@@ -1,0 +1,467 @@
+/*
+ * The overlay reads as a slice of the EverQuest combat log that has been sorted and
+ * quantified: warm parchment ink on smoked glass, not a generic dark-mode panel.
+ *
+ * The central idea is that THE ROW IS THE BAR. There is no separate bar track and no
+ * bar column — each member's damage share fills the row behind the text. At 360px the
+ * horizontal space is the scarcest thing there is, and a separate bar column would
+ * spend a third of it on something the row background can encode for free.
+ *
+ * Everything is sized in em against --scale so the whole HUD scales as one unit.
+ */
+
+:root {
+  /* EverQuest's own UI is warm — smoked brown-black and amber, never blue-black. */
+  --ink:        #f0e3c4;   /* parchment: primary text */
+  --ink-dim:    #a8977a;   /* aged parchment: labels and units */
+  --ink-faint:  #6d6350;
+  --slab:       #100d0a;   /* smoked glass */
+  --edge:       #2e2620;
+
+  --ember:      #b9702a;   /* everyone's damage fill */
+  --ember-lit:  #e0a53f;   /* the player's own row: the number they came for */
+  --pet:        #6d8f6a;   /* pet contribution: reads as "not you" instantly */
+
+  /* The healing view recolors the fill so the two modes are never confusable at a
+     glance — EQ's own healing cue is a pale restorative blue-green. */
+  --balm:       #3f8f8a;
+  --balm-lit:   #63c2b4;
+
+  --live:       #d8b24a;
+  --stale:      #6d6350;
+
+  --scale: 1;
+  --opacity: 0.85;
+
+  --row-h: 1.55em;
+  --pad: 0.55em;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  /* The window itself is transparent; only #slab paints. */
+  background: transparent;
+  cursor: default;
+  user-select: none;
+}
+
+body {
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: calc(13px * var(--scale));
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ---------------------------------------------------------------- the slab */
+
+#slab {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--slab) 96%, #3a2a18) 0%,
+    var(--slab) 38%,
+    var(--slab) 100%
+  );
+  opacity: var(--opacity);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+
+  /* A hairline top rule in ember: the only ornament, and it marks where the
+     instrument's reading begins. */
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--ember) 45%, transparent),
+    0 2px 14px rgba(0, 0, 0, 0.55);
+}
+
+/* ---------------------------------------------------------------- header */
+
+#head {
+  position: relative;
+  padding: var(--pad) 0.7em 0.45em;
+  flex: 0 0 auto;
+}
+
+/* Grabbable only when unlocked; while locked the whole window is click-through
+   anyway, and marking it draggable would make it steal drags the moment a hover
+   temporarily re-enables mouse events. */
+#drag-strip { position: absolute; inset: 0; }
+body:not([data-locked="true"]) #drag-strip { -webkit-app-region: drag; }
+
+.head-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  position: relative;
+  pointer-events: none;
+}
+
+#target {
+  font-size: 0.82em;
+  font-stretch: 87.5%;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#elapsed {
+  margin-left: auto;
+  font-size: 0.82em;
+  color: var(--ink-faint);
+}
+
+#pulse {
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: var(--stale);
+  flex: 0 0 auto;
+  transition: background 200ms linear;
+}
+body[data-state="live"] #pulse {
+  background: var(--live);
+  box-shadow: 0 0 0.5em color-mix(in srgb, var(--live) 70%, transparent);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* The headline reading. Bahnschrift is a DIN-lineage face — a measuring-instrument
+   letterform, which is exactly what this number is. */
+.readout { margin-top: 0.05em; }
+
+#dps {
+  font-size: 2.05em;
+  font-stretch: 75%;
+  font-weight: 600;
+  line-height: 0.95;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+#dps-unit, #rolling-unit {
+  font-size: 0.72em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.spacer { flex: 1; }
+
+#rolling {
+  font-size: 1.05em;
+  font-stretch: 87.5%;
+  color: var(--ink-dim);
+}
+
+/* --------------------------------------------------------------- controls */
+
+#controls {
+  /* Relative + z-index so the buttons sit above #drag-strip, which covers the header. */
+  position: relative;
+  z-index: 2;
+  display: none;
+  justify-content: flex-end;
+  gap: 0.3em;
+  margin-bottom: 0.3em;
+  -webkit-app-region: no-drag;
+}
+body:not([data-locked="true"]) #controls { display: flex; }
+
+#controls button {
+  font: inherit;
+  font-size: 0.72em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  padding: 0.15em 0.45em;
+  cursor: pointer;
+}
+#controls button:hover { color: var(--ink); border-color: var(--ember); }
+#controls button:focus-visible { outline: 1px solid var(--ember-lit); outline-offset: 1px; }
+
+/* ------------------------------------------------------------------- rows */
+
+#rows {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0.3em;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+}
+#rows::-webkit-scrollbar { width: 3px; }
+#rows::-webkit-scrollbar-thumb { background: var(--edge); }
+
+.row {
+  position: relative;
+  height: var(--row-h);
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0 0.7em;
+  cursor: default;
+}
+
+/* The fill IS the bar. It sits behind the text at low alpha so the parchment ink
+   stays legible over it at any width. */
+.fill {
+  position: absolute;
+  left: 0;
+  top: 1px;
+  bottom: 1px;
+  background: color-mix(in srgb, var(--ember) 38%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--ember) 80%, transparent);
+  transition: width 140ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.row[data-self="true"] .fill {
+  background: color-mix(in srgb, var(--ember-lit) 42%, transparent);
+  border-right-color: var(--ember-lit);
+}
+
+/* The pet's contribution is carved out of the far end of its owner's fill, so the
+   split is legible without a second row or a legend. */
+.fill-pet {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--pet) 46%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--pet) 70%, transparent);
+}
+
+/*
+ * The pace tick: a hairline at 1/N, the share every member would have if the group
+ * were even. A fill reaching past it is pulling above their share. One pixel, and it
+ * turns a list of numbers into a comparison.
+ */
+#rows[data-pace]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(0.7em + (100% - 1.4em) * var(--pace));
+  width: 1px;
+  background: repeating-linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ink) 28%, transparent) 0 2px,
+    transparent 2px 5px
+  );
+  pointer-events: none;
+  z-index: 2;
+}
+
+.name {
+  position: relative;
+  font-size: 0.95em;
+  font-stretch: 87.5%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.row[data-self="true"] .name { font-weight: 600; }
+
+.row .dps,
+.row .share {
+  position: relative;
+  font-size: 0.92em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.row .dps { margin-left: auto; }
+.row .share { flex: 0 0 2.6em; text-align: right; color: var(--ink-dim); }
+
+.row[data-unknown="true"] .name { color: var(--ink-faint); font-style: italic; }
+.row[data-unknown="true"] .fill { background: color-mix(in srgb, var(--ink-faint) 30%, transparent); }
+
+#empty {
+  margin: auto;
+  padding: 1.2em;
+  color: var(--ink-faint);
+  font-size: 0.85em;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+body[data-has-rows="true"] #empty { display: none; }
+
+/* ---------------------------------------------------------- hover breakdown */
+
+#detail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  padding: 0.55em 0.7em 0.6em;
+  background: color-mix(in srgb, var(--slab) 97%, #000);
+  border-top: 1px solid var(--ember);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.6);
+  max-height: 78%;
+  overflow-y: auto;
+}
+#detail[hidden] { display: none; }
+
+.detail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  margin-bottom: 0.45em;
+}
+#d-name { font-size: 0.95em; font-weight: 600; font-stretch: 87.5%; }
+#d-total { margin-left: auto; font-size: 0.85em; color: var(--ink-dim); }
+
+.split-bar {
+  display: flex;
+  height: 0.4em;
+  border-radius: 1px;
+  overflow: hidden;
+  background: var(--edge);
+}
+.split-bar span { display: block; height: 100%; }
+#d-self-bar { background: var(--ember-lit); }
+#d-pet-bar { background: var(--pet); }
+
+.split-legend {
+  display: flex;
+  gap: 0.9em;
+  margin: 0.3em 0 0.55em;
+  font-size: 0.76em;
+  color: var(--ink-dim);
+}
+.split-legend > span { display: flex; align-items: center; gap: 0.35em; }
+.key { width: 0.55em; height: 0.55em; border-radius: 1px; display: inline-block; }
+.key-self { background: var(--ember-lit); }
+.key-pet { background: var(--pet); }
+
+#d-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.15em 0.6em;
+  margin: 0 0 0.55em;
+  font-size: 0.78em;
+}
+#d-stats div { display: flex; justify-content: space-between; gap: 0.4em; }
+#d-stats dt { color: var(--ink-faint); }
+#d-stats dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+#d-sources {
+  list-style: none;
+  margin: 0 0 0.5em;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25em 0.5em;
+  font-size: 0.76em;
+}
+#d-sources li {
+  color: var(--ink-dim);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  padding: 0.05em 0.35em;
+}
+#d-sources b { color: var(--ink); font-weight: 500; }
+
+#d-abilities {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8em;
+}
+#d-abilities li {
+  position: relative;
+  display: flex;
+  gap: 0.5em;
+  padding: 0.1em 0.3em;
+  margin-bottom: 1px;
+}
+/* Same idea as the rows: the ability's share of this member's damage is the fill. */
+#d-abilities li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--w);
+  background: color-mix(in srgb, var(--ember) 26%, transparent);
+}
+#d-abilities li[data-pet="true"]::before {
+  background: color-mix(in srgb, var(--pet) 26%, transparent);
+}
+#d-abilities .a-name {
+  position: relative;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#d-abilities .a-dmg { position: relative; margin-left: auto; font-variant-numeric: tabular-nums; }
+#d-abilities .a-hits { position: relative; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
+/* ----------------------------------------------------------------- footer */
+
+#foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.15em 0.7em 0.3em;
+  font-size: 0.72em;
+  color: var(--ink-faint);
+  min-height: 1.4em;
+}
+#status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#toast {
+  margin-left: auto;
+  color: var(--ember-lit);
+  opacity: 0;
+  transition: opacity 220ms ease;
+  white-space: nowrap;
+}
+#toast[data-show="true"] { opacity: 1; }
+
+body[data-stale="true"] #status { color: var(--live); }
+
+/* Unlocked: make the window's edges obvious, since it can now be grabbed. */
+body:not([data-locked="true"]) #slab {
+  border-color: var(--ember);
+  box-shadow:
+    inset 0 1px 0 var(--ember),
+    0 0 0 1px color-mix(in srgb, var(--ember) 35%, transparent),
+    0 2px 18px rgba(0, 0, 0, 0.7);
+}
+
+/* Healing mode: one variable swap repaints every fill, chip and ability bar. */
+body[data-metric="healing"] {
+  --ember: var(--balm);
+  --ember-lit: var(--balm-lit);
+}
+body[data-metric="healing"] #btn-metric {
+  color: var(--balm-lit);
+  border-color: var(--balm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+out/
+unknown-lines.txt
+*.log.bak
+.DS_Store
+Thumbs.db

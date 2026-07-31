@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>EQL DPS Overlay</title>
+  <link rel="stylesheet" href="setup.css" />
+</head>
+<body>
+  <header>
+    <h1 id="title">Set up the DPS overlay</h1>
+    <p id="subtitle">Choose the EverQuest Legends log file to follow.</p>
+  </header>
+
+  <main>
+    <section id="log-section">
+      <h2>Log file</h2>
+
+      <div class="row">
+        <label for="dir">Logs folder</label>
+        <input id="dir" type="text" spellcheck="false" />
+        <button id="browse-dir" class="secondary">Browse…</button>
+      </div>
+
+      <p id="dir-status" class="status"></p>
+
+      <ul id="log-list" class="log-list"></ul>
+
+      <div class="row">
+        <button id="browse-file" class="secondary">Pick a file directly…</button>
+        <span id="validation" class="status"></span>
+      </div>
+
+      <p class="hint">
+        The overlay can only see what your client logs. Type <code>/log on</code> in game
+        if the file below looks stale.
+      </p>
+    </section>
+
+    <section id="settings-section">
+      <h2>Overlay</h2>
+
+      <div class="row">
+        <label for="opacity">Opacity</label>
+        <input id="opacity" type="range" min="0.2" max="1" step="0.05" />
+        <output id="opacity-out"></output>
+      </div>
+
+      <div class="row">
+        <label for="scale">Text size</label>
+        <input id="scale" type="range" min="0.7" max="1.8" step="0.05" />
+        <output id="scale-out"></output>
+      </div>
+
+      <div class="row">
+        <label for="timeout">Combat timeout</label>
+        <input id="timeout" type="number" min="3" max="120" step="1" />
+        <span class="unit">seconds without damage ends the fight</span>
+      </div>
+
+      <div class="row">
+        <label for="grace">Post-kill wait</label>
+        <input id="grace" type="number" min="0" max="30" step="1" />
+        <span class="unit">seconds to wait after the last mob dies</span>
+      </div>
+
+      <div class="row checkbox">
+        <input id="group-only" type="checkbox" />
+        <label for="group-only">Show only my group
+          <span class="unit">otherwise every player the log sees appears</span>
+        </label>
+      </div>
+
+      <div class="row checkbox">
+        <input id="auto-switch" type="checkbox" />
+        <label for="auto-switch">Follow character switches automatically</label>
+      </div>
+
+      <h2>Named pets</h2>
+      <p class="hint no-top">
+        Pets called <code>Rhale`s warder</code> are folded into their owner automatically.
+        Summoned pets have their own name and the log never says whose they are, so list
+        them here as <code>Pet = Owner</code>, one per line. Your own pet is detected
+        automatically once it reports to you.
+      </p>
+      <textarea id="pet-owners" rows="4" spellcheck="false"
+                placeholder="Gann = Rhain"></textarea>
+
+      <h2>Hotkeys</h2>
+      <div class="row">
+        <label for="hk-lock">Lock / unlock</label>
+        <input id="hk-lock" type="text" spellcheck="false" />
+      </div>
+      <div class="row">
+        <label for="hk-show">Show / hide</label>
+        <input id="hk-show" type="text" spellcheck="false" />
+      </div>
+      <div class="row">
+        <label for="hk-reset">Reset encounter</label>
+        <input id="hk-reset" type="text" spellcheck="false" />
+      </div>
+      <div class="row">
+        <label for="hk-metric">Damage / healing</label>
+        <input id="hk-metric" type="text" spellcheck="false" />
+      </div>
+      <p class="hint">
+        Electron accelerator syntax, e.g. <code>Control+Shift+L</code>.
+        A binding another program already owns will be reported in the overlay.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <span id="footer-status" class="status"></span>
+    <button id="save" class="primary" disabled>Start overlay</button>
+  </footer>
+
+  <script type="module" src="setup.js"></script>
+</body>
+</html>

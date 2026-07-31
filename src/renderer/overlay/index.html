@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>EQL DPS</title>
+  <link rel="stylesheet" href="overlay.css" />
+</head>
+<body data-locked="true" data-state="idle">
+  <div id="slab">
+
+    <header id="head">
+      <div id="drag-strip" aria-hidden="true"></div>
+
+      <!-- Its own row rather than an overlay on the header: the target name, elapsed
+           time and state dot already use the full width, so floating the buttons on
+           top of them collided with every one of them. -->
+      <div id="controls">
+        <button id="btn-metric" title="Show damage or healing (Ctrl+Shift+M)">healing</button>
+        <button id="btn-reset" title="Reset encounter">reset</button>
+        <button id="btn-settings" title="Settings">settings</button>
+        <button id="btn-lock" title="Lock the overlay (Ctrl+Shift+L)">lock</button>
+        <button id="btn-close" title="Quit">quit</button>
+      </div>
+
+      <div class="head-line">
+        <span id="target">No combat</span>
+        <span id="elapsed" class="tabular">0:00</span>
+        <span id="pulse" title="Combat state"></span>
+      </div>
+
+      <div class="head-line readout">
+        <span id="dps" class="tabular">0</span>
+        <span id="dps-unit">dps</span>
+        <span class="spacer"></span>
+        <span id="rolling" class="tabular">0</span>
+        <span id="rolling-unit">10s</span>
+      </div>
+    </header>
+
+    <ol id="rows"></ol>
+
+    <p id="empty">Waiting for combat…</p>
+
+    <!-- Hover breakdown. Anchored over the list rather than beside it: at this width
+         there is nowhere beside it to go. -->
+    <div id="detail" hidden>
+      <div class="detail-head">
+        <span id="d-name"></span>
+        <span id="d-total" class="tabular"></span>
+      </div>
+
+      <div class="detail-split">
+        <div class="split-bar">
+          <span id="d-self-bar"></span>
+          <span id="d-pet-bar"></span>
+        </div>
+        <div class="split-legend">
+          <span><i class="key key-self"></i><span id="d-self-label"></span></span>
+          <span><i class="key key-pet"></i><span id="d-pet-label"></span></span>
+        </div>
+      </div>
+
+      <dl id="d-stats"></dl>
+      <ul id="d-sources"></ul>
+      <ol id="d-abilities"></ol>
+    </div>
+
+    <footer id="foot">
+      <span id="status"></span>
+      <span id="toast"></span>
+    </footer>
+  </div>
+
+  <script type="module" src="overlay.js"></script>
+</body>
+</html>
