@@ -51,6 +51,25 @@ contains, and preselects the most recently written one. Reopen it any time from 
 **settings** button (unlock the overlay first) to change opacity, scale, combat timeout,
 hotkeys and pet ownership.
 
+### The tray icon
+
+The overlay is frameless and stays out of the taskbar, so the **tray icon** is its home —
+three amber bars in the notification area. Right-click it for:
+
+- which character is being followed
+- show / hide and lock / unlock, with checkmarks for the current state
+- switch between damage and healing
+- reset the current encounter
+- **Settings…**
+- **Quit**
+
+Windows 11 files new tray icons into the hidden overflow, so the first time you look it
+will be behind the **^** chevron next to the clock. Drag it onto the taskbar to pin it
+there, or go to Settings → Personalisation → Taskbar → Other system tray icons.
+
+Everything in that menu is also on a hotkey, and the overlay grows its own row of buttons
+when unlocked.
+
 ### Hotkeys
 
 | | |

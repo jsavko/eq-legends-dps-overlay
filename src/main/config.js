@@ -43,6 +43,15 @@ export const DEFAULTS = {
   /** Which metric the overlay ranks by: 'damage' or 'healing'. */
   metric: 'damage',
 
+  /**
+   * Whether the "where the controls live" hint has been shown.
+   *
+   * The overlay is frameless and stays out of the taskbar, and Windows 11 files new tray
+   * icons into the hidden overflow — so without a nudge on first run there is nothing on
+   * screen telling you how to reach settings or quit.
+   */
+  seenTrayHint: false,
+
   opacity: 0.85,
   scale: 1,
   /** Click-through and undraggable. Unlocked lets the window be moved and resized. */

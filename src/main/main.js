@@ -5,7 +5,9 @@
  * at a fixed rate (see ipc.js), which keeps a busy raid from turning into an IPC storm.
  */
 
-import { app, BrowserWindow, globalShortcut, ipcMain, dialog, screen, shell } from 'electron';
+import {
+  app, BrowserWindow, globalShortcut, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage,
+} from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +19,7 @@ import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(HERE, '..', 'renderer');
+const ASSETS = path.join(HERE, '..', 'assets');
 
 /** A log not written to in this long is probably a session where /log was never enabled. */
 const STALE_LOG_MS = 10 * 60 * 1000;
@@ -26,6 +29,7 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {LogParser|null} */    let parser = null;
 /** @type {Tailer|null} */       let tailer = null;
 /** @type {ConfigStore|null} */  let config = null;
+/** @type {Tray|null} */         let tray = null;
 
 let pushTimer = null;
 let lastRevision = -1;
@@ -52,6 +56,7 @@ async function main() {
   config.load();
 
   registerIpc();
+  createTray();
 
   if (config.isConfigured()) {
     await startTailing(config.get('logPath'));
@@ -65,14 +70,15 @@ async function main() {
   });
 }
 
-// macOS convention does not apply: this is a Windows game overlay, so closing the
-// last window means the user is done.
-app.on('window-all-closed', () => app.quit());
+// Deliberately NOT quitting here: the tray is the app's home, and closing the settings
+// window while the overlay is hidden should leave it running, reachable from the tray.
+app.on('window-all-closed', () => {});
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   tailer?.stop();
   clearInterval(pushTimer);
   clearInterval(hoverTimer);
+  tray?.destroy();
 });
 
 // ---------------------------------------------------------------------------
@@ -102,6 +108,7 @@ async function startTailing(logPath) {
     parser.reset();
     config.set({ logPath: to });
     toast(`Now following ${character}`);
+    refreshTrayMenu();
     pushStatus();
   });
 
@@ -117,6 +124,7 @@ async function startTailing(logPath) {
 
   await tailer.start();
   startPushLoop();
+  refreshTrayMenu();
 }
 
 /**
@@ -166,6 +174,7 @@ function createOverlay() {
     resizable: true,
     skipTaskbar: true,
     alwaysOnTop: true,
+    icon: path.join(ASSETS, 'icon-256.png'),
     focusable: true,
     webPreferences: {
       preload: path.join(RENDERER, 'overlay', 'preload.cjs'),
@@ -185,6 +194,13 @@ function createOverlay() {
     applyLock(config.get('locked'));
     startHoverPolling();
     pushStatus();
+
+    // Once only, and long enough to actually read: there is otherwise no on-screen clue
+    // that the tray exists, which is the one thing a new user needs to know.
+    if (!config.get('seenTrayHint')) {
+      config.set({ seenTrayHint: true });
+      setTimeout(() => toast('Settings and Quit are in the tray icon', 9000), 1200);
+    }
   });
 
   // Height is always derived from content, so only width and position are remembered.
@@ -206,6 +222,77 @@ function createOverlay() {
   registerHotkeys();
 }
 
+// ---------------------------------------------------------------------------
+// Tray
+// ---------------------------------------------------------------------------
+
+/**
+ * The tray is the overlay's only always-available control surface.
+ *
+ * The window is frameless, has `skipTaskbar: true`, and hides its own buttons while
+ * locked — so without a tray icon there is genuinely no discoverable way to reach
+ * settings or quit, only hotkeys the user has to already know.
+ */
+function createTray() {
+  if (tray) return;
+
+  const icon = nativeImage.createFromPath(path.join(ASSETS, 'icon-16.png'));
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
+  tray.setToolTip('EQL DPS Overlay');
+  refreshTrayMenu();
+
+  // Double-click is the conventional Windows "show me the thing" gesture.
+  tray.on('double-click', () => {
+    if (!overlayVisible) toggleVisible();
+    else createSetup('settings');
+  });
+}
+
+/** Rebuild the menu so the checkmarks and labels reflect current state. */
+function refreshTrayMenu() {
+  if (!tray) return;
+
+  const locked = config.get('locked');
+  const healing = config.get('metric') === 'healing';
+  const keys = config.get('hotkeys');
+
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: tailer?.character ? `Following ${tailer.character}` : 'No log selected', enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Show overlay',
+      type: 'checkbox',
+      checked: overlayVisible,
+      accelerator: keys.toggleVisible,
+      click: toggleVisible,
+    },
+    {
+      label: 'Lock overlay',
+      type: 'checkbox',
+      checked: locked,
+      accelerator: keys.toggleLock,
+      // Unlocking is how the overlay gets moved and resized, so say so.
+      toolTip: 'Unlock to drag, resize and reveal the overlay buttons',
+      click: toggleLock,
+    },
+    { type: 'separator' },
+    {
+      label: healing ? 'Show damage' : 'Show healing',
+      accelerator: keys.toggleMetric,
+      click: toggleMetric,
+    },
+    {
+      label: 'Reset encounter',
+      accelerator: keys.resetEncounter,
+      click: () => { parser?.reset(); toast('Encounter reset'); },
+    },
+    { type: 'separator' },
+    { label: 'Settings…', click: () => createSetup('settings') },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
+  ]));
+}
+
 /** @param {'setup'|'settings'} mode */
 function createSetup(mode) {
   if (setupWindow && !setupWindow.isDestroyed()) {
@@ -218,6 +305,7 @@ function createSetup(mode) {
     height: 660,
     title: mode === 'setup' ? 'EQL DPS Overlay — Setup' : 'EQL DPS Overlay — Settings',
     backgroundColor: '#12141a',
+    icon: path.join(ASSETS, 'icon-256.png'),
     webPreferences: {
       preload: path.join(RENDERER, 'setup', 'preload.cjs'),
       contextIsolation: true,
@@ -230,7 +318,7 @@ function createSetup(mode) {
   setupWindow.loadFile(path.join(RENDERER, 'setup', 'index.html'));
   setupWindow.on('closed', () => {
     setupWindow = null;
-    // Closing the first-run screen without choosing a log leaves nothing to show.
+    // Closing the first-run screen without choosing a log leaves nothing to run.
     if (!config.isConfigured() && !overlayWindow) app.quit();
   });
 }
@@ -295,6 +383,7 @@ function toggleLock() {
   const locked = !config.get('locked');
   config.set({ locked });
   applyLock(locked);
+  refreshTrayMenu();
   toast(locked ? 'Overlay locked' : 'Overlay unlocked — drag to move');
 }
 
@@ -307,6 +396,7 @@ function toggleVisible() {
   } else {
     overlayWindow.hide();
   }
+  refreshTrayMenu();
 }
 
 function registerHotkeys() {
@@ -338,6 +428,7 @@ function toggleMetric() {
   const metric = config.get('metric') === 'healing' ? 'damage' : 'healing';
   config.set({ metric });
   overlayWindow?.webContents.send(CHANNELS.CONFIG_CHANGED, config.all);
+  refreshTrayMenu();
   toast(metric === 'healing' ? 'Showing healing' : 'Showing damage');
 }
 
@@ -345,8 +436,8 @@ function toggleMetric() {
 // Pushes to the renderer
 // ---------------------------------------------------------------------------
 
-function toast(message) {
-  overlayWindow?.webContents.send(CHANNELS.TOAST, { message });
+function toast(message, ms) {
+  overlayWindow?.webContents.send(CHANNELS.TOAST, { message, ms });
 }
 
 function pushStatus() {

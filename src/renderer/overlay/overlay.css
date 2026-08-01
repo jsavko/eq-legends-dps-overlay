@@ -445,6 +445,9 @@ body[data-has-rows="true"] #empty { display: none; }
   white-space: nowrap;
 }
 #toast[data-show="true"] { opacity: 1; }
+/* A first-run hint is longer than the character name it shares the row with. */
+#toast[data-wide="true"] { flex: 1 1 auto; text-align: right; }
+body:has(#toast[data-wide="true"][data-show="true"]) #status { display: none; }
 
 body[data-stale="true"] #status { color: var(--live); }
 

@@ -54,7 +54,7 @@ async function init() {
   window.api.onSnapshot(render);
   window.api.onStatus(applyStatus);
   window.api.onConfig(applyConfig);
-  window.api.onToast(({ message }) => showToast(message));
+  window.api.onToast(({ message, ms }) => showToast(message, ms));
   window.api.onLockChanged(applyLock);
 
   wireHover();
@@ -466,11 +466,13 @@ function wireControls() {
   $('btn-close').addEventListener('click', () => window.api.close());
 }
 
-function showToast(message) {
+function showToast(message, ms = 2600) {
   els.toast.textContent = message;
   els.toast.dataset.show = 'true';
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { els.toast.dataset.show = 'false'; }, 2600);
+  toastTimer = setTimeout(() => { els.toast.dataset.show = 'false'; }, ms);
+  // A long hint can be wider than the status text beside it; give it the room.
+  els.toast.dataset.wide = String(ms > 4000);
 }
 
 // ---------------------------------------------------------------- formatting
