@@ -283,6 +283,8 @@ function renderDamageDetail(row) {
 
   setAbilities(row.abilities.slice(0, 6), {
     value: (a) => a.damage,
+    // Of this member's own total, pet included — so the full list sums to 100% for them.
+    share: (a) => (row.damage > 0 ? a.damage / row.damage : 0),
     detail: (a) => (a.misses > 0 ? `${a.hits}/${a.hits + a.misses}` : `${a.hits}`),
   });
 }
@@ -313,6 +315,9 @@ function renderHealDetail(row) {
 
   setAbilities(row.healAbilities.slice(0, 6), {
     value: (a) => a.healing,
+    // Of what LANDED, matching the hps figure above it. A healer whose every point was
+    // overheal divides by zero here and gets a dash, which is the honest reading.
+    share: (a) => (row.healing > 0 ? a.healing / row.healing : 0),
     detail: (a) => (a.overhealing > 0 ? `${a.casts} · ${a.overhealing} over` : `${a.casts}`),
   });
 }
@@ -336,7 +341,12 @@ function setChips(pairs) {
   );
 }
 
-function setAbilities(list, { value, detail }) {
+/**
+ * The ability list. `share` is the row's fraction of the member's own total — printed as a
+ * number, NOT as the bar, which stays normalized to the member's largest ability so it keeps
+ * ranking them legibly even when the top one is only a fifth of their output.
+ */
+function setAbilities(list, { value, detail, share }) {
   const best = list.length > 0 ? value(list[0]) || 1 : 1;
   els.dAbilities.replaceChildren(
     ...list.map((a) => {
@@ -352,11 +362,15 @@ function setAbilities(list, { value, detail }) {
       d.className = 'a-dmg';
       d.textContent = value(a).toLocaleString();
 
+      const p = document.createElement('span');
+      p.className = 'a-pct';
+      p.textContent = formatShare(share(a));
+
       const h = document.createElement('span');
       h.className = 'a-hits';
       h.textContent = detail(a);
 
-      li.append(n, d, h);
+      li.append(n, d, p, h);
       return li;
     })
   );
@@ -476,6 +490,22 @@ function showToast(message, ms = 2600) {
 }
 
 // ---------------------------------------------------------------- formatting
+
+/**
+ * An ability's share of its owner's total, as a column.
+ *
+ * Rounding is deliberate but has a floor: an ability worth 0.4% of a member's damage would
+ * round to a bare "0%" beside a four-digit number, which reads as a bug rather than as
+ * "negligible". Sub-1% shares print "<1%" instead, and a zero denominator prints an em dash
+ * rather than "NaN%" — the real case being a healer whose every point was overheal.
+ */
+function formatShare(fraction) {
+  if (!Number.isFinite(fraction)) return '—';
+  const pct = fraction * 100;
+  if (pct <= 0) return '—';
+  if (pct < 1) return '<1%';
+  return `${Math.round(pct)}%`;
+}
 
 /** DPS needs three glances-worth of precision, not six digits. */
 function formatNumber(n) {

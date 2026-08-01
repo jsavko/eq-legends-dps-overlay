@@ -402,7 +402,9 @@ body[data-has-rows="true"] #empty { display: none; }
   padding: 0.1em 0.3em;
   margin-bottom: 1px;
 }
-/* Same idea as the rows: the ability's share of this member's damage is the fill. */
+/* The fill is normalized to the member's LARGEST ability, not to their total — it ranks the
+   list at a glance, which a share-of-total fill could not do when the top ability is a fifth
+   of their output. The true share of the total is the .a-pct column. */
 #d-abilities li::before {
   content: "";
   position: absolute;
@@ -417,12 +419,24 @@ body[data-has-rows="true"] #empty { display: none; }
 }
 #d-abilities .a-name {
   position: relative;
+  /* The only column that gives, so the three numbers hold a fixed stack on the right and
+     a long name ellipsizes instead of pushing them off the panel. */
+  flex: 1 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-#d-abilities .a-dmg { position: relative; margin-left: auto; font-variant-numeric: tabular-nums; }
-#d-abilities .a-hits { position: relative; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+#d-abilities .a-dmg,
+#d-abilities .a-pct,
+#d-abilities .a-hits {
+  position: relative;   /* above the ::before fill */
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+/* min-width stops the column jittering as a share crosses 9% -> 10% -> 100% mid-fight. */
+#d-abilities .a-pct { min-width: 2.6em; text-align: right; color: var(--ink-dim); }
+#d-abilities .a-hits { color: var(--ink-faint); }
 
 /* ----------------------------------------------------------------- footer */
 
