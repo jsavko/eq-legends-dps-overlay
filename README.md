@@ -19,6 +19,20 @@ live damage for everyone in your group, with each member's pet folded into their
   overhealing, efficiency and who you healed.
 - **Click-through by default**, so it never steals a click from the game.
 
+## Sending it to someone else
+
+`scripts/dev.sh dist` produces a single portable executable at
+`C:\eqoverlay-dev\dist\EQL-DPS-Overlay-<version>.exe` (~74 MB). No installer, no Node,
+no dev toolchain — copy the file and run it.
+
+It is **not code-signed**, so Windows SmartScreen shows "Windows protected your PC" on
+first run: *More info* → *Run anyway*. Signing needs a paid certificate.
+
+On first launch it opens the setup screen, finds the default Logs folder, and preselects
+whichever `eqlog_*.txt` was written most recently — so on a machine with several
+characters it lands on the one being played, and any of the others can be picked from the
+list. Settings live in `%APPDATA%\eq-legends-dps-overlay`, separate from the app itself.
+
 ## Running it
 
 ```bash
