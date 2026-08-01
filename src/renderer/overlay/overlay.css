@@ -389,18 +389,31 @@ body[data-has-rows="true"] #empty { display: none; }
 }
 #d-sources b { color: var(--ink); font-weight: 500; }
 
+/*
+ * ONE grid for the whole list, not a flex row per ability.
+ *
+ * Per-row flex packs each row's own numbers independently, so a row ending in "8/12" pushed
+ * its damage and share left while a row ending in "1" let them sit right — three columns of
+ * numbers that never lined up with the row above. Here the tracks are sized once, to the
+ * widest cell in each column, and every row subgrids onto them.
+ */
 #d-abilities {
   list-style: none;
   margin: 0;
   padding: 0;
   font-size: 0.8em;
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  column-gap: 0.5em;
+  row-gap: 1px;
 }
 #d-abilities li {
   position: relative;
-  display: flex;
-  gap: 0.5em;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
   padding: 0.1em 0.3em;
-  margin-bottom: 1px;
 }
 /* The fill is normalized to the member's LARGEST ability, not to their total — it ranks the
    list at a glance, which a share-of-total fill could not do when the top ability is a fifth
@@ -419,9 +432,8 @@ body[data-has-rows="true"] #empty { display: none; }
 }
 #d-abilities .a-name {
   position: relative;
-  /* The only column that gives, so the three numbers hold a fixed stack on the right and
-     a long name ellipsizes instead of pushing them off the panel. */
-  flex: 1 1 auto;
+  /* The only elastic column (1fr), so a long name ellipsizes instead of widening the
+     numbers' tracks and pushing them off the panel. */
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -431,11 +443,13 @@ body[data-has-rows="true"] #empty { display: none; }
 #d-abilities .a-pct,
 #d-abilities .a-hits {
   position: relative;   /* above the ::before fill */
-  flex: 0 0 auto;
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
-/* min-width stops the column jittering as a share crosses 9% -> 10% -> 100% mid-fight. */
-#d-abilities .a-pct { min-width: 2.6em; text-align: right; color: var(--ink-dim); }
+/* Track floors, so a column does not resize under the eye mid-fight as its widest cell
+   grows — a share crossing 9% -> 10%, or damage crossing 999 -> 1,004. */
+#d-abilities .a-dmg { min-width: 3em; }
+#d-abilities .a-pct { min-width: 2.6em; color: var(--ink-dim); }
 #d-abilities .a-hits { color: var(--ink-faint); }
 
 /* ----------------------------------------------------------------- footer */

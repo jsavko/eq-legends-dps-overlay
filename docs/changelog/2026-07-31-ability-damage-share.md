@@ -50,15 +50,47 @@ ranking, which best-normalization does better — a share-of-total fill would sq
 into the left third of the row whenever the top ability is only a fifth of a member's output.
 The CSS comment that claimed the fill was already a share of the total has been corrected.
 
+## The columns now line up
+
+Adding a third number exposed something the two-column list had been getting away with: each
+row was its own flex line, packing its numbers independently. A row ending in `8/12` pushed its
+damage and share left; a row ending in `1` let them sit right. With three numeric columns the
+result was a stack that lined up with nothing above or below it:
+
+```
+Slash                 501  67%  7/8
+Smiting Strike         126  17%  1
+Frenzy                  77  10%  2
+Damage Shield           18   2%  9
+```
+
+The list is now a single CSS grid — `grid-template-columns: 1fr auto auto auto` on the `<ol>`,
+with each `<li>` subgridding onto those tracks. Track widths are decided once, from the widest
+cell in each column, so every row lands on the same three positions:
+
+```
+Slash                 501  67%   7/8
+Smiting Strike        126  17%     1
+Frenzy                 77  10%     2
+Damage Shield          18   2%     9
+```
+
+Subgrid rather than `display: contents` because each `<li>` must keep its own box — the
+proportional fill behind the row is a `::before` on it. Chromium has supported subgrid since
+117; this ships on Electron 33 / Chromium 130.
+
+The damage and percentage columns also carry `min-width` floors, so a column does not resize
+under the eye mid-fight as its widest cell crosses 999 → 1,004 or 9% → 10%.
+
 ## Files
 
 - `src/renderer/overlay/overlay.js` — new `formatShare()` formatter; `setAbilities()` takes a
   third `share` accessor and emits `<span class="a-pct">`; both `renderDamageDetail()` and
   `renderHealDetail()` pass a guarded denominator.
-- `src/renderer/overlay/overlay.css` — `.a-pct` column (tabular, right-aligned, `min-width`
-  so it does not jitter as a share crosses 9% → 10% → 100%); `.a-name` is now the only
-  flexible column (`flex: 1 1 auto; min-width: 0`) so long names ellipsize instead of pushing
-  the numbers off the panel; corrected fill comment.
+- `src/renderer/overlay/overlay.css` — the list is a grid with subgridded rows so the three
+  numeric columns align down the panel; `.a-pct` column added (tabular, right-aligned, with a
+  `min-width` floor, as has `.a-dmg`); `.a-name` is the sole elastic track (`1fr`) so long
+  names ellipsize instead of widening the number tracks; corrected fill comment.
 
 Nothing changed in the parser: both inputs were already in the snapshot the renderer receives
 4× a second, so this is pure view math — the same way the player/pet split is already derived.
