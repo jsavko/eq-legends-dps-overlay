@@ -319,15 +319,41 @@ body[data-has-rows="true"] #empty { display: none; }
  * member to another was impossible — you had to leave the overlay entirely and come back.
  * In flow, the window grows to fit it (see fitHeight) and every row stays hovarable.
  */
+/*
+ * NO max-height, and nothing here scrolls.
+ *
+ * A scrollbar in this window is a lie: it ignores mouse input so the game keeps every
+ * click, which means the wheel never reaches us and clipped content is simply gone. The
+ * panel was capped at 15em against ~15.5em of natural content, so the last ability row
+ * was always losing its lower edge — a sliver at 1x, and proportionally worse the larger
+ * the player set the text.
+ *
+ * The panel's height is bounded by construction instead: six ability rows, at most five
+ * chips, six stats. fitHeight() grows the window to whatever that comes to.
+ */
 #detail {
   flex: 0 0 auto;
   padding: 0.55em 0.7em 0.6em;
   background: color-mix(in srgb, var(--slab) 97%, #000);
   border-top: 1px solid var(--ember);
-  max-height: 15em;
-  overflow-y: auto;
 }
 #detail[hidden] { display: none; }
+
+/*
+ * Against the bottom of the screen the window cannot grow downward, so main anchors its
+ * bottom edge and the panel opens upward (data-panel="above").
+ *
+ * The panel then has to sit BETWEEN the header and the rows. That is what holds the rows
+ * still: the window's top edge rises by exactly the panel's height, and the panel fills
+ * that new space, so every row stays on the same screen pixel it was on when the cursor
+ * landed. Only the header moves, and nothing hovers the header.
+ */
+body[data-panel="above"] #head { order: -2; }
+body[data-panel="above"] #detail {
+  order: -1;
+  border-top: 0;
+  border-bottom: 1px solid var(--ember);
+}
 
 .detail-head {
   display: flex;
@@ -361,9 +387,18 @@ body[data-has-rows="true"] #empty { display: none; }
 .key-self { background: var(--ember-lit); }
 .key-pet { background: var(--pet); }
 
+/*
+ * Three columns is a maximum, not a fixture: at large text (or minimum width) three
+ * fixed columns overflowed the panel and took the right-hand values — "crits", "share" —
+ * off the edge with nothing to say they had gone. auto-fit drops to two columns, then
+ * one, so a stat is always whole even if it has to stack.
+ */
 #d-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* 9em holds the familiar three columns at the default width and text size. Note this
+     em is #d-stats's own 0.78em, not the body's — a floor set by the body's em would be
+     three quarters the intended size and would let a fourth column in. */
+  grid-template-columns: repeat(auto-fit, minmax(9em, 1fr));
   gap: 0.15em 0.6em;
   margin: 0 0 0.55em;
   font-size: 0.78em;

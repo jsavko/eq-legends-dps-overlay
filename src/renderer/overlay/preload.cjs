@@ -9,6 +9,7 @@ const CH = {
   TOAST: 'overlay:toast',
   LOCK_CHANGED: 'overlay:lock-changed',
   HOVER: 'overlay:hover',
+  PANEL_SIDE: 'overlay:panel-side',
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',
   FIT_HEIGHT: 'window:fit-height',
   CLOSE_WINDOW: 'window:close',
@@ -30,6 +31,8 @@ contextBridge.exposeInMainWorld('api', {
   onLockChanged: on(CH.LOCK_CHANGED),
   /** Window-relative cursor position while click-through, or null when outside. */
   onHover: on(CH.HOVER),
+  /** Whether the breakdown should render below the rows or above them. */
+  onPanelSide: on(CH.PANEL_SIDE),
 
   getConfig: () => ipcRenderer.invoke(CH.CONFIG_GET),
   openSettings: () => ipcRenderer.invoke(CH.OPEN_SETTINGS),

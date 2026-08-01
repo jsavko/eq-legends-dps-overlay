@@ -16,6 +16,7 @@ import { LogParser } from '../parser/index.js';
 import { Tailer, listLogs } from './tailer.js';
 import { ConfigStore, DEFAULT_LOG_DIR } from './config.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
+import { clampHeight, placeWindow } from './layout.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(HERE, '..', 'renderer');
@@ -36,6 +37,10 @@ let lastRevision = -1;
 let overlayVisible = true;
 let saveBoundsTimer = null;
 let hoverTimer = null;
+/** Where the player put the window. Auto-fit reads it and never writes it. */
+let restingY = null;
+/** The y of our last auto-fit, so `remember` can tell our moves from the player's. */
+let lastFitY = null;
 
 // A second instance would fight the first for the same log and hotkeys.
 if (!app.requestSingleInstanceLock()) {
@@ -203,6 +208,8 @@ function createOverlay() {
     }
   });
 
+  restingY = bounds.y;
+
   // Height is always derived from content, so only width and position are remembered.
   // Persisting an auto-fitted height would rewrite config.json every time a row
   // appeared, and would restore a stale height on the next launch.
@@ -211,8 +218,14 @@ function createOverlay() {
     saveBoundsTimer = setTimeout(() => {
       if (!overlayWindow || overlayWindow.isDestroyed()) return;
       const { x, y, width, height } = overlayWindow.getBounds();
+
+      // A bottom-anchored fit moves the window without the player touching it. Taking
+      // that y as the new resting place is how the overlay used to climb the screen:
+      // every hover moved it up a panel-height, and the climb was then persisted.
+      if (y !== lastFitY) restingY = y;
+
       const saved = config.get('bounds');
-      config.set({ bounds: { x, y, width, height: saved?.height ?? height } });
+      config.set({ bounds: { x, y: restingY, width, height: saved?.height ?? height } });
     }, 400);
   };
   overlayWindow.on('moved', remember);
@@ -572,19 +585,22 @@ function registerIpc() {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
     const area = screen.getDisplayMatching(overlayWindow.getBounds()).workArea;
-    const maxHeight = Math.floor(area.height * 0.8);
-    const target = Math.max(70, Math.min(Math.round(height), maxHeight));
     const bounds = overlayWindow.getBounds();
     const contentDelta = bounds.height - overlayWindow.getContentBounds().height;
-    const next = target + contentDelta;
+    const next = clampHeight(height, area) + contentDelta;
 
-    if (Math.abs(bounds.height - next) < 3) return;
+    if (restingY === null) restingY = bounds.y;
 
-    // Opening the hover breakdown grows the window downward. Near the bottom of the
-    // screen that would push it off, so slide it up instead of letting it overflow.
-    const overflow = (bounds.y + next) - (area.y + area.height);
-    const y = overflow > 0 ? Math.max(area.y, bounds.y - overflow) : bounds.y;
+    // Down from the resting position when there is room, bottom-anchored when there is
+    // not — in which case the renderer draws the panel above the rows so they hold still.
+    const { y, above } = placeWindow({ restingY, height: next, area });
 
+    overlayWindow.webContents.send(CHANNELS.PANEL_SIDE, above ? 'above' : 'below');
+
+    if (Math.abs(bounds.height - next) < 3 && bounds.y === y) return;
+
+    // Our own move, not the player's — `remember` must not mistake it for a reposition.
+    lastFitY = y;
     overlayWindow.setBounds({ ...bounds, y, height: next }, false);
   });
 

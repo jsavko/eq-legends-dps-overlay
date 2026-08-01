@@ -13,6 +13,8 @@ export const CHANNELS = {
   TOAST: 'overlay:toast',
   LOCK_CHANGED: 'overlay:lock-changed',
   HOVER: 'overlay:hover',
+  /** 'below' (the usual) or 'above', when the window is against the bottom of the screen. */
+  PANEL_SIDE: 'overlay:panel-side',
 
   // renderer -> main (invoke, returns a value)
   CONFIG_GET: 'config:get',

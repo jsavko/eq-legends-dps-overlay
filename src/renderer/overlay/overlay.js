@@ -54,6 +54,8 @@ async function init() {
   window.api.onSnapshot(render);
   window.api.onStatus(applyStatus);
   window.api.onConfig(applyConfig);
+  // Main decides this: only it knows where the window sits on which display.
+  window.api.onPanelSide((side) => { els.body.dataset.panel = side; });
   window.api.onToast(({ message, ms }) => showToast(message, ms));
   window.api.onLockChanged(applyLock);
 
