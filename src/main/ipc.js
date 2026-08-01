@@ -12,6 +12,7 @@ export const CHANNELS = {
   CONFIG_CHANGED: 'config:changed',
   TOAST: 'overlay:toast',
   LOCK_CHANGED: 'overlay:lock-changed',
+  HOVER: 'overlay:hover',
 
   // renderer -> main (invoke, returns a value)
   CONFIG_GET: 'config:get',

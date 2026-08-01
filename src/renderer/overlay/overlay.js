@@ -146,19 +146,20 @@ function render(snap) {
 }
 
 /**
- * Shrink the window to exactly the rows on screen.
+ * Size the window to exactly its content.
  *
- * A fixed-height overlay spends most of a session as a mostly-empty translucent slab
- * sitting over the game, because a group of four needs a quarter of the height a raid
- * does. Only done while locked: unlocked means the player is deliberately sizing the
- * window, and fighting them for the height would be maddening.
+ * A fixed-height overlay spends most of a session as a mostly-empty translucent slab,
+ * because a group of four needs a quarter of the height a raid does.
+ *
+ * This runs in BOTH lock states. Height is data — the number of rows, plus the breakdown
+ * when it is open — so the player controls width and position and the height follows.
+ * When it was suspended while unlocked, opening the breakdown inside a fixed-size window
+ * had nowhere to go and squeezed the rows down to nothing.
  */
 function fitHeight() {
-  if (els.body.dataset.locked !== 'true') return;
-
   let height = 2;   // the slab's top and bottom border
   for (const child of els.slab.children) {
-    if (child === els.detail || child.hidden) continue;
+    if (child.hidden) continue;   // the breakdown counts when open, so the window grows for it
     if (child === els.rows) {
       // NOT scrollHeight: #rows is a flex-grow scroller, and scrollHeight never
       // reports less than the stretched client height, so it would just measure the
@@ -238,12 +239,8 @@ function buildRow(name) {
 
   li.append(fill, nameEl, dpsEl, shareEl);
   li.refs = { fill, pet, name: nameEl, dps: dpsEl, share: shareEl };
-
-  li.addEventListener('pointerenter', () => {
-    hoveredName = name;
-    const row = snapshot?.rows.find((r) => r.name === name);
-    if (row) renderDetail(row);
-  });
+  // Read back by the mousemove hit-test, which works under click-through.
+  li.dataset.name = name;
 
   return li;
 }
@@ -256,6 +253,10 @@ function renderDetail(row) {
 
   if (metric === 'healing') renderHealDetail(row);
   else renderDamageDetail(row);
+
+  // Re-fit now rather than waiting for the next 4 Hz push. Also covers moving between
+  // rows, where the panel changes height because members have different ability counts.
+  fitHeight();
 }
 
 function renderDamageDetail(row) {
@@ -384,27 +385,77 @@ function setStats(dl, pairs) {
 }
 
 function hideDetail() {
+  const wasOpen = !els.detail.hidden;
   hoveredName = null;
   els.detail.hidden = true;
+  if (wasOpen) fitHeight();   // shrink back to just the rows
 }
 
 // ------------------------------------------------------- mouse pass-through
 
-function wireHover() {
-  // Entering the slab takes mouse events so the breakdown can be read; leaving hands
-  // them straight back so the game never loses a click.
-  els.slab.addEventListener('pointerenter', () => window.api.setIgnoreMouse(false));
-
-  els.slab.addEventListener('pointerleave', () => {
+/**
+ * Hover handling under click-through.
+ *
+ * MOUSE events, not pointer events. While the window ignores mouse input,
+ * `forward: true` forwards the raw move messages to Chromium, which documents that as
+ * enabling "mouse related events such as mouseleave and mouseover" — the Pointer Events
+ * API is not part of that guarantee, and `pointerenter` never fires, which silently
+ * killed the whole feature in locked mode.
+ *
+ * Hit-testing with elementFromPoint rather than relying on event.target keeps this
+ * correct regardless of how the forwarded event is retargeted.
+ */
+/**
+ * Resolve a point inside the window to a member row, and open its breakdown.
+ * @param {number|null} x window-relative CSS pixels, or null when the cursor is outside
+ */
+function hoverAt(x, y) {
+  if (x === null) {
     hideDetail();
-    window.api.setIgnoreMouse(true);
-  });
+    return;
+  }
+  const el = document.elementFromPoint(x, y);
+  if (!el) {
+    hideDetail();
+    return;
+  }
+  // Sitting inside the open panel keeps the current row selected.
+  if (el.closest('#detail')) return;
 
-  // Moving off the list but still inside the slab (e.g. onto the header) closes the
-  // breakdown, which otherwise sticks open under the cursor.
-  els.rows.addEventListener('pointerleave', (event) => {
-    if (!els.detail.contains(event.relatedTarget)) hideDetail();
-  });
+  const row = el.closest('.row');
+  if (!row) {
+    hideDetail();
+    return;
+  }
+  const name = row.dataset.name;
+  if (name === hoveredName) return;
+
+  hoveredName = name;
+  const data = snapshot?.rows.find((r) => r.name === name);
+  if (data) renderDetail(data);
+}
+
+/**
+ * Hover under click-through.
+ *
+ * `setIgnoreMouseEvents(true, { forward: true })` is the documented way to keep receiving
+ * mouse moves while clicks pass through — but it delivered nothing here (verified: a
+ * mousemove counter wired to the overlay never incremented), so the breakdown was
+ * unreachable in the locked state it is normally used in.
+ *
+ * Instead the main process polls the cursor and sends window-relative coordinates. That
+ * has a real advantage over the forwarding approach: the window never has to take mouse
+ * events back to show the panel, so the game keeps every click even while the breakdown
+ * is open.
+ *
+ * DOM mousemove is still wired up for the unlocked state, where the window is a normal
+ * interactive window and events arrive the ordinary way.
+ */
+function wireHover() {
+  window.api.onHover((pos) => hoverAt(pos ? pos.x : null, pos ? pos.y : 0));
+
+  document.addEventListener('mousemove', (e) => hoverAt(e.clientX, e.clientY));
+  document.addEventListener('mouseleave', () => hideDetail());
 }
 
 function wireControls() {

@@ -8,6 +8,7 @@ const CH = {
   CONFIG_CHANGED: 'config:changed',
   TOAST: 'overlay:toast',
   LOCK_CHANGED: 'overlay:lock-changed',
+  HOVER: 'overlay:hover',
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',
   FIT_HEIGHT: 'window:fit-height',
   CLOSE_WINDOW: 'window:close',
@@ -27,6 +28,8 @@ contextBridge.exposeInMainWorld('api', {
   onConfig: on(CH.CONFIG_CHANGED),
   onToast: on(CH.TOAST),
   onLockChanged: on(CH.LOCK_CHANGED),
+  /** Window-relative cursor position while click-through, or null when outside. */
+  onHover: on(CH.HOVER),
 
   getConfig: () => ipcRenderer.invoke(CH.CONFIG_GET),
   openSettings: () => ipcRenderer.invoke(CH.OPEN_SETTINGS),

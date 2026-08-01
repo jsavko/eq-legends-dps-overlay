@@ -30,9 +30,8 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 let pushTimer = null;
 let lastRevision = -1;
 let overlayVisible = true;
-/** Set while the cursor is over an interactive part of the overlay. */
-let hoverHold = false;
 let saveBoundsTimer = null;
+let hoverTimer = null;
 
 // A second instance would fight the first for the same log and hotkeys.
 if (!app.requestSingleInstanceLock()) {
@@ -73,6 +72,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   tailer?.stop();
   clearInterval(pushTimer);
+  clearInterval(hoverTimer);
 });
 
 // ---------------------------------------------------------------------------
@@ -166,9 +166,7 @@ function createOverlay() {
     resizable: true,
     skipTaskbar: true,
     alwaysOnTop: true,
-    // Not focusable while locked, so that hovering a row for the breakdown can enable
-    // mouse events without a stray click pulling focus out of the game.
-    focusable: !config.get('locked'),
+    focusable: true,
     webPreferences: {
       preload: path.join(RENDERER, 'overlay', 'preload.cjs'),
       contextIsolation: true,
@@ -185,21 +183,24 @@ function createOverlay() {
 
   overlayWindow.on('ready-to-show', () => {
     applyLock(config.get('locked'));
+    startHoverPolling();
     pushStatus();
   });
 
+  // Height is always derived from content, so only width and position are remembered.
+  // Persisting an auto-fitted height would rewrite config.json every time a row
+  // appeared, and would restore a stale height on the next launch.
   const remember = () => {
     clearTimeout(saveBoundsTimer);
     saveBoundsTimer = setTimeout(() => {
-      if (overlayWindow && !overlayWindow.isDestroyed()) {
-        config.set({ bounds: overlayWindow.getBounds() });
-      }
+      if (!overlayWindow || overlayWindow.isDestroyed()) return;
+      const { x, y, width, height } = overlayWindow.getBounds();
+      const saved = config.get('bounds');
+      config.set({ bounds: { x, y, width, height: saved?.height ?? height } });
     }, 400);
   };
   overlayWindow.on('moved', remember);
-  // Only remember a resize the player made. Auto-fit resizes fire this too, and
-  // persisting those would rewrite config.json every time a row appeared.
-  overlayWindow.on('resized', () => { if (!config.get('locked')) remember(); });
+  overlayWindow.on('resized', remember);
   overlayWindow.on('closed', () => { overlayWindow = null; });
 
   registerHotkeys();
@@ -245,21 +246,54 @@ function createSetup(mode) {
 function applyLock(locked) {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
-  if (locked && !hoverHold) {
-    // forward:true still delivers mousemove to the renderer, which is what lets a
-    // hovered row ask for mouse events back.
-    overlayWindow.setIgnoreMouseEvents(true, { forward: true });
-  } else {
-    overlayWindow.setIgnoreMouseEvents(false);
-  }
-  overlayWindow.setFocusable(!locked);
+  // No `forward: true`. It is the documented way to keep receiving mouse moves under
+  // click-through, but it delivered nothing here, so hover is driven by cursor polling
+  // instead (see startHoverPolling). The upside is that the window never needs mouse
+  // events back, so the game keeps every click even while the breakdown is open.
+  overlayWindow.setIgnoreMouseEvents(locked);
   overlayWindow.webContents.send(CHANNELS.LOCK_CHANGED, locked);
+}
+
+/**
+ * Track the cursor so the overlay can show a hover breakdown while staying click-through.
+ *
+ * Only runs while locked; unlocked the window is ordinary and DOM mouse events work.
+ * 16 Hz is far below what a cursor poll costs and well above what reads as responsive.
+ */
+function startHoverPolling() {
+  clearInterval(hoverTimer);
+  let last = null;
+
+  hoverTimer = setInterval(() => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    if (!overlayVisible || !config.get('locked')) {
+      if (last !== null) {
+        last = null;
+        overlayWindow.webContents.send(CHANNELS.HOVER, null);
+      }
+      return;
+    }
+
+    const pt = screen.getCursorScreenPoint();
+    const b = overlayWindow.getBounds();
+    const inside =
+      pt.x >= b.x && pt.x < b.x + b.width &&
+      pt.y >= b.y && pt.y < b.y + b.height;
+
+    // getCursorScreenPoint and getBounds are both in device-independent pixels, which
+    // is also what CSS pixels are at zoom 1 — so this maps straight onto the DOM.
+    const next = inside ? { x: pt.x - b.x, y: pt.y - b.y } : null;
+    if (next === null && last === null) return;
+    if (next && last && next.x === last.x && next.y === last.y) return;
+
+    last = next;
+    overlayWindow.webContents.send(CHANNELS.HOVER, next);
+  }, 60);
 }
 
 function toggleLock() {
   const locked = !config.get('locked');
   config.set({ locked });
-  hoverHold = false;
   applyLock(locked);
   toast(locked ? 'Overlay locked' : 'Overlay unlocked — drag to move');
 }
@@ -438,15 +472,6 @@ function registerIpc() {
   ipcMain.handle(CHANNELS.OPEN_SETTINGS, () => createSetup('settings'));
 
   /**
-   * The renderer asks for mouse events back while the cursor is over a row, so the
-   * hover breakdown can be read, and gives them up again on mouseleave.
-   */
-  ipcMain.on(CHANNELS.SET_IGNORE_MOUSE, (_e, ignore) => {
-    hoverHold = !ignore;
-    applyLock(config.get('locked'));
-  });
-
-  /**
    * The renderer measured its content and wants the window to match.
    *
    * Only the height moves — width and position are the player's to choose — and the
@@ -454,15 +479,22 @@ function registerIpc() {
    */
   ipcMain.on(CHANNELS.FIT_HEIGHT, (_e, height) => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
-    if (!config.get('locked')) return;
 
-    const maxHeight = Math.floor(screen.getPrimaryDisplay().workAreaSize.height * 0.8);
+    const area = screen.getDisplayMatching(overlayWindow.getBounds()).workArea;
+    const maxHeight = Math.floor(area.height * 0.8);
     const target = Math.max(70, Math.min(Math.round(height), maxHeight));
     const bounds = overlayWindow.getBounds();
     const contentDelta = bounds.height - overlayWindow.getContentBounds().height;
+    const next = target + contentDelta;
 
-    if (Math.abs(bounds.height - (target + contentDelta)) < 3) return;
-    overlayWindow.setBounds({ ...bounds, height: target + contentDelta }, false);
+    if (Math.abs(bounds.height - next) < 3) return;
+
+    // Opening the hover breakdown grows the window downward. Near the bottom of the
+    // screen that would push it off, so slide it up instead of letting it overflow.
+    const overflow = (bounds.y + next) - (area.y + area.height);
+    const y = overflow > 0 ? Math.max(area.y, bounds.y - overflow) : bounds.y;
+
+    overlayWindow.setBounds({ ...bounds, y, height: next }, false);
   });
 
   ipcMain.on(CHANNELS.TOGGLE_LOCK, toggleLock);

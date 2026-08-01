@@ -209,6 +209,9 @@ body:not([data-locked="true"]) #controls { display: flex; }
   margin: 0;
   padding: 0 0 0.3em;
   flex: 1 1 auto;
+  /* min-height:0 lets the rows scroll instead of shoving the breakdown off the bottom
+     when the window is a fixed size (i.e. unlocked, where auto-fit is suspended). */
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   position: relative;
@@ -309,17 +312,19 @@ body[data-has-rows="true"] #empty { display: none; }
 
 /* ---------------------------------------------------------- hover breakdown */
 
+/*
+ * The breakdown sits BELOW the rows in normal flow rather than floating over them.
+ *
+ * Anchored to the bottom it covered the very names you need to reach, so moving from one
+ * member to another was impossible — you had to leave the overlay entirely and come back.
+ * In flow, the window grows to fit it (see fitHeight) and every row stays hovarable.
+ */
 #detail {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 3;
+  flex: 0 0 auto;
   padding: 0.55em 0.7em 0.6em;
   background: color-mix(in srgb, var(--slab) 97%, #000);
   border-top: 1px solid var(--ember);
-  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.6);
-  max-height: 78%;
+  max-height: 15em;
   overflow-y: auto;
 }
 #detail[hidden] { display: none; }
