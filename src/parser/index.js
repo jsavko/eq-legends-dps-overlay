@@ -21,6 +21,22 @@ export const UNKNOWN = 'Unknown';
 /** How long after a cast starts we are still willing to blame it for stray damage. */
 const CAST_WINDOW_MS = 2000;
 
+/**
+ * Charm has a cast time, so the "has been charmed" line lands well after the cast began.
+ * Wider than CAST_WINDOW_MS for that reason.
+ */
+const CHARM_WINDOW_MS = 8000;
+
+/** Entries live this long in the cast table, so charm attribution outlives the 2s window. */
+const CAST_TABLE_TTL_MS = 10_000;
+
+/**
+ * Spells that take control of a mob. Charm is the only crowd control that makes the
+ * mob fight for you — mez and root do not — so only these transfer damage credit.
+ * "Beguile" is confirmed in EQ Legends; the rest follow classic EverQuest naming.
+ */
+const CHARM_SPELL_RE = /\b(?:beguile|charm|allure|dominate|enslave|subjugate)\b/i;
+
 /** "Gann healed himself" — the target of a reflexive heal is the healer. */
 const REFLEXIVE_RE = /^(?:him|her|it|them|your|my)sel(?:f|ves)$/i;
 
@@ -133,6 +149,9 @@ export class LogParser {
       case 'heal':
         this.handleHeal(event);
         break;
+      case 'charm':
+        this.handleCharm(event);
+        break;
       case 'zone':
         this.handleZone(event);
         break;
@@ -223,9 +242,17 @@ export class LogParser {
     const attackerFriendly = this.isFriendly(attacker.name) || this.isUnownedPet(attacker.name);
     const targetFriendly = this.isFriendly(target.name);
 
-    // Friendly hitting a friendly is almost always a mis-parse or a charmed pet.
-    // Scoring it would inflate someone's DPS, so it is dropped.
-    if (attackerFriendly && targetFriendly) return;
+    if (attackerFriendly && targetFriendly) {
+      // A charmed mob resolves to its owner, so it counts as friendly. The only way one
+      // friendly hits another is therefore that a charm just broke — retry the line once
+      // the charm is released so it is scored as the ordinary combat it now is.
+      if (this.breakCharm(event)) {
+        this.handleDamage(event);
+        return;
+      }
+      // Otherwise this is a mis-parse; scoring it would inflate someone's DPS.
+      return;
+    }
 
     if (attackerFriendly) {
       this.roster.noteFriendlyCombatant(attacker.name);
@@ -289,14 +316,21 @@ export class LogParser {
     this.revision++;
   }
 
+  /** Drop cast-table entries too old to explain anything. */
+  pruneCasts(ts) {
+    for (const [name, cast] of this.casts) {
+      if (ts - cast.ts > CAST_TABLE_TTL_MS || cast.ts > ts) this.casts.delete(name);
+    }
+  }
+
   /** @returns {{name: string, ability: string}|null} the sole in-flight caster, if unambiguous */
   attributeNonMelee(ts) {
+    this.pruneCasts(ts);
     const candidates = [];
     for (const [name, cast] of this.casts) {
-      if (ts - cast.ts > CAST_WINDOW_MS || cast.ts > ts) {
-        this.casts.delete(name);
-        continue;
-      }
+      // Pruning uses a longer TTL than this window so charm attribution still works;
+      // filter here rather than delete.
+      if (ts - cast.ts > CAST_WINDOW_MS) continue;
       if (this.isFriendly(name)) candidates.push({ name, ability: cast.ability ?? 'Unknown' });
     }
     // Two people casting at once makes attribution a coin flip; a visible "Unknown"
@@ -354,7 +388,65 @@ export class LogParser {
     this.revision++;
   }
 
+  /**
+   * A mob was charmed and now fights for the group.
+   *
+   * The line names the mob but not who charmed it, so the charmer is the friendly whose
+   * most recent in-flight cast was a charm spell. Matching on the spell NAME rather than
+   * on "the only caster in flight" is what makes this work: several people are usually
+   * casting at once, and only one of them is casting Beguile.
+   *
+   * With no charm caster identified, the mob is left alone rather than credited to a
+   * guess — its damage then simply goes uncounted, which is the honest outcome.
+   */
+  handleCharm(event) {
+    const mob = this.resolve(event.who);
+    const charmer = this.attributeCharm(event.ts);
+    if (!charmer) return;
+
+    this.roster.charm(mob.name, charmer);
+    this.revision++;
+  }
+
+  /** @returns {string|null} the friendly whose recent cast was a charm spell */
+  attributeCharm(ts) {
+    this.pruneCasts(ts);
+    let best = null;
+    for (const [name, cast] of this.casts) {
+      if (ts - cast.ts > CHARM_WINDOW_MS) continue;
+      if (!cast.ability || !CHARM_SPELL_RE.test(cast.ability)) continue;
+      if (!this.isFriendly(name)) continue;
+      if (!best || cast.ts > best.ts) best = { name, ts: cast.ts };
+    }
+    return best?.name ?? null;
+  }
+
+  /**
+   * Infer that a charm has ended.
+   *
+   * EQ Legends logs no charm-break message whatsoever, so the break has to be deduced.
+   * A charmed pet resolves to its owner, who is friendly — so a "friendly hitting a
+   * friendly" line involving a charmed mob can only mean the charm just broke, in either
+   * direction (the ex-pet turning on the group, or the group turning on it).
+   *
+   * @returns {boolean} true if something was un-charmed and the event deserves a retry
+   */
+  breakCharm(event) {
+    let broke = false;
+    for (const raw of [event.attacker, event.target]) {
+      if (raw && this.roster.isCharmed(raw)) {
+        this.roster.uncharm(raw);
+        broke = true;
+      }
+    }
+    if (broke) this.revision++;
+    return broke;
+  }
+
   handleDeath(event) {
+    // A charm ends with the mob, whichever side killed it.
+    this.roster.uncharm(event.target);
+
     if (!this.current || this.current.closed) return;
     const target = this.resolve(event.target);
     if (this.isFriendly(target.name)) return;   // a player dying does not end the pull
@@ -366,7 +458,9 @@ export class LogParser {
     if (event.phase === 'entered') this.zone = event.zone;
     this.closeCurrent('zone', event.ts);
     // Group membership deliberately survives zoning — a group zones together, and
-    // dropping members here would blank rows from the fight still on screen.
+    // dropping members here would blank rows from the fight still on screen. Charms do
+    // not survive: the mob is in the zone you left.
+    this.roster.clearCharms();
     this.casts.clear();
     this.revision++;
   }
@@ -396,6 +490,7 @@ export class LogParser {
     this.current = null;
     this.last = null;
     this.casts.clear();
+    this.roster.clearCharms();
     this.revision++;
   }
 

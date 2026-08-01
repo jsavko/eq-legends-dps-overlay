@@ -498,3 +498,124 @@ test('an enemy damage shield hurting us is never credited to anyone', () => {
 
   assert.equal(p.snapshot().totalDamage, 100);
 });
+
+// ---------------------------------------------------------------------------
+// Charmed pets.
+//
+// A charmed mob keeps its mob name ("a tal ghoul wizard") but fights for the group, and
+// its damage IS logged. EQ Legends emits exactly one charm signal — "<mob> has been
+// charmed." — and NO break message at all, so the end of a charm must be inferred.
+// ---------------------------------------------------------------------------
+
+test('a charmed mob is credited to whoever cast the charm', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  // Two people casting at once: matching on the SPELL NAME is what picks Rhain.
+  p.feed(`${D(19, 20, 1)} Emalina begins casting Greater Healing V.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 4)} A tal ghoul wizard slashes a ghoul savant for 40 points of damage.`);
+  p.feed(`${D(19, 20, 5)} a tal ghoul wizard hit a ghoul savant for 148 points of magic damage by Lightning Bolt.`);
+
+  const rhain = p.snapshot().rows.find((r) => r.name === 'Rhain');
+  assert.equal(rhain.damage, 188);
+  assert.equal(rhain.petDamage, 188, "the charmed mob's damage is pet damage");
+  assert.equal(p.snapshot().rows.some((r) => r.name === 'tal ghoul wizard'), false);
+});
+
+test('mez is not charm', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Mesmerization VIII.`);
+  p.feed(`${D(19, 20, 2)} a shin ghoul knight has been mesmerized.`);
+  p.feed(`${D(19, 20, 4)} A shin ghoul knight slashes a ghoul savant for 40 points of damage.`);
+
+  const rhain = p.snapshot().rows.find((r) => r.name === 'Rhain');
+  assert.equal(rhain, undefined, 'a mezzed mob is asleep, not fighting for us');
+});
+
+test('a charm with no charm spell in flight credits nobody', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 4)} A tal ghoul wizard slashes a ghoul savant for 40 points of damage.`);
+
+  // Uncounted rather than guessed onto someone.
+  assert.equal(p.snapshot().totalDamage, 100);
+});
+
+test('charm breaks when the pet turns on the group', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 4)} A tal ghoul wizard slashes a ghoul savant for 40 points of damage.`);
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), true);
+
+  // No break message exists in the log; the ex-pet hitting us is the only signal.
+  p.feed(`${D(19, 20, 6)} A tal ghoul wizard hits Emalina for 20 points of damage.`);
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
+
+  // Its later swings are no longer credited to Rhain.
+  p.feed(`${D(19, 20, 8)} A tal ghoul wizard slashes a ghoul savant for 99 points of damage.`);
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Rhain').damage, 40);
+});
+
+test('charm breaks when the group turns on the pet, and that hit still counts', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 6)} Emalina slashes a tal ghoul wizard for 50 points of damage.`);
+
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
+  // The line that broke the charm is re-handled, so its damage is not lost.
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Emalina').damage, 150);
+});
+
+test('killing the charmed mob ends the charm', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 9)} A tal ghoul wizard has been slain by Emalina!`);
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
+});
+
+test('a charmer only holds one charm at a time', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 5)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 6)} a wan ghoul knight has been charmed.`);
+
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false, 'the old charm is released');
+  assert.equal(p.roster.isCharmed('a wan ghoul knight'), true);
+});
+
+test('zoning clears charms', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 21, 0)} LOADING, PLEASE WAIT...`);
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
+});
+
+test('a mob-named pet can be mapped in settings despite the article', () => {
+  // The lookup path strips articles, so the configured key must be stripped too.
+  const p = makeParser({ petOwners: { 'a tal ghoul wizard': 'Rhain' } });
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 4)} A tal ghoul wizard slashes a ghoul savant for 40 points of damage.`);
+
+  const rhain = p.snapshot().rows.find((r) => r.name === 'Rhain');
+  assert.equal(rhain.petDamage, 40);
+});
+
+test('uncharmed mobs fighting each other are still ignored', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 4)} A tal ghoul wizard slashes a ghoul savant for 40 points of damage.`);
+  assert.equal(p.snapshot().totalDamage, 100);
+});

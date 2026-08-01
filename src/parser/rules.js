@@ -370,6 +370,28 @@ export const RULES = [
     make: (m) => ({ kind: 'cast', attacker: m[1], ability: null }),
   },
 
+  // ----------------------------------------------------------------- crowd control
+  {
+    // (confirmed) "a tal ghoul wizard has been charmed."
+    //
+    // A charmed mob fights FOR the group, and its damage is logged
+    // ("A tal ghoul wizard slashes a ghoul savant for 40 points of damage."), so it is
+    // real group damage belonging to whoever charmed it. This line is the only charm
+    // signal EQ Legends emits — there is no corresponding break message, so the end of
+    // a charm has to be inferred (see index.js).
+    id: 'charm',
+    re: /^(.+?) has been charmed\.$/,
+    make: (m) => ({ kind: 'charm', who: m[1] }),
+  },
+  {
+    // (confirmed) "a shin ghoul knight has been mesmerized."
+    // Mez is NOT charm: a mezzed mob is asleep, not fighting for you. Typed separately
+    // so it can never be mistaken for one.
+    id: 'crowd-control',
+    re: /^(.+?) has been (mesmerized|awakened|poisoned|stunned|rooted)\.$/,
+    make: (m) => ({ kind: 'effect', who: m[1], effect: m[2] }),
+  },
+
   // ---------------------------------------------------------------------- heals
   {
     // (confirmed) "Emalina healed Rhain for 119 (139) hit points by Bravery."

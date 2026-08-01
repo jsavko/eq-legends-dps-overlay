@@ -74,6 +74,19 @@ Gann = Rhain
 Until you do, the pet keeps its own row — its damage is still counted, never silently
 dropped.
 
+**Charmed mobs are credited to the charmer.** A charmed mob keeps its mob name
+(`a tal ghoul wizard`) but fights for you, and its damage counts as the charmer's pet
+damage. EverQuest Legends announces `a tal ghoul wizard has been charmed.` but names no
+caster, so the charmer is identified as the friendly whose in-flight spell was a charm
+spell — matching on the spell name, since several people are usually casting at once.
+With no charm spell in flight, nobody is credited rather than a guess being made.
+
+There is **no charm-break message in the log at all**, so the end of a charm is inferred:
+the ex-pet hitting the group, the group hitting it, its death, or zoning. Two limitations
+follow. Mob names are generic, so if two `a tal ghoul wizard` are up and one is charmed,
+the other's damage is credited too. And because a break is only noticed on the next
+relevant line, a few swings after a silent break can land on the charmer.
+
 **Overhealing is exact.** EverQuest writes `healed Rhain for 119 (139) hit points` —
 what actually landed, then what the spell would have restored — and prints the
 parenthetical *only* when the two differ. So a heal with a single number wasted nothing,

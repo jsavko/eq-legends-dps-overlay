@@ -13,7 +13,7 @@
  * someone left the group, no amount of swinging puts them back in it.
  */
 
-import { looksLikePlayerName } from './entities.js';
+import { looksLikePlayerName, stripArticle } from './entities.js';
 
 export class Roster {
   /**
@@ -47,6 +47,40 @@ export class Roster {
     this.knownPlayers = new Set();
     /** Names the game called out as NPCs — includes every summoned pet. */
     this.knownNpcs = new Set();
+
+    /**
+     * Mobs currently charmed, mapped to whoever charmed them.
+     *
+     * Kept apart from petOwners because the two have opposite lifetimes: petOwners is
+     * durable configuration, while a charm lasts seconds and is revoked by inference.
+     * Separating them means replacing the configured mapping cannot disturb a live
+     * charm, and breaking a charm cannot delete the user's settings.
+     * @type {Map<string, string>}
+     */
+    this.charmedPets = new Map();
+  }
+
+  /** Record that `owner` has charmed `pet`. Names are stored article-stripped. */
+  charm(pet, owner) {
+    const key = stripArticle(String(pet).trim());
+    if (!key || !owner) return;
+    // One charm per charmer: landing a new one releases the old.
+    for (const [existing, holder] of this.charmedPets) {
+      if (holder === owner) this.charmedPets.delete(existing);
+    }
+    this.charmedPets.set(key, owner);
+  }
+
+  uncharm(pet) {
+    return this.charmedPets.delete(stripArticle(String(pet).trim()));
+  }
+
+  isCharmed(name) {
+    return this.charmedPets.has(stripArticle(String(name).trim()));
+  }
+
+  clearCharms() {
+    this.charmedPets.clear();
   }
 
   /**
@@ -58,13 +92,18 @@ export class Roster {
    */
   setPetOwners(mapping) {
     this.petOwners = new Map(
-      Object.entries(mapping ?? {}).filter(([pet, owner]) => pet && owner)
+      Object.entries(mapping ?? {})
+        .filter(([pet, owner]) => pet && owner)
+        // Article-stripped, because that is the form every lookup arrives in. Without
+        // this a mob-named pet entered as "a tal ghoul wizard" could never match.
+        .map(([pet, owner]) => [stripArticle(pet.trim()), owner.trim()])
     );
   }
 
-  /** @returns {string|null} the owner if `name` is a known named pet */
+  /** @returns {string|null} the owner if `name` is a charmed mob or a known named pet */
   ownerOf(name) {
-    return this.petOwners.get(name) ?? null;
+    const key = stripArticle(String(name).trim());
+    return this.charmedPets.get(key) ?? this.petOwners.get(key) ?? null;
   }
 
   /**
@@ -109,8 +148,9 @@ export class Roster {
     if (event.kind === 'pet-owner') {
       const owner = event.owner === 'You' ? this.selfName : event.owner;
       if (event.pet && owner) {
-        this.petOwners.set(event.pet, owner);
-        this.implicit.delete(event.pet);
+        const key = stripArticle(String(event.pet).trim());
+        this.petOwners.set(key, owner);
+        this.implicit.delete(key);
       }
       return;
     }
