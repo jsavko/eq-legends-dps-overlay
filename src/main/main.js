@@ -16,7 +16,7 @@ import { LogParser } from '../parser/index.js';
 import { Tailer, listLogs } from './tailer.js';
 import { ConfigStore, DEFAULT_LOG_DIR } from './config.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
-import { clampHeight, placeWindow } from './layout.js';
+import { clampHeight, clampWidth, placeWindow } from './layout.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(HERE, '..', 'renderer');
@@ -37,10 +37,22 @@ let lastRevision = -1;
 let overlayVisible = true;
 let saveBoundsTimer = null;
 let hoverTimer = null;
-/** Where the player put the window. Auto-fit reads it and never writes it. */
+/**
+ * Where the player put the window. Auto-fit reads these and never writes them.
+ *
+ * All three axes that auto-fit touches need one: the breakdown borrows height AND
+ * width, and against the right screen edge extra width moves x. Fitting from current
+ * bounds instead of resting ones is how the overlay once climbed the screen — each
+ * open moved it, the next open started from the moved position, and `remember`
+ * persisted the drift as the player's own choice.
+ */
 let restingY = null;
-/** The y of our last auto-fit, so `remember` can tell our moves from the player's. */
+let restingX = null;
+let restingWidth = null;
+/** Our last auto-fit, so `remember` can tell our moves from the player's. */
 let lastFitY = null;
+let lastFitX = null;
+let lastFitWidth = null;
 
 // A second instance would fight the first for the same log and hotkeys.
 if (!app.requestSingleInstanceLock()) {
@@ -209,23 +221,35 @@ function createOverlay() {
   });
 
   restingY = bounds.y;
+  restingX = bounds.x;
+  restingWidth = bounds.width;
 
-  // Height is always derived from content, so only width and position are remembered.
-  // Persisting an auto-fitted height would rewrite config.json every time a row
-  // appeared, and would restore a stale height on the next launch.
+  // Height is always derived from content, so only the resting width and position are
+  // remembered. Persisting an auto-fitted size would rewrite config.json every time
+  // the breakdown opened, and would restore a hover-widened window on the next launch.
   const remember = () => {
     clearTimeout(saveBoundsTimer);
     saveBoundsTimer = setTimeout(() => {
       if (!overlayWindow || overlayWindow.isDestroyed()) return;
       const { x, y, width, height } = overlayWindow.getBounds();
 
-      // A bottom-anchored fit moves the window without the player touching it. Taking
-      // that y as the new resting place is how the overlay used to climb the screen:
-      // every hover moved it up a panel-height, and the climb was then persisted.
+      // An auto-fit moves and resizes the window without the player touching it.
+      // Taking those bounds as the new resting place is how the overlay used to climb
+      // the screen — and would now also walk it leftward a panel-width per hover.
+      // Only a change we did not make is the player's.
       if (y !== lastFitY) restingY = y;
+      if (x !== lastFitX) restingX = x;
+      if (width !== lastFitWidth) restingWidth = width;
 
       const saved = config.get('bounds');
-      config.set({ bounds: { x, y: restingY, width, height: saved?.height ?? height } });
+      config.set({
+        bounds: {
+          x: restingX,
+          y: restingY,
+          width: restingWidth,
+          height: saved?.height ?? height,
+        },
+      });
     }, 400);
   };
   overlayWindow.on('moved', remember);
@@ -578,30 +602,56 @@ function registerIpc() {
   /**
    * The renderer measured its content and wants the window to match.
    *
-   * Only the height moves — width and position are the player's to choose — and the
-   * result is clamped so a raid-sized roster cannot grow the window off the screen.
+   * While the breakdown is closed only the height moves, capped at 80% of the work
+   * area — width and position stay the player's. While it is open the window may
+   * borrow BOTH dimensions up to the full work area: the panel promises every ability
+   * with its name whole, and this window cannot scroll, so a promise without room on
+   * screen is content silently gone. Everything borrowed is returned, to exactly the
+   * resting bounds, on the close message.
+   *
+   * The renderer sends measurements (`height`, `extraWidth`, `panelOpen`), never
+   * bounds: main alone knows the resting position, the display and the clamps. Width
+   * grows from the CURRENT width — after a grow the renderer's shortfall reads zero,
+   * and computing from resting would snap the window back mid-hover.
    */
-  ipcMain.on(CHANNELS.FIT_HEIGHT, (_e, height) => {
+  ipcMain.on(CHANNELS.FIT_WINDOW, (_e, spec) => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    const { height, extraWidth = 0, panelOpen = false } = spec ?? {};
 
-    const area = screen.getDisplayMatching(overlayWindow.getBounds()).workArea;
     const bounds = overlayWindow.getBounds();
+    const area = screen.getDisplayMatching(bounds).workArea;
     const contentDelta = bounds.height - overlayWindow.getContentBounds().height;
-    const next = clampHeight(height, area) + contentDelta;
+    const nextH = clampHeight(height, area, { panelOpen }) + contentDelta;
 
     if (restingY === null) restingY = bounds.y;
+    if (restingX === null) restingX = bounds.x;
+    if (restingWidth === null) restingWidth = bounds.width;
 
-    // Down from the resting position when there is room, bottom-anchored when there is
-    // not — in which case the renderer draws the panel above the rows so they hold still.
-    const { y, above } = placeWindow({ restingY, height: next, area });
+    const nextW = panelOpen
+      ? clampWidth(bounds.width + extraWidth, area, { minWidth: restingWidth })
+      : restingWidth;
+
+    // Down-and-right from the resting position when there is room, edge-anchored when
+    // there is not — in which case the renderer draws the panel above the rows so they
+    // hold still under the cursor.
+    const { x, y, above } = placeWindow({
+      restingX, restingY, width: nextW, height: nextH, area,
+    });
 
     overlayWindow.webContents.send(CHANNELS.PANEL_SIDE, above ? 'above' : 'below');
 
-    if (Math.abs(bounds.height - next) < 3 && bounds.y === y) return;
+    if (
+      Math.abs(bounds.height - nextH) < 3 &&
+      Math.abs(bounds.width - nextW) < 3 &&
+      bounds.y === y &&
+      bounds.x === x
+    ) return;
 
     // Our own move, not the player's — `remember` must not mistake it for a reposition.
     lastFitY = y;
-    overlayWindow.setBounds({ ...bounds, y, height: next }, false);
+    lastFitX = x;
+    lastFitWidth = nextW;
+    overlayWindow.setBounds({ x, y, width: nextW, height: nextH }, false);
   });
 
   ipcMain.on(CHANNELS.TOGGLE_LOCK, toggleLock);

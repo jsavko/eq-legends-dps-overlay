@@ -317,7 +317,7 @@ body[data-has-rows="true"] #empty { display: none; }
  *
  * Anchored to the bottom it covered the very names you need to reach, so moving from one
  * member to another was impossible — you had to leave the overlay entirely and come back.
- * In flow, the window grows to fit it (see fitHeight) and every row stays hovarable.
+ * In flow, the window grows to fit it (see fitWindow) and every row stays hovarable.
  */
 /*
  * NO max-height, and nothing here scrolls.
@@ -328,8 +328,12 @@ body[data-has-rows="true"] #empty { display: none; }
  * was always losing its lower edge — a sliver at 1x, and proportionally worse the larger
  * the player set the text.
  *
- * The panel's height is bounded by construction instead: six ability rows, at most five
- * chips, six stats. fitHeight() grows the window to whatever that comes to.
+ * Nor is the ability list capped by count: it holds EVERY ability, always — a top-six
+ * slice is how DoT damage used to vanish from the breakdown while sitting plainly in
+ * the totals. What keeps the height bounded is layout, not omission: fitWindow() grows
+ * the window (both dimensions, up to the work area, given back on close), and when one
+ * column of rows would outgrow the screen the list flows into more columns instead
+ * (see [data-cols] below and breakdown.js).
  */
 #detail {
   flex: 0 0 auto;
@@ -442,6 +446,18 @@ body[data-panel="above"] #detail {
   column-gap: 0.5em;
   row-gap: 1px;
 }
+/*
+ * The multi-column fallback: when one column of rows would outgrow the screen, the
+ * whole four-track group is repeated per column. Items are placed EXPLICITLY by
+ * overlay.js (inline grid-row/grid-column) — the `1 / -1` span below would otherwise
+ * stack everything back into one full-width column — and column-major, so the ranking
+ * still reads top-to-bottom the way the one-column list always has.
+ */
+#d-abilities[data-cols="2"] { grid-template-columns: repeat(2, 1fr auto auto auto); }
+#d-abilities[data-cols="3"] { grid-template-columns: repeat(3, 1fr auto auto auto); }
+/* A breath between columns, so the last number of one and the name of the next
+   cannot read as one row. */
+#d-abilities li[data-col]:not([data-col="0"]) { margin-left: 0.6em; }
 #d-abilities li {
   position: relative;
   display: grid;

@@ -11,7 +11,7 @@ const CH = {
   HOVER: 'overlay:hover',
   PANEL_SIDE: 'overlay:panel-side',
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',
-  FIT_HEIGHT: 'window:fit-height',
+  FIT_WINDOW: 'window:fit',
   CLOSE_WINDOW: 'window:close',
   RESET_ENCOUNTER: 'overlay:reset',
   TOGGLE_LOCK: 'overlay:toggle-lock',
@@ -39,8 +39,13 @@ contextBridge.exposeInMainWorld('api', {
 
   /** Give mouse events back to the game, or take them so a row can be hovered. */
   setIgnoreMouse: (ignore) => ipcRenderer.send(CH.SET_IGNORE_MOUSE, ignore),
-  /** Ask the window to shrink or grow to exactly fit the rows currently shown. */
-  fitHeight: (height) => ipcRenderer.send(CH.FIT_HEIGHT, height),
+  /**
+   * Ask the window to fit its content: `{ height, extraWidth, panelOpen }`.
+   * Height is the measured content; extraWidth is how short the breakdown's name
+   * columns are of showing every name in full. Main owns the resting bounds and the
+   * clamps, so the renderer reports measurements and never names absolute bounds.
+   */
+  fitWindow: (spec) => ipcRenderer.send(CH.FIT_WINDOW, spec),
   toggleLock: () => ipcRenderer.send(CH.TOGGLE_LOCK),
   toggleMetric: () => ipcRenderer.send(CH.TOGGLE_METRIC),
   resetEncounter: () => ipcRenderer.send(CH.RESET_ENCOUNTER),

@@ -27,7 +27,13 @@ export const CHANNELS = {
 
   // renderer -> main (fire and forget)
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',
-  FIT_HEIGHT: 'window:fit-height',
+  /**
+   * `{ height, extraWidth, panelOpen }`. The renderer measures, main decides: it alone
+   * knows the resting bounds, the display and the clamps. `extraWidth` is how many
+   * pixels the breakdown's name columns are short — main widens the CURRENT width by
+   * that much while the panel is open, and restores the RESTING width when it closes.
+   */
+  FIT_WINDOW: 'window:fit',
   CLOSE_WINDOW: 'window:close',
   RESET_ENCOUNTER: 'overlay:reset',
   TOGGLE_LOCK: 'overlay:toggle-lock',

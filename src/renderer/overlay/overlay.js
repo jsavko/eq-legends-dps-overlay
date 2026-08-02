@@ -12,6 +12,8 @@
  *    every push would restart every animation and make the bars stutter.
  */
 
+import { abilityColumns } from './breakdown.js';
+
 const $ = (id) => document.getElementById(id);
 
 const els = {
@@ -80,7 +82,7 @@ function applyLock(locked) {
   if (locked) {
     hideDetail();
     // Locking restores the auto-fit that manual resizing suspended.
-    requestAnimationFrame(fitHeight);
+    requestAnimationFrame(fitWindow);
   }
 }
 
@@ -144,7 +146,7 @@ function render(snap) {
     else hideDetail();
   }
 
-  fitHeight();
+  fitWindow();
 }
 
 /**
@@ -153,12 +155,36 @@ function render(snap) {
  * A fixed-height overlay spends most of a session as a mostly-empty translucent slab,
  * because a group of four needs a quarter of the height a raid does.
  *
- * This runs in BOTH lock states. Height is data — the number of rows, plus the breakdown
- * when it is open — so the player controls width and position and the height follows.
- * When it was suspended while unlocked, opening the breakdown inside a fixed-size window
- * had nowhere to go and squeezed the rows down to nothing.
+ * This runs in BOTH lock states, and it reports MEASUREMENTS, not bounds: the height the
+ * content wants, and how many pixels the breakdown's name columns are short of showing
+ * every name whole. Main owns the resting bounds and the clamps, so it alone decides
+ * where the window goes — the renderer asking for absolute bounds is how a fitted size
+ * would end up persisted as the player's own choice.
+ *
+ * While the breakdown is open the window grows in BOTH dimensions — every ability with
+ * its name in full — and main gives both back when it closes.
  */
-function fitHeight() {
+let lastSentPanelOpen = false;
+
+function fitWindow() {
+  const height = measureContentHeight();
+  const panelOpen = !els.detail.hidden;
+  const extraWidth = panelOpen ? measureWidthShortfall() : 0;
+
+  // A dead band stops a 1px rounding difference from starting a resize feedback loop.
+  // A panel-state flip is always sent regardless: the close message is what tells main
+  // to give the borrowed width and height back.
+  if (
+    panelOpen === lastSentPanelOpen &&
+    extraWidth === 0 &&
+    Math.abs(height - window.innerHeight) < 3
+  ) return;
+
+  lastSentPanelOpen = panelOpen;
+  window.api.fitWindow({ height, extraWidth, panelOpen });
+}
+
+function measureContentHeight() {
   let height = 2;   // the slab's top and bottom border
   for (const child of els.slab.children) {
     if (child.hidden) continue;   // the breakdown counts when open, so the window grows for it
@@ -173,11 +199,31 @@ function fitHeight() {
       height += child.offsetHeight;
     }
   }
+  return Math.ceil(height);
+}
 
-  height = Math.ceil(height);
-  // A dead band stops a 1px rounding difference from starting a resize feedback loop.
-  if (Math.abs(height - window.innerHeight) < 3) return;
-  window.api.fitHeight(height);
+/**
+ * How many pixels of window width the ability list is missing.
+ *
+ * `.a-name` is the one elastic column, clipped with an ellipsis when the track is
+ * narrow — `scrollWidth` still reports the full text, so the worst shortfall says
+ * exactly how much wider the window must be for every name to fit. The extra width a
+ * resize brings is split evenly among the columns' `1fr` name tracks, so the shortfall
+ * is multiplied by the column count; the +2 covers scrollWidth/clientWidth integer
+ * rounding leaving a permanent one-pixel clip.
+ *
+ * Measured against the CURRENT width: once the window has grown, this reads zero and
+ * the 4 Hz repaint stops asking. Main never shrinks while the panel stays open — width
+ * comes back when it closes — so moving between members cannot make the window flap.
+ */
+function measureWidthShortfall() {
+  let deficit = 0;
+  for (const el of els.dAbilities.querySelectorAll('.a-name')) {
+    deficit = Math.max(deficit, el.scrollWidth - el.clientWidth);
+  }
+  if (deficit === 0) return 0;
+  const cols = Number(els.dAbilities.dataset.cols || '1');
+  return (deficit + 2) * cols;
 }
 
 function renderRows(rows, m) {
@@ -256,9 +302,11 @@ function renderDetail(row) {
   if (metric === 'healing') renderHealDetail(row);
   else renderDamageDetail(row);
 
+  layoutAbilityColumns();
+
   // Re-fit now rather than waiting for the next 4 Hz push. Also covers moving between
   // rows, where the panel changes height because members have different ability counts.
-  fitHeight();
+  fitWindow();
 }
 
 function renderDamageDetail(row) {
@@ -283,7 +331,10 @@ function renderDamageDetail(row) {
     .sort((a, b) => b[1] - a[1]);
   setChips(sources.map(([kind, value]) => [SOURCE_LABEL[kind] ?? kind, value.toLocaleString()]));
 
-  setAbilities(row.abilities.slice(0, 6), {
+  // EVERY ability, never a top-N slice. The parser was credited with the damage; a
+  // breakdown that hides the bottom of the list reads as damage gone missing — DoTs
+  // sort low per-tick and were exactly what vanished.
+  setAbilities(row.abilities, {
     value: (a) => a.damage,
     // Of this member's own total, pet included — so the full list sums to 100% for them.
     share: (a) => (row.damage > 0 ? a.damage / row.damage : 0),
@@ -313,9 +364,9 @@ function renderHealDetail(row) {
     ['rolling', formatNumber(row.rollingHps)],
   ]);
 
-  setChips(row.healTargets.slice(0, 5).map((t) => [t.name, t.healing.toLocaleString()]));
+  setChips(row.healTargets.map((t) => [t.name, t.healing.toLocaleString()]));
 
-  setAbilities(row.healAbilities.slice(0, 6), {
+  setAbilities(row.healAbilities, {
     value: (a) => a.healing,
     // Of what LANDED, matching the hps figure above it. A healer whose every point was
     // overheal divides by zero here and gets a dash, which is the honest reading.
@@ -378,6 +429,51 @@ function setAbilities(list, { value, detail, share }) {
   );
 }
 
+/**
+ * Flow the ability list into as many columns as the screen forces, never fewer rows.
+ *
+ * The list always holds every ability; when one column would be taller than the work
+ * area allows, it flows into two, then three. Column-major, so the damage ranking reads
+ * down each column the way the single-column list always has.
+ *
+ * Placement must be EXPLICIT per item: the stylesheet's `li { grid-column: 1 / -1 }`
+ * spans the whole grid, which in a multi-column template would stack every item back
+ * into one full-width column regardless of `data-cols`. Inline styles override it.
+ */
+function layoutAbilityColumns() {
+  const list = els.dAbilities;
+  const items = [...list.children];
+
+  // Reset to a single column first — both the measurement baseline and the usual case.
+  list.dataset.cols = '1';
+  for (const li of items) {
+    li.style.gridRow = '';
+    li.style.gridColumn = '';
+    delete li.dataset.col;
+  }
+  if (items.length < 2) return;
+
+  const rowHeight = items[0].offsetHeight + 1;   // +1: the grid's row-gap
+  // The vertical budget is the whole work area — screen.availHeight, no IPC needed —
+  // minus everything on screen that is not an ability row.
+  const nonList = measureContentHeight() - items.length * rowHeight;
+  const cols = abilityColumns({
+    count: items.length,
+    rowHeight,
+    available: screen.availHeight - nonList,
+  });
+  if (cols === 1) return;
+
+  const rows = Math.ceil(items.length / cols);
+  items.forEach((li, i) => {
+    const col = Math.floor(i / rows);
+    li.dataset.col = String(col);
+    li.style.gridRow = String((i % rows) + 1);
+    li.style.gridColumn = `${col * 4 + 1} / span 4`;
+  });
+  list.dataset.cols = String(cols);
+}
+
 const SOURCE_LABEL = {
   melee: 'melee',
   spell: 'spell',
@@ -404,7 +500,7 @@ function hideDetail() {
   const wasOpen = !els.detail.hidden;
   hoveredName = null;
   els.detail.hidden = true;
-  if (wasOpen) fitHeight();   // shrink back to just the rows
+  if (wasOpen) fitWindow();   // give back the width and height the panel borrowed
 }
 
 // ------------------------------------------------------- mouse pass-through
