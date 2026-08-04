@@ -178,7 +178,7 @@ Damage-taken design, mirroring the outgoing side in `encounter.js`:
 
 ### Finish
 - [x] `docs/changelog/2026-08-04-damage-taken-and-encounter-history.md`
-- [ ] Bump `package.json` version (own commit), `scripts/dev.sh dist`, remind that the
+- [x] Bump `package.json` version (own commit), `scripts/dev.sh dist`, remind that the
       win-unpacked exe is stale until then.
 
 ## Notes
