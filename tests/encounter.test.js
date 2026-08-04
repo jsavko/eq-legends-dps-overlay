@@ -203,3 +203,141 @@ test('includeNames filters rows and rebases the shares', () => {
   assert.equal(snap.totalDamage, 100);
   assert.equal(snap.rows[0].share, 1);
 });
+
+function taken(enc, name, attacker, amount, second, extra = {}) {
+  enc.addDamageTaken({
+    name,
+    attacker,
+    amount,
+    ts: s(second),
+    ability: 'Hit',
+    isPet: false,
+    ...extra,
+  });
+}
+
+test('damage taken aggregates per victim with attacker and ability breakdowns', () => {
+  const enc = new Encounter(s(0));
+  taken(enc, 'Rhale', 'froglok king', 100, 0);
+  taken(enc, 'Rhale', 'froglok king', 60, 5, { ability: 'Slash' });
+  taken(enc, 'Rhale', 'froglok guard', 40, 10);
+
+  const snap = enc.snapshot(s(10));
+  assert.equal(snap.totalDamageTaken, 200);
+  assert.equal(snap.groupDtps, 20);
+
+  const row = snap.rows[0];
+  assert.equal(row.damageTaken, 200);
+  assert.equal(row.dtps, 20);
+  assert.equal(row.hitsTaken, 3);
+  assert.equal(row.maxHitTaken, 100);
+  assert.equal(row.takenShare, 1);
+
+  // WHO is killing them, worst first...
+  assert.deepEqual(row.attackers.map((a) => [a.name, a.damage, a.hits]), [
+    ['froglok king', 160, 2],
+    ['froglok guard', 40, 1],
+  ]);
+  // ...and WITH WHAT.
+  assert.deepEqual(row.takenAbilities.map((a) => [a.name, a.damage]), [
+    ['Hit', 140],
+    ['Slash', 60],
+  ]);
+});
+
+test('a pure victim gets a row even though they never swung', () => {
+  const enc = new Encounter(s(0));
+  taken(enc, 'Rhale', 'froglok king', 100, 0);
+  const snap = enc.snapshot(s(1));
+  assert.equal(snap.rows.length, 1);
+  assert.equal(snap.rows[0].damage, 0);
+  assert.equal(snap.rows[0].damageTaken, 100);
+});
+
+test('a pet\'s beating folds into the owner but stays separately visible', () => {
+  const enc = new Encounter(s(0));
+  taken(enc, 'Rhale', 'froglok king', 100, 0);
+  taken(enc, 'Rhale', 'froglok king', 80, 1, { isPet: true });
+
+  const row = enc.snapshot(s(1)).rows[0];
+  assert.equal(row.damageTaken, 180);
+  assert.equal(row.petDamageTaken, 80);
+  assert.equal(row.playerDamageTaken, 100);
+});
+
+test('takenShare splits across victims like share does across dealers', () => {
+  const enc = new Encounter(s(0));
+  taken(enc, 'Rhale', 'froglok king', 300, 0);
+  taken(enc, 'Rhain', 'froglok king', 100, 0);
+  const snap = enc.snapshot(s(1));
+  assert.equal(snap.rows.find((r) => r.name === 'Rhale').takenShare, 0.75);
+  assert.equal(snap.rows.find((r) => r.name === 'Rhain').takenShare, 0.25);
+});
+
+test('rolling DTPS only counts the trailing window', () => {
+  const enc = new Encounter(s(0));
+  taken(enc, 'Rhale', 'froglok king', 1000, 0);   // ages out
+  taken(enc, 'Rhale', 'froglok king', 200, 25);
+  taken(enc, 'Rhale', 'froglok king', 300, 30);
+  const row = enc.snapshot(s(30)).rows[0];
+  assert.equal(row.rollingDtps, 50);              // (200 + 300) / 10s
+});
+
+test('incoming damage keeps the encounter alive, exactly as outgoing does', () => {
+  const enc = new Encounter(s(0), { timeoutMs: 15_000, postKillGraceMs: 3000 });
+  enc.engage('froglok king', 100);
+  hit(enc, 'Rhale', 100, 0);
+  enc.npcDied('froglok king', s(2));      // grace timer starts...
+  taken(enc, 'Rhale', 'froglok add', 50, 3);   // ...but something is still swinging
+
+  assert.equal(enc.update(s(6)), false, 'incoming damage must cancel the grace timer');
+  assert.equal(enc.update(s(17)), false);
+  assert.equal(enc.update(s(18)), true);  // 15s after the incoming hit at s(3)
+  assert.equal(enc.closeReason, 'timeout');
+});
+
+test('avoided swings are counted by kind', () => {
+  const enc = new Encounter(s(0));
+  taken(enc, 'Rhale', 'froglok king', 10, 0);
+  enc.addAvoidTaken({ name: 'Rhale', avoidance: 'dodge', ts: s(1) });
+  enc.addAvoidTaken({ name: 'Rhale', avoidance: 'dodge', ts: s(2) });
+  enc.addAvoidTaken({ name: 'Rhale', avoidance: 'riposte', ts: s(3) });
+
+  const row = enc.snapshot(s(3)).rows[0];
+  assert.equal(row.avoidsTaken, 3);
+  assert.deepEqual(row.avoidedTaken, { dodge: 2, riposte: 1 });
+});
+
+test('deaths land on the row and in the encounter list; pet deaths never count as the owner\'s', () => {
+  const enc = new Encounter(s(0));
+  taken(enc, 'Rhale', 'froglok king', 500, 0);
+  enc.recordDeath({ name: 'Rhale', killer: 'froglok king', ts: s(1), isPet: false });
+  enc.recordDeath({ name: 'Rhale', killer: 'froglok king', ts: s(2), isPet: true });
+
+  const snap = enc.snapshot(s(2));
+  assert.equal(snap.rows[0].deaths, 1);
+  assert.equal(snap.rows[0].petDeaths, 1);
+  assert.deepEqual(snap.deaths.map((d) => [d.name, d.killer, d.isPet]), [
+    ['Rhale', 'froglok king', false],
+    ['Rhale', 'froglok king', true],
+  ]);
+});
+
+test('a death alone is enough for a row — dying before swinging must not hide the death', () => {
+  const enc = new Encounter(s(0));
+  hit(enc, 'Rhain', 100, 0);   // someone else keeps the encounter non-empty
+  enc.recordDeath({ name: 'Rhale', killer: 'froglok king', ts: s(1), isPet: false });
+  const row = enc.snapshot(s(1)).rows.find((r) => r.name === 'Rhale');
+  assert.ok(row);
+  assert.equal(row.deaths, 1);
+});
+
+test('the deaths list respects includeNames like the rows do', () => {
+  const enc = new Encounter(s(0));
+  hit(enc, 'Rhale', 100, 0);
+  hit(enc, 'Randomguy', 100, 0);
+  enc.recordDeath({ name: 'Randomguy', killer: 'froglok king', ts: s(1), isPet: false });
+
+  const snap = enc.snapshot(s(1), { includeNames: (n) => n === 'Rhale' });
+  assert.equal(snap.deaths.length, 0);
+});

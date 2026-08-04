@@ -27,6 +27,11 @@
   --balm:       #3f8f8a;
   --balm-lit:   #63c2b4;
 
+  /* The damage-taken view: dried-blood red, unmistakably "this is hurting us" while
+     staying inside the warm parchment palette. */
+  --wound:      #9e3b2e;
+  --wound-lit:  #d0685a;
+
   --live:       #d8b24a;
   --stale:      #6d6350;
 
@@ -411,7 +416,8 @@ body[data-panel="above"] #detail {
 #d-stats dt { color: var(--ink-faint); }
 #d-stats dd { margin: 0; font-variant-numeric: tabular-nums; }
 
-#d-sources {
+#d-sources,
+#d-types {
   list-style: none;
   margin: 0 0 0.5em;
   padding: 0;
@@ -420,13 +426,17 @@ body[data-panel="above"] #detail {
   gap: 0.25em 0.5em;
   font-size: 0.76em;
 }
-#d-sources li {
+#d-sources li,
+#d-types li {
   color: var(--ink-dim);
   border: 1px solid var(--edge);
   border-radius: 2px;
   padding: 0.05em 0.35em;
 }
-#d-sources b { color: var(--ink); font-weight: 500; }
+#d-sources b,
+#d-types b { color: var(--ink); font-weight: 500; }
+/* The resist tag: "fire 3,231 FR" — the actionable part, so it gets the accent. */
+#d-types .resist { color: var(--ember-lit); font-weight: 500; }
 
 /*
  * ONE grid for the whole list, not a flex row per ability.
@@ -547,6 +557,16 @@ body[data-metric="healing"] {
 body[data-metric="healing"] #btn-metric {
   color: var(--balm-lit);
   border-color: var(--balm);
+}
+
+/* Damage-taken mode: same trick, third color. */
+body[data-metric="taken"] {
+  --ember: var(--wound);
+  --ember-lit: var(--wound-lit);
+}
+body[data-metric="taken"] #btn-metric {
+  color: var(--wound-lit);
+  border-color: var(--wound);
 }
 
 @media (prefers-reduced-motion: reduce) {

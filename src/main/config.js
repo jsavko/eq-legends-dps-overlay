@@ -40,7 +40,7 @@ export const DEFAULTS = {
    */
   petOwners: {},
 
-  /** Which metric the overlay ranks by: 'damage' or 'healing'. */
+  /** Which metric the overlay ranks by: 'damage', 'healing' or 'taken'. */
   metric: 'damage',
 
   /**

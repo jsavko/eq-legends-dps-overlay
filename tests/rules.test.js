@@ -296,3 +296,53 @@ test('DoT ticks: has/have, self, critical and unattributed (sample)', () => {
   assert.equal(anon.amount, 10);
   assert.equal(anon.ability, 'Poison');
 });
+
+test('the player\'s own death parses; the generic rule cannot reach second person', () => {
+  // 9 hits in the live Rhale log, so the wording is confirmed.
+  const e = m('You have been slain by a froglok king!');
+  assert.equal(e.kind, 'death');
+  assert.equal(e.target, 'You');
+  assert.equal(e.attacker, 'a froglok king');
+
+  // Another player's death still goes through the generic rule.
+  const other = m('Rhain has been slain by a froglok king!');
+  assert.equal(other.kind, 'death');
+  assert.equal(other.target, 'Rhain');
+});
+
+test('"smashes" is a real EQ Legends verb (live log: evil eyes)', () => {
+  // Surfaced by collect-unknown.js — every occurrence was an evil eye, and without
+  // the verb both its incoming and outgoing melee vanished from the parse.
+  const e = m('An evil eye smashes YOU for 30 points of damage.');
+  assert.equal(e.kind, 'damage');
+  assert.equal(e.source, 'melee');
+  assert.equal(e.attacker, 'An evil eye');
+  assert.equal(e.target, 'YOU');
+  assert.equal(e.amount, 30);
+  assert.equal(e.ability, 'Smash');
+});
+
+test('incoming avoids parse in second person', () => {
+  const dodge = m('A froglok shin knight tries to hit YOU, but YOU dodge!');
+  assert.equal(dodge.kind, 'miss');
+  assert.equal(dodge.attacker, 'A froglok shin knight');
+  assert.equal(dodge.target, 'YOU');
+  assert.equal(dodge.avoidance, 'dodge');
+
+  const riposte = m('A froglok shin knight tries to slash YOU, but YOU riposte!');
+  assert.equal(riposte.avoidance, 'riposte');
+});
+
+test('damage-shield verbs that state an element carry it as the type', () => {
+  const fire = m('YOU are burned by a lava elemental\'s barrier for 12 points of non-melee damage!');
+  assert.equal(fire.kind, 'damage');
+  assert.equal(fire.damageType, 'fire');
+
+  const cold = m('Rhain is frozen by an ice ghoul\'s shroud for 9 points of non-melee damage.');
+  assert.equal(cold.damageType, 'cold');
+
+  // "pierced" names no element — the type must stay honestly absent, not guessed.
+  const thorns = m('Rhain is pierced by a wan ghoul knight\'s thorns for 8 points of non-melee damage.');
+  assert.equal(thorns.damageType, null);
+  assert.equal(thorns.attacker, 'a wan ghoul knight');
+});

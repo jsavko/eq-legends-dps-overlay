@@ -17,7 +17,7 @@
            time and state dot already use the full width, so floating the buttons on
            top of them collided with every one of them. -->
       <div id="controls">
-        <button id="btn-metric" title="Show damage or healing (Ctrl+Shift+M)">healing</button>
+        <button id="btn-metric" title="Cycle damage / healing / taken (Ctrl+Shift+M)">healing</button>
         <button id="btn-reset" title="Reset encounter">reset</button>
         <button id="btn-settings" title="Settings">settings</button>
         <button id="btn-lock" title="Lock the overlay (Ctrl+Shift+L)">lock</button>
@@ -64,6 +64,10 @@
 
       <dl id="d-stats"></dl>
       <ul id="d-sources"></ul>
+      <!-- Taken view only: damage per stated type, tagged with the resist that
+           mitigates it. Hidden (not merely empty) in the other views so it costs
+           the fit-window measurement nothing there. -->
+      <ul id="d-types" hidden></ul>
       <ol id="d-abilities"></ol>
     </div>
 

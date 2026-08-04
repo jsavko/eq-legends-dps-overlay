@@ -33,6 +33,7 @@ const els = {
   dPetLabel: $('d-pet-label'),
   dStats: $('d-stats'),
   dSources: $('d-sources'),
+  dTypes: $('d-types'),
   dAbilities: $('d-abilities'),
   status: $('status'),
   toast: $('toast'),
@@ -42,7 +43,7 @@ let snapshot = null;
 let selfName = null;
 let hoveredName = null;
 let toastTimer = null;
-/** 'damage' or 'healing'. Every snapshot carries both, so switching is instant. */
+/** 'damage', 'healing' or 'taken'. Every snapshot carries all three, so switching is instant. */
 let metric = 'damage';
 /** Row elements by combatant name, so pushes update in place. */
 const rowCache = new Map();
@@ -71,8 +72,11 @@ function applyConfig(config) {
   if (!config) return;
   document.documentElement.style.setProperty('--opacity', String(config.opacity));
   document.documentElement.style.setProperty('--scale', String(config.scale));
-  metric = config.metric === 'healing' ? 'healing' : 'damage';
+  metric = METRICS[config.metric] ? config.metric : 'damage';
   els.body.dataset.metric = metric;
+  // The button names where the cycle goes NEXT, not where it is — the current mode is
+  // already told by the unit label and the fill color.
+  $('btn-metric').textContent = METRIC_CYCLE[(METRIC_CYCLE.indexOf(metric) + 1) % METRIC_CYCLE.length];
   applyLock(config.locked);
   if (snapshot) render(snapshot);   // repaint in the new metric without waiting for a push
 }
@@ -101,13 +105,15 @@ function applyStatus(status) {
 /**
  * Field names for the metric on screen.
  *
- * Damage and healing are rendered by exactly the same code — only the fields it reads
- * differ. Rows are always sorted by damage on arrival, so the healing view re-sorts.
+ * All three metrics are rendered by exactly the same code — only the fields it reads
+ * differ. Rows are always sorted by damage on arrival, so the other views re-sort.
  */
 const METRICS = {
-  damage: { total: 'damage', rate: 'dps', rolling: 'rollingDps', share: 'share', unit: 'dps' },
-  healing: { total: 'healing', rate: 'hps', rolling: 'rollingHps', share: 'healShare', unit: 'hps' },
+  damage: { total: 'damage', rate: 'dps', rolling: 'rollingDps', share: 'share', unit: 'dps', group: 'groupDps' },
+  healing: { total: 'healing', rate: 'hps', rolling: 'rollingHps', share: 'healShare', unit: 'hps', group: 'groupHps' },
+  taken: { total: 'damageTaken', rate: 'dtps', rolling: 'rollingDtps', share: 'takenShare', unit: 'dtps', group: 'groupDtps' },
 };
+const METRIC_CYCLE = ['damage', 'healing', 'taken'];
 
 function render(snap) {
   snapshot = snap;
@@ -116,15 +122,22 @@ function render(snap) {
 
   els.body.dataset.state = snap.active ? 'live' : 'idle';
 
-  const rows = metric === 'healing'
-    ? snap.rows.filter((r) => r.heals > 0).sort((a, b) => b.healing - a.healing)
-    : snap.rows;
+  let rows = snap.rows;
+  if (metric === 'healing') {
+    rows = snap.rows.filter((r) => r.heals > 0).sort((a, b) => b.healing - a.healing);
+  } else if (metric === 'taken') {
+    // Deaths keep a row visible even at 0 damage taken — dying is the one fact this
+    // view must never hide.
+    rows = snap.rows
+      .filter((r) => r.damageTaken > 0 || r.deaths > 0 || r.petDeaths > 0)
+      .sort((a, b) => b.damageTaken - a.damageTaken);
+  }
 
   els.body.dataset.hasRows = String(rows.length > 0);
 
   els.target.textContent = snap.idle ? 'No combat' : (snap.label ?? 'Combat');
   els.elapsed.textContent = formatDuration(snap.durationMs);
-  els.dps.textContent = formatNumber(metric === 'healing' ? snap.groupHps : snap.groupDps);
+  els.dps.textContent = formatNumber(snap[m.group] ?? 0);
   $('dps-unit').textContent = m.unit;
 
   const topRolling = rows.reduce((a, r) => a + r[m.rolling], 0);
@@ -248,7 +261,9 @@ function renderRows(rows, m) {
     el.dataset.unknown = String(row.name === 'Unknown');
 
     const total = row[m.total];
-    const petTotal = metric === 'healing' ? row.petHealing : row.petDamage;
+    const petTotal = metric === 'healing' ? row.petHealing
+      : metric === 'taken' ? row.petDamageTaken
+      : row.petDamage;
     const petFraction = total > 0 ? petTotal / total : 0;
 
     el.refs.fill.style.width = `${(row[m.share] * 100).toFixed(2)}%`;
@@ -299,7 +314,11 @@ function renderDetail(row) {
   els.detail.hidden = false;
   els.dName.textContent = row.name;
 
+  // The type row belongs to the taken view alone; renderTakenDetail un-hides it.
+  els.dTypes.hidden = true;
+
   if (metric === 'healing') renderHealDetail(row);
+  else if (metric === 'taken') renderTakenDetail(row);
   else renderDamageDetail(row);
 
   layoutAbilityColumns();
@@ -375,6 +394,74 @@ function renderHealDetail(row) {
   });
 }
 
+/**
+ * The taken view answers "what is killing me": the chips are the attackers (worst
+ * first), the ability list is what they hit with, and deaths sit in the stats where
+ * they cannot be missed. Same layout as the other two views, so nothing new to learn.
+ */
+function renderTakenDetail(row) {
+  els.dTotal.textContent = `${row.damageTaken.toLocaleString()} taken · ${formatNumber(row.dtps)} dtps`;
+
+  const petPct = row.damageTaken > 0 ? (row.petDamageTaken / row.damageTaken) * 100 : 0;
+  setSplit(petPct,
+    `player ${row.playerDamageTaken.toLocaleString()}`,
+    `pet ${row.petDamageTaken.toLocaleString()}`);
+
+  setStats(els.dStats, [
+    ['hits taken', row.hitsTaken],
+    ['max hit', row.maxHitTaken.toLocaleString()],
+    ['avoided', row.avoidsTaken],
+    ['deaths', row.petDeaths > 0 ? `${row.deaths} +${row.petDeaths} pet` : row.deaths],
+    ['share', `${Math.round(row.takenShare * 100)}%`],
+    ['rolling', formatNumber(row.rollingDtps)],
+  ]);
+
+  setChips(row.attackers.map((a) => [a.name, a.damage.toLocaleString()]));
+  setTypeChips(row.takenByType ?? {});
+
+  setAbilities(row.takenAbilities, {
+    value: (a) => a.damage,
+    share: (a) => (row.damageTaken > 0 ? a.damage / row.damageTaken : 0),
+    // The resist tag rides in the detail column: "17 · FR" answers "what would have
+    // helped" right on the ability that hurt.
+    detail: (a) => (RESIST[a.type] ? `${a.hits} · ${RESIST[a.type]}` : `${a.hits}`),
+  });
+}
+
+/**
+ * Which resist mitigates which stated damage type. Melee is armor, not a resist, and
+ * an unstated type gets no tag — the log did not say, so neither do we.
+ */
+const RESIST = {
+  fire: 'FR',
+  cold: 'CR',
+  magic: 'MR',
+  poison: 'PR',
+  disease: 'DR',
+  corruption: 'Corr',
+};
+
+/** "fire 3,231 FR · melee 10,929 · untyped 712" — damage per stated type. */
+function setTypeChips(byType) {
+  const entries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+  els.dTypes.hidden = entries.length === 0;
+  els.dTypes.replaceChildren(
+    ...entries.map(([type, value]) => {
+      const li = document.createElement('li');
+      const b = document.createElement('b');
+      b.textContent = value.toLocaleString();
+      li.append(document.createTextNode(`${type} `), b);
+      if (RESIST[type]) {
+        const tag = document.createElement('span');
+        tag.className = 'resist';
+        tag.textContent = ` ${RESIST[type]}`;
+        li.append(tag);
+      }
+      return li;
+    })
+  );
+}
+
 function setSplit(petPct, selfLabel, petLabel) {
   els.dSelfBar.style.width = `${100 - petPct}%`;
   els.dPetBar.style.width = `${petPct}%`;
@@ -404,7 +491,7 @@ function setAbilities(list, { value, detail, share }) {
   els.dAbilities.replaceChildren(
     ...list.map((a) => {
       const li = document.createElement('li');
-      li.dataset.pet = String(a.pet);
+      li.dataset.pet = String(Boolean(a.pet));   // taken abilities carry no pet flag
       li.style.setProperty('--w', `${(value(a) / best) * 100}%`);
 
       const n = document.createElement('span');

@@ -10,6 +10,9 @@ const CH = {
   LOGS_PICK: 'logs:pick',
   LOGS_VALIDATE: 'logs:validate',
   SETUP_COMPLETE: 'setup:complete',
+  HISTORY_LIST: 'history:list',
+  HISTORY_GET: 'history:get',
+  HISTORY_CLEAR: 'history:clear',
 };
 
 const modeArg = process.argv.find((a) => a.startsWith('--overlay-mode='));
@@ -22,4 +25,9 @@ contextBridge.exposeInMainWorld('api', {
   pick: (what) => ipcRenderer.invoke(CH.LOGS_PICK, what),
   validate: (filePath) => ipcRenderer.invoke(CH.LOGS_VALIDATE, filePath),
   complete: (patch) => ipcRenderer.invoke(CH.SETUP_COMPLETE, patch),
+
+  /** Encounter history: characters + index, one full record, wipe one character. */
+  historyList: (key) => ipcRenderer.invoke(CH.HISTORY_LIST, key),
+  historyGet: (key, id) => ipcRenderer.invoke(CH.HISTORY_GET, { key, id }),
+  historyClear: (key) => ipcRenderer.invoke(CH.HISTORY_CLEAR, key),
 });

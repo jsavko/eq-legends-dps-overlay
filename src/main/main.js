@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { LogParser } from '../parser/index.js';
 import { Tailer, listLogs } from './tailer.js';
 import { ConfigStore, DEFAULT_LOG_DIR } from './config.js';
+import { EncounterStore, RECORD_VERSION, storeKey } from './history.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
 import { clampHeight, clampWidth, placeWindow } from './layout.js';
 
@@ -31,6 +32,7 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {Tailer|null} */       let tailer = null;
 /** @type {ConfigStore|null} */  let config = null;
 /** @type {Tray|null} */         let tray = null;
+/** @type {EncounterStore|null} */ let history = null;
 
 let pushTimer = null;
 let lastRevision = -1;
@@ -71,6 +73,7 @@ if (!app.requestSingleInstanceLock()) {
 async function main() {
   config = new ConfigStore(app.getPath('userData'));
   config.load();
+  history = new EncounterStore(path.join(app.getPath('userData'), 'history'));
 
   registerIpc();
   createTray();
@@ -108,6 +111,7 @@ async function startTailing(logPath) {
   parser = new LogParser({
     logFilename: path.basename(logPath),
     ...config.parserOptions(),
+    onEncounterEnd: persistEncounter,
   });
 
   tailer = new Tailer({
@@ -142,6 +146,40 @@ async function startTailing(logPath) {
   await tailer.start();
   startPushLoop();
   refreshTrayMenu();
+}
+
+/**
+ * Persist a closed encounter to the history store.
+ *
+ * The snapshot is built UNFILTERED — no group-only narrowing — so the record holds
+ * everything the fight contained; the history browser applies view-time filters.
+ * Encounters with no damage in either direction are skipped: they are phantom opens
+ * (a stray engage with nothing behind it), not fights anyone would want to review.
+ * A manual reset never reaches here at all — the parser's onEncounterEnd contract.
+ */
+function persistEncounter(enc) {
+  if (!history || !parser) return;
+  try {
+    const snap = enc.snapshot(enc.endTs);
+    if (snap.totalDamage === 0 && snap.totalDamageTaken === 0) return;
+    history.append({
+      v: RECORD_VERSION,
+      id: `${enc.startTs}-${enc.endTs}`,
+      character: parser.selfName,
+      server: parser.server,
+      zone: parser.zone,
+      label: snap.label,
+      startTs: enc.startTs,
+      endTs: enc.endTs,
+      durationMs: snap.durationMs,
+      closeReason: snap.closeReason,
+      snapshot: { ...snap, self: parser.selfName, zone: parser.zone },
+    });
+  } catch (err) {
+    // History is a convenience; a full disk or a locked file must never take the
+    // live overlay down with it.
+    toast(`History write failed: ${err.message}`);
+  }
 }
 
 /**
@@ -290,7 +328,8 @@ function refreshTrayMenu() {
   if (!tray) return;
 
   const locked = config.get('locked');
-  const healing = config.get('metric') === 'healing';
+  const metricIdx = METRIC_CYCLE.indexOf(config.get('metric'));
+  const nextMetric = METRIC_CYCLE[(metricIdx + 1) % METRIC_CYCLE.length];
   const keys = config.get('hotkeys');
 
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -314,7 +353,7 @@ function refreshTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: healing ? 'Show damage' : 'Show healing',
+      label: `Show ${METRIC_LABEL[nextMetric]}`,
       accelerator: keys.toggleMetric,
       click: toggleMetric,
     },
@@ -460,13 +499,19 @@ function registerHotkeys() {
   bind(keys.toggleMetric, toggleMetric, 'damage/healing');
 }
 
-/** Flip the overlay between ranking by damage and ranking by healing. */
+/** The metric cycle: damage → healing → taken → damage. */
+const METRIC_CYCLE = ['damage', 'healing', 'taken'];
+const METRIC_LABEL = { damage: 'damage', healing: 'healing', taken: 'damage taken' };
+
 function toggleMetric() {
-  const metric = config.get('metric') === 'healing' ? 'damage' : 'healing';
+  // indexOf on an unknown stored value is -1, which +1 lands on 'damage' — so a
+  // config written by a future version degrades to the default instead of sticking.
+  const idx = METRIC_CYCLE.indexOf(config.get('metric'));
+  const metric = METRIC_CYCLE[(idx + 1) % METRIC_CYCLE.length];
   config.set({ metric });
   overlayWindow?.webContents.send(CHANNELS.CONFIG_CHANGED, config.all);
   refreshTrayMenu();
-  toast(metric === 'healing' ? 'Showing healing' : 'Showing damage');
+  toast(`Showing ${METRIC_LABEL[metric]}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +643,26 @@ function registerIpc() {
   });
 
   ipcMain.handle(CHANNELS.OPEN_SETTINGS, () => createSetup('settings'));
+
+  /**
+   * History, for the settings window. The default key is whoever is being followed
+   * right now, but every character with a file on disk is offered — reviewing last
+   * night's raid on an alt while logged into the main is a real case.
+   */
+  ipcMain.handle(CHANNELS.HISTORY_LIST, (_e, key) => {
+    const current = storeKey(parser?.selfName, parser?.server);
+    const characters = history.characters();
+    const selected = key ?? (characters.some((c) => c.key === current) ? current : characters[0]?.key);
+    return {
+      characters,
+      selected: selected ?? null,
+      encounters: selected ? history.list(selected) : [],
+    };
+  });
+
+  ipcMain.handle(CHANNELS.HISTORY_GET, (_e, { key, id }) => history.get(key, id));
+
+  ipcMain.handle(CHANNELS.HISTORY_CLEAR, (_e, key) => history.clear(key));
 
   /**
    * The renderer measured its content and wants the window to match.

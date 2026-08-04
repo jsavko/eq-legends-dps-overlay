@@ -24,6 +24,10 @@ export const CHANNELS = {
   LOGS_VALIDATE: 'logs:validate',
   SETUP_COMPLETE: 'setup:complete',
   OPEN_SETTINGS: 'window:open-settings',
+  /** Encounter history (settings window): list index, fetch one record, wipe a file. */
+  HISTORY_LIST: 'history:list',
+  HISTORY_GET: 'history:get',
+  HISTORY_CLEAR: 'history:clear',
 
   // renderer -> main (fire and forget)
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',

@@ -194,3 +194,138 @@ footer {
   border-top: 1px solid var(--line);
 }
 footer .status { flex: 1; }
+
+/* ------------------------------------------------------------------ tabs */
+
+#tabs { display: flex; gap: 6px; margin-top: 14px; }
+.tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 14px;
+}
+.tab[aria-selected="true"] {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+/* The history tab replaces both settings columns with one full-width section. */
+body[data-tab="history"] #log-section,
+body[data-tab="history"] #settings-section { display: none; }
+#history-section { grid-column: 1 / -1; }
+body[data-tab="history"] footer #save { display: none; }
+
+/* --------------------------------------------------------------- history */
+
+#h-char {
+  flex: 0 0 180px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 6px 8px;
+  font: inherit;
+}
+button.danger:hover { border-color: var(--bad); color: var(--bad); }
+
+.fight-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.fight-list:empty { display: none; }
+.fight-list > li { border-bottom: 1px solid var(--line); }
+.fight-list > li:last-child { border-bottom: none; }
+
+.fight-head {
+  display: grid;
+  grid-template-columns: 1fr 90px 70px 90px 90px 60px;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.fight-head:hover { background: var(--panel-2); }
+.fight-head .f-label { font-weight: 600; }
+.fight-head .f-label .f-zone { font-weight: 400; color: var(--muted); }
+.fight-head .f-when { color: var(--muted); font-size: 12px; }
+.fight-head .num { text-align: right; font-variant-numeric: tabular-nums; }
+.fight-head .f-deaths { color: var(--bad); text-align: right; }
+.fight-head .f-deaths[data-none="true"] { color: var(--muted); }
+li[data-open="true"] .fight-head {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Column captions above the list; same grid as the rows they caption. */
+.fight-cols {
+  display: grid;
+  grid-template-columns: 1fr 90px 70px 90px 90px 60px;
+  gap: 10px;
+  padding: 8px 12px 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.fight-cols .num { text-align: right; }
+
+/* ------------------------------------------------- expanded fight detail */
+
+.fight-detail { padding: 4px 12px 14px; }
+
+.fight-detail .d-meta { color: var(--muted); font-size: 12px; margin: 4px 0 10px; }
+.fight-detail .d-deaths { color: var(--bad); font-size: 12px; margin: 0 0 10px; }
+
+.metric-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.metric-tabs button { padding: 3px 10px; font-size: 12px; }
+.metric-tabs button[aria-selected="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fight-detail table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.fight-detail th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.fight-detail td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.fight-detail th.num, .fight-detail td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fight-detail details { margin: 0; }
+.fight-detail summary { cursor: pointer; }
+.fight-detail summary:hover { color: var(--accent); }
+.fight-detail .sub {
+  margin: 6px 0 8px 16px;
+}
+.fight-detail .sub caption {
+  text-align: left;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+}
+.fight-detail .resist { color: var(--accent); }
+.fight-detail .pet-tag { color: var(--good); }

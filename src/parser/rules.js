@@ -34,6 +34,7 @@ export const ATTACK_VERBS = [
   'punches', 'punch',
   'frenzies on', 'frenzy on',
   'backstabs', 'backstab',
+  'smashes', 'smash',   // evil eyes; surfaced by collect-unknown against the live log
   // standard EverQuest attack verbs not present in the sample
   'bites', 'bite',
   'claws', 'claw',
@@ -59,6 +60,14 @@ function escapeRe(s) {
 }
 
 const VERB_ALT = alt(ATTACK_VERBS);
+
+/** Damage-shield verbs that state their element. The rest stay honestly untyped. */
+const DS_VERB_TYPE = {
+  burned: 'fire',
+  singed: 'fire',
+  frozen: 'cold',
+  shocked: 'magic',
+};
 
 /** Trailing modifiers EQ appends: " (Critical)", " (Flurry)", " (Critical) (Lucky)". */
 const MODS = '((?: \\([^)]*\\))*)';
@@ -235,15 +244,20 @@ export const RULES = [
     // possessive. Without that strip the attacker reads as "Emalina's thorns", matches
     // no combatant, and several hundred points of real damage per fight are dropped.
     // Note the self form ends in "!" rather than ".".
+    //
+    // The VERB is the log stating the shield's element — "burned by" is fire, "frozen
+    // by" is cold — so it is captured and mapped, which is reading the line, not
+    // guessing. "pierced"/"struck" name no element and map to nothing.
     id: 'damage-shield',
-    re: /^(.+?) (?:is|are) (?:pierced|burned|frozen|struck|singed|shocked) by (.+?) for (\d+) points? of non-melee damage[.!]$/,
+    re: /^(.+?) (?:is|are) (pierced|burned|frozen|struck|singed|shocked) by (.+?) for (\d+) points? of non-melee damage[.!]$/,
     make: (m) => ({
       kind: 'damage',
       source: 'ds',
-      attacker: possessiveOwner(m[2]),
+      attacker: possessiveOwner(m[3]),
       target: m[1],
-      amount: Number(m[3]),
+      amount: Number(m[4]),
       ability: 'Damage Shield',
+      damageType: DS_VERB_TYPE[m[2]] ?? null,
       mods: [],
     }),
   },
@@ -348,6 +362,15 @@ export const RULES = [
     id: 'death-self-kill',
     re: /^You have slain (.+?)!$/,
     make: (m) => ({ kind: 'death', target: m[1], attacker: 'You' }),
+  },
+  {
+    // "You have been slain by a froglok king!" — second person, so the generic
+    // "has been slain" rule above can never match it. Classic EverQuest wording;
+    // collect-unknown.js will flag it if this server phrases the player's own death
+    // differently.
+    id: 'death-self',
+    re: /^You have been slain by (.+?)!$/,
+    make: (m) => ({ kind: 'death', target: 'You', attacker: m[1] }),
   },
   {
     id: 'death-plain',

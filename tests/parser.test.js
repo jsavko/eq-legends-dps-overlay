@@ -45,17 +45,19 @@ test('pet damage lands on the owner, not on a row of its own', () => {
   assert.equal(snap.rows[0].playerDamage, 40);
 });
 
-test('incoming damage opens the fight but is never scored', () => {
+test('incoming damage opens the fight and scores as taken, never as dealt', () => {
   const p = makeParser();
   p.feed(`${D(18, 48, 13)} A froglok shin knight hits Rhain for 58 points of damage.`);
   const opened = p.snapshot();
   assert.equal(opened.active, true);
-  assert.equal(opened.totalDamage, 0, 'damage taken is out of scope for v1');
+  assert.equal(opened.totalDamage, 0, 'incoming damage must never inflate outgoing DPS');
+  assert.equal(opened.totalDamageTaken, 58);
 
   p.feed(`${D(18, 48, 15)} Rhain smites a froglok shin knight for 11 points of damage.`);
   const snap = p.snapshot();
   assert.equal(snap.totalDamage, 11);
   assert.equal(snap.rows.length, 1);
+  assert.equal(snap.rows[0].damageTaken, 58);
 });
 
 test('a mob killing another mob never enters the parse', () => {
@@ -618,4 +620,124 @@ test('uncharmed mobs fighting each other are still ignored', () => {
   p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
   p.feed(`${D(19, 20, 4)} A tal ghoul wizard slashes a ghoul savant for 40 points of damage.`);
   assert.equal(p.snapshot().totalDamage, 100);
+});
+
+// ---------------------------------------------------------------- damage taken
+
+test('incoming melee on YOU lands on the self row, attacker article-stripped', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 13)} A froglok shin knight hits YOU for 30 points of damage.`);
+  p.feed(`${D(18, 48, 14)} a froglok shin knight hits YOU for 20 points of damage.`);
+
+  const row = p.snapshot().rows[0];
+  assert.equal(row.name, 'Rhale');
+  assert.equal(row.damageTaken, 50);
+  // "A froglok" and "a froglok" must collapse to ONE attacker entry.
+  assert.deepEqual(row.attackers, [{ name: 'froglok shin knight', damage: 50, hits: 2, max: 30 }]);
+  assert.equal(row.takenAbilities[0].name, 'Hit');
+});
+
+test('a beating taken by the pet folds into the owner, split out like pet damage', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 13)} A froglok shin knight hits Rhale\`s warder for 80 points of damage.`);
+  p.feed(`${D(18, 48, 14)} A froglok shin knight hits YOU for 30 points of damage.`);
+
+  const snap = p.snapshot();
+  assert.equal(snap.rows.length, 1, 'the warder must not get its own taken row');
+  assert.equal(snap.rows[0].damageTaken, 110);
+  assert.equal(snap.rows[0].petDamageTaken, 80);
+  assert.equal(snap.rows[0].playerDamageTaken, 30);
+});
+
+test('incoming DoT ticks and damage shields score as taken', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 13)} You have taken 29 damage from Searing Arrow by a ghoul savant.`);
+  p.feed(`${D(18, 48, 14)} YOU are pierced by a wan ghoul knight's thorns for 8 points of non-melee damage!`);
+
+  const row = p.snapshot().rows[0];
+  assert.equal(row.name, 'Rhale');
+  assert.equal(row.damageTaken, 37);
+  assert.deepEqual(row.takenAbilities.map((a) => [a.name, a.damage]), [
+    ['Searing Arrow', 29],
+    ['Damage Shield', 8],
+  ]);
+  assert.deepEqual(row.attackers.map((a) => a.name).sort(), ['ghoul savant', 'wan ghoul knight']);
+});
+
+test('incoming damage never inflates outgoing DPS, and mob-on-mob still scores nothing', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 13)} A froglok shin knight hits YOU for 30 points of damage.`);
+  p.feed(`${D(18, 48, 14)} A froglok shin knight cleaves a shriveled mummy for 20 points of damage.`);
+
+  const snap = p.snapshot();
+  assert.equal(snap.totalDamage, 0);
+  assert.equal(snap.totalDamageTaken, 30);
+  assert.equal(snap.rows.length, 1);
+  assert.equal(snap.rows[0].name, 'Rhale');
+});
+
+test('incoming avoids are defense credit on the victim row', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 13)} A froglok shin knight hits YOU for 30 points of damage.`);
+  p.feed(`${D(18, 48, 14)} A froglok shin knight tries to hit YOU, but YOU dodge!`);
+  p.feed(`${D(18, 48, 15)} A froglok shin knight tries to slash YOU, but YOU riposte!`);
+
+  const row = p.snapshot().rows[0];
+  assert.equal(row.avoidsTaken, 2);
+  assert.deepEqual(row.avoidedTaken, { dodge: 1, riposte: 1 });
+});
+
+test('your own death is recorded with its killer, and does not end the pull', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 13)} A froglok king hits YOU for 300 points of damage.`);
+  p.feed(`${D(18, 48, 14)} You have been slain by a froglok king!`);
+
+  const snap = p.snapshot();
+  assert.equal(snap.active, true, 'a player death must not close the encounter');
+  const row = snap.rows.find((r) => r.name === 'Rhale');
+  assert.equal(row.deaths, 1);
+  assert.deepEqual(snap.deaths.map((d) => [d.name, d.killer]), [['Rhale', 'froglok king']]);
+});
+
+test('the pet dying is petDeaths, never the owner\'s own death', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 13)} A froglok king hits Rhale\`s warder for 300 points of damage.`);
+  p.feed(`${D(18, 48, 14)} Rhale\`s warder has been slain by a froglok king!`);
+
+  const row = p.snapshot().rows[0];
+  assert.equal(row.name, 'Rhale');
+  assert.equal(row.deaths, 0);
+  assert.equal(row.petDeaths, 1);
+});
+
+test('another group member\'s death lands on their row', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 13)} A froglok king hits Rhain for 300 points of damage.`);
+  p.feed(`${D(18, 48, 14)} Rhain has been slain by a froglok king!`);
+
+  const row = p.snapshot().rows.find((r) => r.name === 'Rhain');
+  assert.equal(row.deaths, 1);
+});
+
+test('an NPC death still ends the pull after the grace period (regression)', () => {
+  // The death handler grew a friendly branch; the NPC path must be unchanged.
+  const p = makeParser({ postKillGraceMs: 3000 });
+  p.feed(`${D(18, 48, 13)} You crush a froglok shin knight for 40 points of damage.`);
+  p.feed(`${D(18, 48, 15)} A froglok shin knight has been slain by Rhale!`);
+  p.feed(`${D(18, 48, 25)} You have entered The Ruins of Old Guk 2 (Adaptive).`);
+  assert.equal(p.snapshot().active, false);
+});
+
+test('taken damage buckets by stated type, with the ability carrying its element', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 13)} A froglok shin knight hits YOU for 30 points of damage.`);
+  p.feed(`${D(18, 48, 14)} A ghoul savant hit YOU for 100 points of fire damage by Inferno.`);
+  p.feed(`${D(18, 48, 15)} You have taken 29 damage from Searing Arrow by a ghoul savant.`);
+
+  const row = p.snapshot().rows[0];
+  // Melee is armor's problem, the fire hit names its resist, the DoT line names
+  // nothing and must not be guessed at.
+  assert.deepEqual(row.takenByType, { melee: 30, fire: 100, untyped: 29 });
+  assert.equal(row.takenAbilities.find((a) => a.name === 'Inferno').type, 'fire');
+  assert.equal(row.takenAbilities.find((a) => a.name === 'Searing Arrow').type, null);
 });

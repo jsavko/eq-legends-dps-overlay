@@ -54,6 +54,35 @@ function newCombatant(name) {
     /** @type {Map<number, number>} epoch-second -> healing, for rolling HPS */
     healWindow: new Map(),
 
+    // Damage taken — the mirror of the outgoing structures above, keyed the same way:
+    // the victim is the row, and a pet's beating folds into its owner exactly as its
+    // damage does. Answering "what is killing me" needs both axes of the same events,
+    // so byAttacker records WHO and takenByAbility records WITH WHAT.
+    damageTaken: 0,
+    petDamageTaken: 0,
+    hitsTaken: 0,
+    maxHitTaken: 0,
+    /** Deaths of the member themself; a pet dying is petDeaths, never the owner's. */
+    deaths: 0,
+    petDeaths: 0,
+    /** Total incoming swings this member avoided (dodge, parry, riposte, ...). */
+    avoidsTaken: 0,
+    /** @type {Object<string, number>} avoidance kind -> count */
+    avoidedTaken: {},
+    /** @type {Map<string, {damage:number, hits:number, max:number}>} who hit them */
+    byAttacker: new Map(),
+    /** @type {Map<string, {damage:number, hits:number, max:number, type:string|null}>} what hit them */
+    takenByAbility: new Map(),
+    /**
+     * Damage taken per stated type — 'melee', 'fire', 'cold', ... or 'untyped' when
+     * the log names none (DoT ticks). This is what tells the player which RESIST
+     * would have helped; a type is only ever what the line itself said.
+     * @type {Object<string, number>}
+     */
+    takenByType: {},
+    /** @type {Map<number, number>} epoch-second -> damage taken, for rolling DTPS */
+    takenWindow: new Map(),
+
     firstTs: null,
     lastTs: null,
   };
@@ -82,6 +111,14 @@ export class Encounter {
     this.allSlainAt = null;
     this.totalDamage = 0;
     this.totalHealing = 0;
+    this.totalDamageTaken = 0;
+    /**
+     * Every friendly death in the fight, in order, with who landed the kill. The
+     * per-combatant counter answers "how many times"; this answers "when and to what",
+     * which is what a post-raid review actually wants to know.
+     * @type {Array<{name:string, killer:string|null, ts:number, isPet:boolean}>}
+     */
+    this.deaths = [];
   }
 
   combatant(name) {
@@ -199,6 +236,86 @@ export class Encounter {
     ab.misses = (ab.misses ?? 0) + 1;
   }
 
+  /**
+   * Credit incoming damage to the friendly who took it.
+   *
+   * Incoming damage keeps the encounter alive exactly as outgoing does: a tank being
+   * pounded while the group meds is still a live fight, and closing it under them
+   * would split one pull into two.
+   *
+   * @param {Object} hit
+   * @param {string} hit.name     canonical victim (a pet's owner, already resolved)
+   * @param {string} hit.attacker canonical attacker, article-stripped
+   * @param {number} hit.amount
+   * @param {number} hit.ts
+   * @param {string} hit.ability
+   * @param {boolean} hit.isPet   true when it was this member's pet that was hit
+   * @param {string|null} [hit.type] stated damage type ('fire', 'melee', ...), or null
+   */
+  addDamageTaken({ name, attacker, amount, ts, ability, isPet, type }) {
+    const c = this.combatant(name);
+
+    c.damageTaken += amount;
+    if (isPet) c.petDamageTaken += amount;
+    c.hitsTaken += 1;
+    if (amount > c.maxHitTaken) c.maxHitTaken = amount;
+
+    const typeKey = type ?? 'untyped';
+    c.takenByType[typeKey] = (c.takenByType[typeKey] ?? 0) + amount;
+
+    let atk = c.byAttacker.get(attacker);
+    if (!atk) {
+      atk = { damage: 0, hits: 0, max: 0 };
+      c.byAttacker.set(attacker, atk);
+    }
+    atk.damage += amount;
+    atk.hits += 1;
+    if (amount > atk.max) atk.max = amount;
+
+    let ab = c.takenByAbility.get(ability);
+    if (!ab) {
+      ab = { damage: 0, hits: 0, max: 0, type: null };
+      c.takenByAbility.set(ability, ab);
+    }
+    ab.damage += amount;
+    ab.hits += 1;
+    if (amount > ab.max) ab.max = amount;
+    if (type) ab.type = type;   // an ability's type is fixed; any stated one is THE one
+
+    const second = Math.floor(ts / SECOND);
+    c.takenWindow.set(second, (c.takenWindow.get(second) ?? 0) + amount);
+
+    if (c.firstTs === null) c.firstTs = ts;
+    c.lastTs = ts;
+
+    this.totalDamageTaken += amount;
+    this.lastDamageTs = Math.max(this.lastDamageTs, ts);
+    this.allSlainAt = null;   // a mob still swinging means the pull is not over
+  }
+
+  /** An incoming swing this member avoided. Lowers nothing; it is pure defense credit. */
+  addAvoidTaken({ name, avoidance, ts }) {
+    const c = this.combatant(name);
+    c.avoidsTaken += 1;
+    c.avoidedTaken[avoidance] = (c.avoidedTaken[avoidance] ?? 0) + 1;
+    if (c.firstTs === null) c.firstTs = ts;
+    c.lastTs = ts;
+  }
+
+  /**
+   * A friendly died. Recorded on their row AND in the encounter-wide list — the row
+   * answers "how many times", the list "when and to what". A pet's death never counts
+   * as its owner's: "you died twice" must mean the player hit the floor twice.
+   */
+  recordDeath({ name, killer, ts, isPet }) {
+    const c = this.combatant(name);
+    if (isPet) c.petDeaths += 1;
+    else c.deaths += 1;
+    if (c.firstTs === null) c.firstTs = ts;
+    c.lastTs = ts;
+    this.deaths.push({ name, killer: killer ?? null, ts, isPet: Boolean(isPet) });
+  }
+
   /** Note that an NPC is part of this fight, for the encounter label and end detection. */
   engage(npcName, damage = 0) {
     this.engagedNpcs.set(npcName, (this.engagedNpcs.get(npcName) ?? 0) + damage);
@@ -295,13 +412,19 @@ export class Encounter {
     const rows = [];
     let shownDamage = 0;
     let shownHealing = 0;
+    let shownTaken = 0;
 
     for (const c of this.combatants.values()) {
       if (includeNames && !includeNames(c.name)) continue;
       // `heals`, not `healing`: a healer whose every point was overheal has healing 0
       // but is precisely the case worth showing — dropping the row would hide the
-      // problem instead of reporting it.
-      if (c.damage === 0 && c.hits === 0 && c.misses === 0 && c.heals === 0) continue;
+      // problem instead of reporting it. Same logic on the taken side: a member who
+      // only got hit (or only died) never swung, and is exactly who the damage-taken
+      // view exists for.
+      if (
+        c.damage === 0 && c.hits === 0 && c.misses === 0 && c.heals === 0 &&
+        c.hitsTaken === 0 && c.avoidsTaken === 0 && c.deaths === 0 && c.petDeaths === 0
+      ) continue;
 
       const swings = c.hits + c.misses;
 
@@ -355,19 +478,42 @@ export class Encounter {
         healTargets: [...c.healTargets.entries()]
           .map(([name, healing]) => ({ name, healing }))
           .sort((a, b) => b.healing - a.healing),
+
+        damageTaken: c.damageTaken,
+        petDamageTaken: c.petDamageTaken,
+        playerDamageTaken: c.damageTaken - c.petDamageTaken,
+        dtps: c.damageTaken / durationSec,
+        rollingDtps: this.rollingTotal(c.takenWindow, t) / rollingSec,
+        hitsTaken: c.hitsTaken,
+        maxHitTaken: c.maxHitTaken,
+        deaths: c.deaths,
+        petDeaths: c.petDeaths,
+        avoidsTaken: c.avoidsTaken,
+        avoidedTaken: { ...c.avoidedTaken },
+        takenByType: { ...c.takenByType },
+        attackers: [...c.byAttacker.entries()]
+          .map(([name, a]) => ({ name, damage: a.damage, hits: a.hits, max: a.max }))
+          .sort((a, b) => b.damage - a.damage),
+        takenAbilities: [...c.takenByAbility.entries()]
+          .map(([name, a]) => ({ name, damage: a.damage, hits: a.hits, max: a.max, type: a.type }))
+          .sort((a, b) => b.damage - a.damage),
       });
 
       shownDamage += c.damage;
       shownHealing += c.healing;
+      shownTaken += c.damageTaken;
     }
 
-    // Both shares are precomputed so the overlay can flip between damage and healing
-    // without a round trip to the parser.
+    // All three shares are precomputed so the overlay can flip between damage,
+    // healing and taken without a round trip to the parser.
     rows.sort((a, b) => b.damage - a.damage);
     for (const r of rows) {
       r.share = shownDamage > 0 ? r.damage / shownDamage : 0;
       r.healShare = shownHealing > 0 ? r.healing / shownHealing : 0;
+      r.takenShare = shownTaken > 0 ? r.damageTaken / shownTaken : 0;
     }
+
+    const shownNames = new Set(rows.map((r) => r.name));
 
     return {
       active: !this.closed,
@@ -379,6 +525,10 @@ export class Encounter {
       groupDps: shownDamage / durationSec,
       totalHealing: shownHealing,
       groupHps: shownHealing / durationSec,
+      totalDamageTaken: shownTaken,
+      groupDtps: shownTaken / durationSec,
+      // Filtered the same way as the rows, so a group-only view never names outsiders.
+      deaths: this.deaths.filter((d) => shownNames.has(d.name)),
       rows,
     };
   }

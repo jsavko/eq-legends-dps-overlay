@@ -48,6 +48,11 @@ export class LogParser {
    * @param {boolean} [options.groupOnly]   restrict rows to confirmed group members
    * @param {number} [options.timeoutMs]    encounter idle timeout
    * @param {() => number} [options.clock]  time source; replay overrides this
+   * @param {(enc: Encounter) => void} [options.onEncounterEnd]
+   *   Called with each encounter as it CLOSES (timeout, kill, zone) — the hook main
+   *   uses to persist history. Deliberately not called by reset(): a manual reset is
+   *   the player saying "this one doesn't count". The parser stays pure Node; whatever
+   *   the callback does with the encounter is the caller's business.
    */
   constructor(options = {}) {
     const fromFile = options.logFilename ? parseLogFilename(options.logFilename) : null;
@@ -62,6 +67,7 @@ export class LogParser {
       rollingWindowMs: options.rollingWindowMs ?? DEFAULTS.rollingWindowMs,
     };
 
+    this.onEncounterEnd = options.onEncounterEnd ?? null;
     this.roster = new Roster(this.selfName);
     this.roster.setPetOwners(options.petOwners);
     /** @type {Encounter|null} */
@@ -272,12 +278,25 @@ export class LogParser {
     }
 
     if (targetFriendly) {
-      // An NPC hitting us still means a fight is on, so the encounter opens and its
-      // clock runs — but incoming damage is not scored (damage-taken is out of scope).
+      // An NPC hitting us means a fight is on — and the incoming side is scored too:
+      // the victim's row records who hit them and with what, which is the entire
+      // "what is killing me" view. addDamageTaken also keeps the encounter clock
+      // running, exactly as outgoing damage does.
       const enc = this.ensureEncounter(event.ts);
       enc.engage(attacker.name, 0);
-      enc.lastDamageTs = Math.max(enc.lastDamageTs, event.ts);
-      enc.allSlainAt = null;
+      enc.addDamageTaken({
+        name: target.name,
+        // The resolved name, not the raw one, so "A froglok" and "a froglok" collapse
+        // to one attacker entry — and an enemy pet reads as the pet, not its owner.
+        attacker: attacker.isPet ? attacker.display : attacker.name,
+        amount: event.amount,
+        ts: event.ts,
+        ability: event.ability,
+        isPet: target.isPet,
+        // Melee is typed as such (armor mitigates it); spells carry the element the
+        // line stated; anything else is honestly untyped, never guessed.
+        type: event.source === 'melee' ? 'melee' : event.damageType ?? null,
+      });
       this.revision++;
     }
   }
@@ -341,19 +360,35 @@ export class LogParser {
   handleMiss(event) {
     const attacker = this.resolve(event.attacker);
     const target = this.resolve(event.target);
-    if (!this.isFriendly(attacker.name) || this.isFriendly(target.name)) return;
+    const attackerFriendly = this.isFriendly(attacker.name);
+    const targetFriendly = this.isFriendly(target.name);
 
     // A miss alone does not start a fight — otherwise a stray swing at a passing mob
     // opens an encounter with 0 damage and an ever-growing duration.
     if (!this.current || this.current.closed) return;
 
-    this.current.addMiss({
-      name: attacker.name,
-      ts: event.ts,
-      isPet: attacker.isPet,
-      ability: event.ability,
-    });
-    this.revision++;
+    if (attackerFriendly && !targetFriendly) {
+      this.current.addMiss({
+        name: attacker.name,
+        ts: event.ts,
+        isPet: attacker.isPet,
+        ability: event.ability,
+      });
+      this.revision++;
+      return;
+    }
+
+    // The other direction — a mob swinging at a friendly who avoided it — is defense
+    // credit for the taken view: dodges and ripostes are why the damage-taken number
+    // is as low as it is, and hiding them would make a good tank look merely lucky.
+    if (!attackerFriendly && targetFriendly) {
+      this.current.addAvoidTaken({
+        name: target.name,
+        avoidance: event.avoidance ?? 'miss',
+        ts: event.ts,
+      });
+      this.revision++;
+    }
   }
 
   /**
@@ -449,7 +484,19 @@ export class LogParser {
 
     if (!this.current || this.current.closed) return;
     const target = this.resolve(event.target);
-    if (this.isFriendly(target.name)) return;   // a player dying does not end the pull
+    if (this.isFriendly(target.name)) {
+      // A player dying does not end the pull — but it is the single most important
+      // fact in the damage-taken view, so it is recorded before the early return.
+      // A pet's death is marked as such and never counts as its owner's.
+      this.current.recordDeath({
+        name: target.name,
+        killer: event.attacker ? this.resolve(event.attacker).name : null,
+        ts: event.ts,
+        isPet: target.isPet,
+      });
+      this.revision++;
+      return;
+    }
     this.current.npcDied(target.name, event.ts);
     this.revision++;
   }
@@ -470,6 +517,7 @@ export class LogParser {
     this.current.close(reason, ts ?? this.current.lastDamageTs);
     this.last = this.current;
     this.current = null;
+    this.onEncounterEnd?.(this.last);
   }
 
   /**
@@ -482,6 +530,7 @@ export class LogParser {
       this.last = this.current;
       this.current = null;
       this.revision++;
+      this.onEncounterEnd?.(this.last);
     }
   }
 
