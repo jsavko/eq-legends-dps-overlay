@@ -11,10 +11,6 @@
   <header>
     <h1 id="title">Set up the DPS overlay</h1>
     <p id="subtitle">Choose the EverQuest Legends log file to follow.</p>
-    <nav id="tabs">
-      <button class="tab" data-tab="settings" aria-selected="true">Settings</button>
-      <button class="tab" data-tab="history" aria-selected="false">History</button>
-    </nav>
   </header>
 
   <main>
@@ -117,20 +113,6 @@
         Electron accelerator syntax, e.g. <code>Control+Shift+L</code>.
         A binding another program already owns will be reported in the overlay.
       </p>
-    </section>
-
-    <!-- Encounter history. A separate tab because it is a reading surface, not a
-         form — and it lives HERE rather than in the overlay because the overlay can
-         never scroll, while a fight list is nothing but scrolling. -->
-    <section id="history-section" hidden>
-      <div class="row">
-        <label for="h-char">Character</label>
-        <select id="h-char"></select>
-        <input id="h-filter" type="text" placeholder="filter by boss or zone…" spellcheck="false" />
-        <button id="h-clear" class="danger">Clear…</button>
-      </div>
-      <p id="h-status" class="status"></p>
-      <ol id="h-list" class="fight-list"></ol>
     </section>
   </main>
 

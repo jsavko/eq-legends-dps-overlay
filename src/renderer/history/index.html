@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>Encounter History</title>
+  <link rel="stylesheet" href="history.css" />
+</head>
+<body>
+  <!-- Three fixed panes. Every click swaps CONTENT inside a pane; no pane ever
+       resizes, expands, or pushes another around — that reflow is exactly what the
+       old accordion tab did and why it was replaced. -->
+  <header id="titlebar">
+    <h1>Encounter History</h1>
+    <select id="char"></select>
+    <span class="spacer"></span>
+    <button id="clear" class="danger">Clear history…</button>
+  </header>
+
+  <aside id="rail">
+    <input id="search" type="text" placeholder="boss or zone…" spellcheck="false" />
+    <nav id="chips">
+      <button class="chip" data-chip="all" aria-selected="true">All</button>
+      <button class="chip" data-chip="bosses" aria-selected="false">Bosses</button>
+      <button class="chip" data-chip="deaths" aria-selected="false">Deaths</button>
+      <button class="chip" data-chip="today" aria-selected="false">Today</button>
+    </nav>
+    <ol id="fights"></ol>
+    <footer id="rail-foot"></footer>
+  </aside>
+
+  <main id="fight">
+    <div id="fight-empty" class="pane-empty" hidden></div>
+    <div id="fight-body" hidden>
+      <div id="fight-head">
+        <h2 id="f-name"></h2>
+        <p id="f-meta"></p>
+        <!-- Always in flow, even with nothing to report: a line that appears only on
+             death fights would shift every pane below it as you move down the rail. -->
+        <p id="f-deaths"></p>
+      </div>
+
+      <div id="stats">
+        <div class="stat"><span class="s-label">Dealt</span><b id="s-dealt"></b><span class="s-unit" id="s-dealt-u"></span></div>
+        <div class="stat balm"><span class="s-label">Healed</span><b id="s-healed"></b><span class="s-unit" id="s-healed-u"></span></div>
+        <div class="stat wound"><span class="s-label">Taken</span><b id="s-taken"></b><span class="s-unit" id="s-taken-u"></span></div>
+        <div class="stat bad"><span class="s-label">Deaths</span><b id="s-deaths"></b><span class="s-unit" id="s-deaths-u"></span></div>
+      </div>
+
+      <nav id="metrics">
+        <button class="seg" data-metric="damage" aria-selected="true">Damage</button>
+        <button class="seg" data-metric="healing" aria-selected="false">Healing</button>
+        <button class="seg" data-metric="taken" aria-selected="false">Damage taken</button>
+      </nav>
+
+      <div id="panes">
+        <section id="members">
+          <div class="col-head"><span>Member</span><span class="num" id="m-cols"></span></div>
+          <ol id="member-list"></ol>
+        </section>
+        <section id="breakdown"></section>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="history.js"></script>
+</body>
+</html>

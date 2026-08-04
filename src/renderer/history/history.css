@@ -1,0 +1,484 @@
+/*
+ * The history window wears the OVERLAY's warm palette, not the settings window's cool
+ * slate: this is a reading surface for combat, and it should read as the overlay's
+ * record book — parchment ink on smoked brown-black — rather than as another form.
+ *
+ * Layout is three fixed panes (rail / members / breakdown) on one grid. Every
+ * interaction swaps content INSIDE a pane; nothing here may resize, expand, or push a
+ * neighbor — the reflow-on-every-click accordion is the failure this window replaces.
+ * Panes scroll internally, which is fine in a normal window: only the OVERLAY may
+ * never scroll, because only the overlay is click-through.
+ */
+
+:root {
+  --bg:        #100d0a;
+  --panel:     #17130f;
+  --panel-2:   #221b14;
+  --line:      #2e2620;
+
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+
+  --ember:     #b9702a;
+  --gold:      #e0a53f;   /* resist tags and the selection accent */
+  --balm:      #63c2b4;   /* healing */
+  --wound:     #9e3b2e;   /* damage taken */
+  --wound-lit: #d0685a;
+  --bad:       #e5766b;   /* deaths */
+
+  /* The active metric's color, swapped by body[data-metric] below. Bars, selection
+     tints and the active segment all follow this one variable. */
+  --metric:     var(--ember);
+  --metric-lit: var(--gold);
+}
+body[data-metric="healing"] { --metric: var(--balm); --metric-lit: var(--balm); }
+body[data-metric="taken"]   { --metric: var(--wound); --metric-lit: var(--wound-lit); }
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 300px 1fr;
+  grid-template-areas:
+    "titlebar titlebar"
+    "rail     fight";
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow: hidden;
+  user-select: none;
+}
+
+.num, .tabular { font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- titlebar */
+
+#titlebar {
+  grid-area: titlebar;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+#titlebar h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+#titlebar .spacer { flex: 1; }
+
+select#char {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 5px 8px;
+  font: inherit;
+}
+select#char:focus { outline: none; border-color: var(--ember); }
+
+button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 5px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { border-color: var(--ember); }
+button.danger { color: var(--ink-dim); }
+button.danger:hover { border-color: var(--bad); color: var(--bad); }
+
+/* -------------------------------------------------------------------- rail */
+
+#rail {
+  grid-area: rail;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 10px;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  min-height: 0;   /* lets the fight list scroll instead of stretching the grid row */
+}
+
+#search {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 6px 9px;
+  font: inherit;
+}
+#search::placeholder { color: var(--ink-faint); }
+#search:focus { outline: none; border-color: var(--ember); }
+
+#chips { display: flex; gap: 5px; }
+.chip {
+  flex: 1;
+  padding: 3px 0;
+  font-size: 12px;
+  color: var(--ink-dim);
+  border-radius: 3px;
+}
+.chip[aria-selected="true"] {
+  background: color-mix(in srgb, var(--ember) 22%, transparent);
+  border-color: var(--ember);
+  color: var(--ink);
+}
+
+#fights {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+#fights::-webkit-scrollbar { width: 6px; }
+#fights::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+
+#fights .day {
+  padding: 10px 8px 4px;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+}
+
+#fights .fight-row {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#fights .fight-row:hover { background: var(--panel-2); }
+#fights .fight-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--ember) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--gold);
+}
+
+.fight-row .r-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.fight-row .r-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+/* Trash reads dimmer than bosses, so a raid night's kills stand out of the grind. */
+.fight-row[data-trash="true"] .r-name { color: var(--ink-dim); font-weight: 400; }
+.fight-row .r-len { color: var(--ink-dim); font-size: 12px; }
+
+.fight-row .r-sub {
+  display: flex;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fight-row .r-deaths { color: var(--bad); }
+
+#rail-foot {
+  padding: 6px 4px 0;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+/* -------------------------------------------------------------- fight pane */
+
+#fight {
+  grid-area: fight;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+}
+.pane-empty {
+  place-self: center;
+  color: var(--ink-faint);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+#fight-body {
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 14px;
+  padding: 18px 20px;
+  min-height: 0;
+  min-width: 0;
+}
+#fight-body[hidden], #fight-empty[hidden] { display: none; }
+
+/* Name and meta hold to one line each (the full label also lives in the rail row), so
+   the header's height — and every pane below it — is the same for every fight. */
+#fight-head h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#f-meta {
+  margin: 3px 0 0;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#f-deaths { margin: 5px 0 0; color: var(--bad); font-size: 12.5px; }
+#f-deaths[data-none="true"] { color: var(--ink-faint); }
+
+/* --------------------------------------------------------------- stat strip */
+
+#stats {
+  display: flex;
+  gap: 12px;
+}
+.stat {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.stat .s-label {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.stat b {
+  font-size: 19px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.stat .s-unit { margin-left: 6px; font-size: 11.5px; color: var(--ink-dim); }
+.stat.balm b  { color: var(--balm); }
+.stat.wound b { color: var(--wound-lit); }
+.stat.bad b   { color: var(--bad); }
+
+/* ----------------------------------------------------------- metric segments */
+
+#metrics {
+  display: flex;
+  gap: 6px;
+}
+.seg {
+  padding: 4px 14px;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+}
+/* The active segment is FILLED with its metric's color, so which lens you are
+   looking through is never a squint. */
+.seg[aria-selected="true"] {
+  background: var(--metric);
+  border-color: var(--metric);
+  color: #14100c;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------- members + breakdown */
+
+#panes {
+  display: grid;
+  grid-template-columns: 290px 1fr;
+  gap: 14px;
+  min-height: 0;
+  min-width: 0;
+}
+
+#members {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 0;
+}
+
+.col-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+#member-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;   /* raids outgrow the pane; the pane, not the window, absorbs it */
+  min-height: 0;
+}
+#member-list::-webkit-scrollbar { width: 6px; }
+#member-list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+
+#member-list li {
+  padding: 6px 8px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#member-list li:hover { background: var(--panel-2); }
+#member-list li[aria-selected="true"] {
+  background: color-mix(in srgb, var(--metric) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--metric-lit);
+}
+
+#member-list .m-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+#member-list .m-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#member-list .m-skull { color: var(--bad); }
+#member-list .m-value { font-variant-numeric: tabular-nums; }
+#member-list .m-share { flex: 0 0 3em; text-align: right; color: var(--ink-dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+#member-list .m-bar {
+  margin-top: 4px;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+#member-list .m-bar span {
+  display: block;
+  height: 100%;
+  background: var(--metric);
+}
+
+/* -------------------------------------------------------------- breakdown */
+
+#breakdown {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  min-height: 0;
+  min-width: 0;
+}
+#breakdown::-webkit-scrollbar { width: 6px; }
+#breakdown::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+
+#breakdown .b-head {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+#breakdown .b-head b { color: var(--ink); font-weight: 600; }
+
+#breakdown h3 {
+  margin: 14px 0 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+#breakdown h3:first-of-type { margin-top: 0; }
+
+/*
+ * One grid per table, the background bar behind the name cell — the overlay's "the
+ * row is the bar" idea, normalized to the section's largest entry so the list ranks
+ * at a glance. Column tracks are sized once to the widest cell, so numbers align
+ * down the column instead of drifting per-row.
+ */
+.b-table {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  column-gap: 12px;
+  row-gap: 1px;
+  font-size: 12.5px;
+}
+.b-table li {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  position: relative;
+  padding: 2px 6px;
+}
+.b-table li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--w, 0%);
+  background: color-mix(in srgb, var(--metric) 22%, transparent);
+  border-radius: 2px;
+}
+.b-table li > * { position: relative; }
+.b-table .c-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.b-table .c-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.b-table .c-dim { color: var(--ink-dim); }
+.b-table li.cols {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.b-table li.cols::before { display: none; }
+
+.resist { color: var(--gold); font-weight: 600; }
+.pet-tag { color: var(--ink-dim); font-style: italic; }
+
+/* "fire 13,011 FR" chips under the taken tables. */
+.b-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 7px;
+  font-size: 12px;
+}
+.b-chips li {
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 8px;
+}
+.b-chips b { color: var(--ink); font-weight: 500; }
+
+.b-empty { color: var(--ink-faint); font-size: 12.5px; }

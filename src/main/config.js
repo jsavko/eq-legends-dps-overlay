@@ -58,6 +58,8 @@ export const DEFAULTS = {
   locked: true,
   /** Overlay window position and size; null until the user moves it. */
   bounds: null,
+  /** History window position and size; null until the user moves or resizes it. */
+  historyBounds: null,
 
   hotkeys: {
     toggleLock: 'Control+Shift+L',

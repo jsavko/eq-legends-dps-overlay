@@ -28,6 +28,7 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 
 /** @type {BrowserWindow|null} */ let overlayWindow = null;
 /** @type {BrowserWindow|null} */ let setupWindow = null;
+/** @type {BrowserWindow|null} */ let historyWindow = null;
 /** @type {LogParser|null} */    let parser = null;
 /** @type {Tailer|null} */       let tailer = null;
 /** @type {ConfigStore|null} */  let config = null;
@@ -38,6 +39,7 @@ let pushTimer = null;
 let lastRevision = -1;
 let overlayVisible = true;
 let saveBoundsTimer = null;
+let saveHistoryBoundsTimer = null;
 let hoverTimer = null;
 /**
  * Where the player put the window. Auto-fit reads these and never writes them.
@@ -363,20 +365,17 @@ function refreshTrayMenu() {
       click: () => { parser?.reset(); toast('Encounter reset'); },
     },
     { type: 'separator' },
-    // History is a tab inside the settings window, but it earns its own menu item:
-    // "show me past fights" is a destination people look for by name, not a setting.
-    { label: 'History…', click: () => createSetup('settings', 'history') },
+    // "Show me past fights" is a destination people look for by name, so it gets its
+    // own window and its own menu item rather than hiding inside settings.
+    { label: 'History…', click: createHistory },
     { label: 'Settings…', click: () => createSetup('settings') },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));
 }
 
-/**
- * @param {'setup'|'settings'} mode
- * @param {'history'|''} [tab] tab to open on; the renderer reads it from argv
- */
-function createSetup(mode, tab = '') {
+/** @param {'setup'|'settings'} mode */
+function createSetup(mode) {
   if (setupWindow && !setupWindow.isDestroyed()) {
     setupWindow.focus();
     return;
@@ -392,7 +391,7 @@ function createSetup(mode, tab = '') {
       preload: path.join(RENDERER, 'setup', 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      additionalArguments: [`--overlay-mode=${mode}`, `--overlay-tab=${tab}`],
+      additionalArguments: [`--overlay-mode=${mode}`],
     },
   });
 
@@ -403,6 +402,50 @@ function createSetup(mode, tab = '') {
     // Closing the first-run screen without choosing a log leaves nothing to run.
     if (!config.isConfigured() && !overlayWindow) app.quit();
   });
+}
+
+/**
+ * The encounter history browser: a dedicated window, because it is a reading surface
+ * with three fixed panes and its own footprint — an 860×660 settings form can hold
+ * neither. Sized and placed by the player, remembered across launches.
+ */
+function createHistory() {
+  if (historyWindow && !historyWindow.isDestroyed()) {
+    historyWindow.focus();
+    return;
+  }
+
+  historyWindow = new BrowserWindow({
+    width: 1200,
+    height: 780,
+    ...(config.get('historyBounds') ?? {}),
+    minWidth: 900,
+    minHeight: 540,
+    title: 'EQL DPS Overlay — Encounter History',
+    backgroundColor: '#100d0a',
+    icon: path.join(ASSETS, 'icon-256.png'),
+    webPreferences: {
+      preload: path.join(RENDERER, 'history', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  historyWindow.setMenuBarVisibility(false);
+  historyWindow.loadFile(path.join(RENDERER, 'history', 'index.html'));
+
+  // The overlay's debounced remember, minus its resting/fitted split: nothing ever
+  // auto-fits this window, so its current bounds are always the player's own.
+  const remember = () => {
+    clearTimeout(saveHistoryBoundsTimer);
+    saveHistoryBoundsTimer = setTimeout(() => {
+      if (!historyWindow || historyWindow.isDestroyed()) return;
+      config.set({ historyBounds: historyWindow.getBounds() });
+    }, 400);
+  };
+  historyWindow.on('moved', remember);
+  historyWindow.on('resized', remember);
+  historyWindow.on('closed', () => { historyWindow = null; });
 }
 
 // ---------------------------------------------------------------------------
@@ -668,7 +711,7 @@ function registerIpc() {
   ipcMain.handle(CHANNELS.OPEN_SETTINGS, () => createSetup('settings'));
 
   /**
-   * History, for the settings window. The default key is whoever is being followed
+   * History, for the history window. The default key is whoever is being followed
    * right now, but every character with a file on disk is offered — reviewing last
    * night's raid on an alt while logged into the main is a real case.
    */
