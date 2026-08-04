@@ -363,14 +363,20 @@ function refreshTrayMenu() {
       click: () => { parser?.reset(); toast('Encounter reset'); },
     },
     { type: 'separator' },
+    // History is a tab inside the settings window, but it earns its own menu item:
+    // "show me past fights" is a destination people look for by name, not a setting.
+    { label: 'History…', click: () => createSetup('settings', 'history') },
     { label: 'Settings…', click: () => createSetup('settings') },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));
 }
 
-/** @param {'setup'|'settings'} mode */
-function createSetup(mode) {
+/**
+ * @param {'setup'|'settings'} mode
+ * @param {'history'|''} [tab] tab to open on; the renderer reads it from argv
+ */
+function createSetup(mode, tab = '') {
   if (setupWindow && !setupWindow.isDestroyed()) {
     setupWindow.focus();
     return;
@@ -386,7 +392,7 @@ function createSetup(mode) {
       preload: path.join(RENDERER, 'setup', 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      additionalArguments: [`--overlay-mode=${mode}`],
+      additionalArguments: [`--overlay-mode=${mode}`, `--overlay-tab=${tab}`],
     },
   });
 
@@ -629,6 +635,23 @@ function registerIpc() {
         mtimeMs: st.mtimeMs,
         size: st.size,
       };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  /**
+   * Empty the followed eqlog on disk. Safe while the game runs — EQ appends per
+   * line, and truncation is the classic way players manage these files — and safe
+   * for the overlay: the tailer notices the shrink, emits 'reset', and the parser
+   * starts clean. Encounter history is untouched; persisting fights is exactly what
+   * makes clearing the raw log a loss of nothing.
+   */
+  ipcMain.handle(CHANNELS.LOGS_CLEAR, async () => {
+    if (!tailer?.filePath) return { ok: false, error: 'no log is being followed' };
+    try {
+      await fs.promises.truncate(tailer.filePath, 0);
+      return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
     }

@@ -88,6 +88,16 @@ function wireEvents() {
 
   $('dir').addEventListener('change', () => loadDirectory($('dir').value));
 
+  $('clear-log').addEventListener('click', async () => {
+    if (!window.confirm(
+      'Empty the followed log file on disk?\n\n' +
+      'EverQuest keeps logging into the empty file, and recorded fight history is ' +
+      'not touched — but the raw log text itself is gone for good.'
+    )) return;
+    const r = await window.api.clearLog();
+    setStatus($('validation'), r.ok ? 'Log file cleared.' : `Could not clear — ${r.error}`, r.ok ? 'ok' : 'bad');
+  });
+
   $('save').addEventListener('click', save);
 }
 
@@ -288,6 +298,11 @@ function wireTabs() {
     state.history.openId = null;
     loadHistory($('h-char').value);
   });
+  // Opened from the tray's History… item — land directly on the tab.
+  if (window.api.initialTab === 'history') {
+    document.querySelector('#tabs .tab[data-tab="history"]').click();
+  }
+
   $('h-filter').addEventListener('input', renderHistory);
   $('h-clear').addEventListener('click', async () => {
     const label = $('h-char').selectedOptions[0]?.textContent ?? 'this character';

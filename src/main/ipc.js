@@ -22,6 +22,8 @@ export const CHANNELS = {
   LOGS_LIST: 'logs:list',
   LOGS_PICK: 'logs:pick',
   LOGS_VALIDATE: 'logs:validate',
+  /** Truncate the followed eqlog to zero bytes; the tailer's reset path handles the rest. */
+  LOGS_CLEAR: 'logs:clear',
   SETUP_COMPLETE: 'setup:complete',
   OPEN_SETTINGS: 'window:open-settings',
   /** Encounter history (settings window): list index, fetch one record, wipe a file. */
