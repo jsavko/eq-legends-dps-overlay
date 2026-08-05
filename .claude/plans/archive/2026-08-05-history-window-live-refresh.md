@@ -115,12 +115,11 @@ the follow-to-newest case needs code.
       sticky-top follow when on the newest fight; rail-only growth when parked on an
       older fight; no change at all on a foreign-character append.
 - [x] `docs/changelog/2026-08-05-history-window-live-refresh.md` per conventions.
-- [ ] Bump `package.json` version (own commit) and `scripts/dev.sh dist` — the user
+- [x] Bump `package.json` version (own commit) and `scripts/dev.sh dist` — the user
       launches the `win-unpacked` exe, which does not update on sync.
-      *Bump done (0.3.1). Dist DEFERRED: the overlay was running and the log actively
-      growing at execution time (user in-game); the build fails on the running exe's
-      locked files and killing the overlay mid-session was not acceptable. Run
-      `scripts/dev.sh dist` after quitting the overlay, then tick this.*
+      *Bump done (0.3.1). Dist was briefly deferred because the user was in-game, then
+      shipped the same morning on their standing instruction to kill and rebuild even
+      mid-session: overlay killed, dist built, overlay relaunched on 0.3.1.*
 
 ## Notes
 
