@@ -15,6 +15,12 @@ export const CHANNELS = {
   HOVER: 'overlay:hover',
   /** 'below' (the usual) or 'above', when the window is against the bottom of the screen. */
   PANEL_SIDE: 'overlay:panel-side',
+  /**
+   * A fight was appended to the history store — `{ key }` names whose file grew. Sent
+   * to the history window so an open one can refresh its rail live instead of showing
+   * a list frozen at whatever moment it was opened.
+   */
+  HISTORY_APPENDED: 'history:appended',
 
   // renderer -> main (invoke, returns a value)
   CONFIG_GET: 'config:get',

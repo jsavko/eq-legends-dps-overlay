@@ -164,7 +164,7 @@ function persistEncounter(enc) {
   try {
     const snap = enc.snapshot(enc.endTs);
     if (snap.totalDamage === 0 && snap.totalDamageTaken === 0) return;
-    history.append({
+    const key = history.append({
       v: RECORD_VERSION,
       id: `${enc.startTs}-${enc.endTs}`,
       character: parser.selfName,
@@ -177,6 +177,11 @@ function persistEncounter(enc) {
       closeReason: snap.closeReason,
       snapshot: { ...snap, self: parser.selfName, zone: parser.zone },
     });
+    // Only after a successful append — a failed write must not announce a fight that
+    // is not actually in the file.
+    if (historyWindow && !historyWindow.isDestroyed()) {
+      historyWindow.webContents.send(CHANNELS.HISTORY_APPENDED, { key });
+    }
   } catch (err) {
     // History is a convenience; a full disk or a locked file must never take the
     // live overlay down with it.

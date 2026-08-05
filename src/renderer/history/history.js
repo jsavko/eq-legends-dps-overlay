@@ -39,7 +39,7 @@ function wireEvents() {
 
   $('search').addEventListener('input', () => {
     state.search = $('search').value;
-    renderRail();
+    renderRail({ reveal: true });
   });
 
   for (const btn of document.querySelectorAll('#chips .chip')) {
@@ -48,9 +48,14 @@ function wireEvents() {
       for (const b of document.querySelectorAll('#chips .chip')) {
         b.setAttribute('aria-selected', String(b === btn));
       }
-      renderRail();
+      renderRail({ reveal: true });
     });
   }
+
+  // Live refresh: main announces every fight appended to the store, so a window left
+  // open across a raid session shows each fight seconds after it ends instead of a
+  // list frozen at whatever moment the window was opened.
+  window.api.onAppended(({ key }) => { void refreshList(key); });
 
   for (const btn of document.querySelectorAll('#metrics .seg')) {
     btn.addEventListener('click', () => setMetric(btn.dataset.metric));
@@ -86,19 +91,61 @@ async function loadCharacter(key) {
   state.record = null;
   state.member = null;
 
+  rebuildCharacterOptions();
+  renderRail();
+}
+
+function rebuildCharacterOptions() {
   $('char').replaceChildren(
-    ...r.characters.map((c) => {
+    ...state.characters.map((c) => {
       const o = document.createElement('option');
       o.value = c.key;
       o.textContent = c.server ? `${c.character} (${c.server})` : c.character;
-      o.selected = c.key === r.selected;
+      o.selected = c.key === state.key;
       return o;
     })
   );
-  $('char').disabled = r.characters.length === 0;
-  $('clear').disabled = r.characters.length === 0;
+  $('char').disabled = state.characters.length === 0;
+  $('clear').disabled = state.characters.length === 0;
+}
 
+/**
+ * A fight was just appended to the store (the HISTORY_APPENDED push). Unlike
+ * loadCharacter, nothing the user is looking at may be reset: the rail re-renders in
+ * place, the selection and filters survive, and panes 2/3 are not touched — except by
+ * the sticky-top follow below, which swaps them exactly as a click would.
+ *
+ * "Sticky top": the window auto-selects the newest fight on open, so a user still
+ * sitting on the newest fight they can see is following along live — their selection
+ * advances to the fight that just ended. A user parked on an older fight navigated
+ * there deliberately, and the new fight only joins the rail.
+ */
+async function refreshList(key) {
+  // A window opened before any history existed has no character selected; the first
+  // fight ever recorded is the one moment the full (resetting) load is the right move,
+  // because there is nothing on screen to preserve.
+  if (state.key === null) {
+    await loadCharacter(null);
+    return;
+  }
+
+  const r = await window.api.historyList(state.key);
+  state.characters = r.characters;
+  rebuildCharacterOptions();
+
+  // An append for another character changes nothing in this rail — but it may have
+  // just created that character's file, which is why the dropdown refreshed above.
+  if (key !== state.key) return;
+
+  // "Newest" through the user's current filters — following the top only makes sense
+  // for the top the user can actually see.
+  const prevNewestShown = filteredEncounters()[0]?.id ?? null;
+  state.encounters = r.encounters;
   renderRail();
+  const newestShown = filteredEncounters()[0]?.id ?? null;
+  if (newestShown && newestShown !== prevNewestShown && state.fightId === prevNewestShown) {
+    selectFight(newestShown);
+  }
 }
 
 function filteredEncounters() {
@@ -107,7 +154,7 @@ function filteredEncounters() {
 
 // -------------------------------------------------------------------- rail
 
-function renderRail() {
+function renderRail({ reveal = false } = {}) {
   const shown = filteredEncounters();
   const list = $('fights');
 
@@ -139,7 +186,7 @@ function renderRail() {
   // Keep the selection if it survived the filter; otherwise fall to the newest shown
   // fight, or to the empty pane when nothing is left to show.
   if (shown.some((e) => e.id === state.fightId)) {
-    markSelectedRow();
+    markSelectedRow({ reveal });
   } else if (shown.length > 0) {
     selectFight(shown[0].id);
   } else {
@@ -183,11 +230,14 @@ function buildFightRow(e) {
   return li;
 }
 
-function markSelectedRow() {
+// `reveal` scrolls the selected row into view, and is passed only on an explicit user
+// action (a click, the arrow keys, a filter change). A background refresh from a fight
+// closing must never move the rail under a user who scrolled away to read something.
+function markSelectedRow({ reveal = false } = {}) {
   for (const li of document.querySelectorAll('#fights .fight-row')) {
     const selected = li.dataset.id === state.fightId;
     li.setAttribute('aria-selected', String(selected));
-    if (selected) li.scrollIntoView({ block: 'nearest' });
+    if (selected && reveal) li.scrollIntoView({ block: 'nearest' });
   }
 }
 
@@ -195,7 +245,7 @@ function markSelectedRow() {
 
 async function selectFight(id) {
   state.fightId = id;
-  markSelectedRow();
+  markSelectedRow({ reveal: true });
   state.record = await window.api.historyGet(state.key, id);
   state.member = null;   // a new fight means the old member may not exist here
   renderFight();
