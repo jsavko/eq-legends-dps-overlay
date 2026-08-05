@@ -366,3 +366,22 @@ test('a player interrupt uses the same possessive wording (sample)', () => {
   assert.equal(e.attacker, 'Emalina');
   assert.equal(e.ability, 'Renewing Echo');
 });
+
+test('resist lines parse in all three forms (sample)', () => {
+  const self = m("You resist a zol ghoul knight's Ghoul Root!");
+  assert.equal(self.kind, 'resist');
+  assert.equal(self.target, 'You');
+  assert.equal(self.attacker, 'a zol ghoul knight');
+  assert.equal(self.ability, 'Ghoul Root');
+
+  const yours = m('Master Yael resisted your Ykesha!');
+  assert.equal(yours.kind, 'resist');
+  assert.equal(yours.attacker, 'You');
+  assert.equal(yours.target, 'Master Yael');
+  assert.equal(yours.ability, 'Ykesha');
+
+  // The pet's backtick never confuses the apostrophe split.
+  const pet = m("Lord Nagafen resisted Rhale`s warder's Sicken!");
+  assert.equal(pet.attacker, 'Rhale`s warder');
+  assert.equal(pet.ability, 'Sicken');
+});

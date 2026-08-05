@@ -51,6 +51,13 @@ export const WARM_START_MIN_SAMPLES = 3;
 /** Bound per-key memory; a raid boss casts well under this in any one fight. */
 const MAX_GAPS_KEPT = 30;
 
+/**
+ * Landed-evidence lines closer together than this are ONE volley, not a new cycle:
+ * an AE prints a damage line per group member in the same second or two, and
+ * learning those as gaps would bury the real interval under zeros.
+ */
+const VOLLEY_MS = 2500;
+
 const key = (caster, ability) => `${caster}|${ability}`;
 
 function median(values) {
@@ -93,18 +100,49 @@ export class RhythmTracker {
   }
 
   noteCast(caster, ability, ts) {
+    this.record(caster, ability, ts, 'cast');
+  }
+
+  /**
+   * Evidence from a spell LANDING (damage or resist line) rather than a cast line.
+   *
+   * This exists for innate breath weapons: Lord Nagafen's Lava Breath never prints
+   * "begins casting" — its ~13s cycle is visible only as landed damage on the group
+   * and the occasional "You resist" — so the landings are the only clock there is.
+   */
+  noteLanded(caster, ability, ts) {
+    this.record(caster, ability, ts, 'landed');
+  }
+
+  record(caster, ability, ts, source) {
     const k = key(caster, ability);
     let entry = this.entries.get(k);
     if (!entry) {
-      entry = { caster, ability, gaps: [], lastTs: ts, skipNextGap: false };
+      entry = { caster, ability, gaps: [], lastTs: ts, skipNextGap: false, source };
       this.entries.set(k, entry);
       return;
+    }
+
+    // A spell with BOTH cast lines and landing lines must never mix the two: each
+    // cycle would contribute a full gap AND a tiny cast-to-landing gap, wrecking the
+    // median. Cast-start evidence wins — it anchors earlier, which is when the
+    // warning matters — so landings are ignored once casts exist, and the first cast
+    // seen restarts a landings-built entry from scratch.
+    if (source === 'landed' && entry.source === 'cast') return;
+    if (source === 'cast' && entry.source === 'landed') {
+      this.entries.set(k, { caster, ability, gaps: [], lastTs: ts, skipNextGap: false, source });
+      return;
+    }
+
+    if (source === 'landed' && entry.lastTs !== null) {
+      const sinceVolley = ts - entry.lastTs;
+      if (sinceVolley >= 0 && sinceVolley < VOLLEY_MS) return;   // same volley echo
     }
 
     const gap = ts - entry.lastTs;
     entry.lastTs = ts;
 
-    if (gap <= 0 || gap > MAX_GAP_MS) return;
+    if (gap <= 0 || gap > MAX_GAP_MS || Number.isNaN(gap)) return;
     if (entry.skipNextGap) {
       // The previous cast was interrupted, and EQ mobs retry early — a real effect
       // that would drag the learned median down if this gap were counted.

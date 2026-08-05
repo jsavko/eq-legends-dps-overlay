@@ -187,6 +187,9 @@ export class LogParser {
       case 'interrupt':
         this.handleInterrupt(event);
         break;
+      case 'resist':
+        this.handleResist(event);
+        break;
       case 'heal':
         this.handleHeal(event);
         break;
@@ -313,6 +316,15 @@ export class LogParser {
     }
 
     if (targetFriendly) {
+      // A named boss's spell LANDING is rhythm evidence too: innate breath weapons
+      // (Lava Breath) never print a cast line, so their cycle is visible only here.
+      // Spells only — melee is continuous and DoT ticks are periodic by mechanic,
+      // not by the boss's decision, so both would learn garbage rhythms.
+      if (event.source === 'spell' && event.ability &&
+          stripArticle(event.attacker) === String(event.attacker).trim()) {
+        this.rhythms.noteLanded(attacker.display, event.ability, event.ts);
+      }
+
       // An NPC hitting us means a fight is on — and the incoming side is scored too:
       // the victim's row records who hit them and with what, which is the entire
       // "what is killing me" view. addDamageTaken also keeps the encounter clock
@@ -484,6 +496,25 @@ export class LogParser {
     const before = this.hostileCasts.length;
     this.hostileCasts = this.hostileCasts.filter((c) => c.caster !== caster.display);
     if (this.hostileCasts.length !== before) this.revision++;
+  }
+
+  /**
+   * A friendly resisted a hostile named caster's spell — the volley still FIRED,
+   * which is what the rhythm tracker needs to know. A wholly-resisted breath AE
+   * leaves no damage line at all; without this, a clean resist reads as a skipped
+   * beat and retracts a perfectly healthy timer.
+   *
+   * Outgoing resists (the mob resisting OUR spells) teach nothing about the mob's
+   * own rhythm and are ignored.
+   */
+  handleResist(event) {
+    if (!event.ability) return;
+    const attacker = this.resolve(event.attacker);
+    const target = this.resolve(event.target);
+    if (!this.isFriendly(target.name)) return;
+    if (this.isFriendly(attacker.name)) return;
+    if (stripArticle(event.attacker) !== String(event.attacker).trim()) return;
+    this.rhythms.noteLanded(attacker.display, event.ability, event.ts);
   }
 
   /** Clear warnings from a caster who is now dead (a corpse finishes no casts). */

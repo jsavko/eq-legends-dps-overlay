@@ -408,6 +408,31 @@ export const RULES = [
     re: /^(.+?)'s (.+?) spell is interrupted\.$/,
     make: (m) => ({ kind: 'interrupt', attacker: m[1], ability: m[2] }),
   },
+  {
+    // (confirmed) "You resist a zol ghoul knight's Ghoul Root!"
+    //
+    // Resists matter to the rhythm tracker: for an innate breath AE the resist line
+    // can be the ONLY proof a cycle fired — everyone resisting a volley would
+    // otherwise read as a skipped beat and retract the timer.
+    id: 'resist-self',
+    re: /^You resist (.+?)'s (.+?)!$/,
+    make: (m) => ({ kind: 'resist', target: 'You', attacker: m[1], ability: m[2] }),
+  },
+  {
+    // (confirmed) "Master Yael resisted your Ykesha!"
+    // Must precede the possessive form: "resisted your Tishan's Clash!" contains an
+    // apostrophe-s that would mis-split the caster there.
+    id: 'resist-your',
+    re: /^(.+?) resisted your (.+?)!$/,
+    make: (m) => ({ kind: 'resist', target: m[1], attacker: 'You', ability: m[2] }),
+  },
+  {
+    // (confirmed) "Lord Nagafen resisted Rhale`s warder's Sicken!" — the non-greedy
+    // caster stops at the first apostrophe-s, and a pet's backtick never confuses it.
+    id: 'resist',
+    re: /^(.+?) resisted (.+?)'s (.+?)!$/,
+    make: (m) => ({ kind: 'resist', target: m[1], attacker: m[2], ability: m[3] }),
+  },
 
   // ----------------------------------------------------------------- crowd control
   {

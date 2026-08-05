@@ -898,6 +898,40 @@ test('closing a fight exports what it taught; a manual reset exports nothing', (
   assert.equal(learned.length, 0, 'a disowned fight teaches nothing on the record');
 });
 
+test('a breath AE with no cast line earns a timer from its landings', () => {
+  const p = makeParser({ timeoutMs: 120_000 });
+  p.feed(`${D(18, 48, 0)} You crush Lord Nagafen for 40 points of damage.`);
+  // Volleys 13s apart, each hitting two group members in the same second; the third
+  // volley is wholly resisted — its resist line is the only proof the cycle fired.
+  const volley = (s) => {
+    const ts = D(18, 48 + Math.floor(s / 60), s % 60);
+    p.feed(`${ts} Lord Nagafen hit you for 500 points of fire damage by Lava Breath.`);
+    p.feed(`${ts} Lord Nagafen hit Rhale\`s warder for 500 points of fire damage by Lava Breath.`);
+  };
+  volley(10);
+  volley(23);
+  p.feed(`${D(18, 48, 36)} You resist Lord Nagafen's Lava Breath!`);
+  volley(49);
+
+  const [timer] = p.snapshot(T(18, 48, 50)).castTimers;
+  assert.ok(timer, 'landings and resists together must earn the timer');
+  assert.equal(timer.caster, 'Lord Nagafen');
+  assert.equal(timer.ability, 'Lava Breath');
+  assert.equal(timer.intervalMs, 13_000);
+});
+
+test('melee swings and DoT ticks never earn timers', () => {
+  const p = makeParser({ timeoutMs: 120_000 });
+  p.feed(`${D(18, 48, 0)} You crush Lord Nagafen for 40 points of damage.`);
+  for (const s of [10, 23, 36, 49]) {
+    const ts = D(18, 48 + Math.floor(s / 60), s % 60);
+    // Melee is continuous, and DoT ticks are periodic by mechanic, not by decision.
+    p.feed(`${ts} Lord Nagafen hits YOU for 100 points of damage.`);
+    p.feed(`${ts} You have taken 40 damage from Ignite Blood by Lord Nagafen.`);
+  }
+  assert.equal(p.snapshot(T(18, 48, 50)).castTimers.length, 0);
+});
+
 test('timers vanish when the fight ends', () => {
   const p = makeParser({ timeoutMs: 120_000 });
   p.feed(`${D(18, 48, 0)} You crush Quag Maelstrom for 40 points of damage.`);

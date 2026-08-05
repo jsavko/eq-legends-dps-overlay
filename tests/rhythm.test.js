@@ -132,6 +132,35 @@ test('only qualified rhythms export to the store', () => {
   assert.ok(learned[0].samples >= 3);
 });
 
+test('landed volleys collapse to one beat and earn a timer', () => {
+  const t = new RhythmTracker();
+  // Lava-Breath-like: no cast line exists; each volley prints two damage lines a
+  // second apart (you, then the warder). The echo must not become a 1s gap.
+  for (const s of [0, 13, 26, 39]) {
+    t.noteLanded('Lord Nagafen', 'Lava Breath', s * S);
+    t.noteLanded('Lord Nagafen', 'Lava Breath', (s + 1) * S);
+  }
+  const [timer] = t.timers(40 * S);
+  assert.ok(timer, 'landings alone must be able to earn a timer');
+  assert.equal(timer.intervalMs, 13 * S);
+  assert.equal(timer.dueMs, (39 + 13 - 40) * S);
+});
+
+test('cast-start evidence supersedes landings for the same spell', () => {
+  const t = new RhythmTracker();
+  t.noteLanded('Lord Nagafen', 'Shadow Vortex', 0);
+  t.noteLanded('Lord Nagafen', 'Shadow Vortex', 60 * S);
+  // The first cast line restarts the entry; its own landing 2s later is ignored —
+  // otherwise every cycle contributes a 2s cast-to-landing gap beside the real 60s.
+  t.noteCast('Lord Nagafen', 'Shadow Vortex', 62 * S);
+  t.noteLanded('Lord Nagafen', 'Shadow Vortex', 64 * S);
+  feed(t, 'Lord Nagafen', 'Shadow Vortex', [122, 182, 242]);
+
+  const [timer] = t.timers(243 * S);
+  assert.ok(timer);
+  assert.equal(timer.intervalMs, 60 * S, 'the cast-to-landing gap must not pollute the median');
+});
+
 test('reset clears in-fight state but keeps known rhythms', () => {
   const t = new RhythmTracker();
   t.setKnown([{ caster: 'Quag Maelstrom', ability: 'Mana Drain', intervalMs: 19 * S, spreadMs: 1500, samples: 10 }]);
