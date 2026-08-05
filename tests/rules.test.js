@@ -367,6 +367,78 @@ test('a player interrupt uses the same possessive wording (sample)', () => {
   assert.equal(e.ability, 'Renewing Echo');
 });
 
+test('the summon say-line outranks chat and names its victim (live log)', () => {
+  const e = m("Master Yael says, 'You will not evade me, Emalina!'");
+  assert.equal(e.kind, 'summon');
+  assert.equal(e.attacker, 'Master Yael');
+  assert.equal(e.victim, 'Emalina');
+
+  // The victim can be a pet — the raw backtick name passes through for entities.js.
+  const pet = m("Master Yael says, 'You will not evade me, Rhale`s warder!'");
+  assert.equal(pet.kind, 'summon');
+  assert.equal(pet.victim, 'Rhale`s warder');
+
+  // Any other say-line still falls through to chat as before.
+  assert.equal(m("A froglok shin knight says, 'Frrroooaaakkk!'").kind, 'chat');
+});
+
+test('a player-shaped sayer still parses as a summon — the hostility guard is the parser\'s', () => {
+  // The say-rule now outranks chat, so a troll typing the sentence in /say reaches
+  // the parser as a summon event; rules.js stays free of any notion of who is hostile.
+  const e = m("Hlep says, 'You will not evade me, Emalina!'");
+  assert.equal(e.kind, 'summon');
+  assert.equal(e.attacker, 'Hlep');
+});
+
+test('the self-summon confirmation parses with no attacker (live log)', () => {
+  const e = m('You have been summoned!');
+  assert.equal(e.kind, 'summon');
+  assert.equal(e.attacker, null);
+  assert.equal(e.victim, 'You');
+});
+
+test('CC landing on a person parses: stun, entrance, mez (live log)', () => {
+  const stun = m('You are stunned!');
+  assert.equal(stun.kind, 'effect');
+  assert.equal(stun.who, 'You');
+  assert.equal(stun.effect, 'stunned');
+
+  const entrance = m('You have been entranced.');
+  assert.equal(entrance.kind, 'effect');
+  assert.equal(entrance.who, 'You');
+  assert.equal(entrance.effect, 'entranced');
+
+  const mez = m('Emalina has been mesmerized.');
+  assert.equal(mez.kind, 'effect');
+  assert.equal(mez.who, 'Emalina');
+  assert.equal(mez.effect, 'mesmerized');
+});
+
+test('CC end-lines parse; unrelated "no longer" lines stay unmatched (live log)', () => {
+  const stun = m('You are no longer stunned.');
+  assert.equal(stun.kind, 'effect-end');
+  assert.equal(stun.who, 'You');
+  assert.equal(stun.effect, 'stunned');
+
+  assert.equal(m('You are no longer captivated.').effect, 'captivated');
+  assert.equal(m('You are no longer entranced.').effect, 'entranced');
+
+  // Effects the parser never tracks must not emit end events.
+  assert.equal(m('You are no longer hidden.'), null);
+  assert.equal(m('You are no longer ensnared.'), null);
+  assert.equal(m('You are no longer poisoned.'), null);
+});
+
+test('the awakened line always names the waker on this server (live log)', () => {
+  // The bare classic "has been awakened." never occurs — every awakening is the
+  // by-form, which the generic crowd-control rule cannot reach.
+  const e = m('A wan ghoul knight has been awakened by Rhain.');
+  assert.equal(e.kind, 'effect');
+  assert.equal(e.who, 'A wan ghoul knight');
+  assert.equal(e.effect, 'awakened');
+  assert.equal(e.by, 'Rhain');
+});
+
 test('resist lines parse in all three forms (sample)', () => {
   const self = m("You resist a zol ghoul knight's Ghoul Root!");
   assert.equal(self.kind, 'resist');

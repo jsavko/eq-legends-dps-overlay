@@ -9,18 +9,25 @@
  */
 
 const stack = document.getElementById('stack');
+const effectsList = document.getElementById('effects');
 const timersList = document.getElementById('timers');
 
 let cfg = null;
 /** @type {Map<number, HTMLElement>} chip elements by warning id */
 const chips = new Map();
+/** @type {Map<string, HTMLElement>} member CC state chips by who|effect */
+const effectChips = new Map();
 /** @type {Map<string, {el: HTMLElement, due: HTMLElement, drain: HTMLElement}>} timer chips by caster|ability */
 const timerChips = new Map();
 /** Ids present in the previous push — how a NEW tier-3 warning is told from an old one. */
 let seenIds = new Set();
 
-/** The one call to action; every tier-3 category is an interrupt call. */
+/** The one call to action; every tier-3 category is an interrupt call — except a
+ *  summon, which already happened and gets its announcement verb in buildChip. */
 const VERB = { 3: 'Interrupt' };
+
+/** Member CC states, worded as the state they are, not the spell that caused it. */
+const EFFECT_VERB = { stun: 'Stunned', mez: 'Mezzed', charm: 'Charmed' };
 
 /** Entries fade for the last moments of their window; matches the CSS transition. */
 const FADE_MS = 700;
@@ -38,6 +45,7 @@ async function init() {
   window.api.onSnapshot((snapshot) => {
     const warnings = snapshot.hostileCasts ?? [];
     render(warnings);
+    renderEffects(snapshot.memberEffects ?? []);
     renderTimers(snapshot.castTimers ?? [], warnings);
   });
 }
@@ -69,6 +77,13 @@ function render(warnings) {
     if (w.remainingMs <= FADE_MS) el.dataset.fading = '';
     else delete el.dataset.fading;
 
+    // A summon's caster can arrive late — confirmation line first, say-line second
+    // filling in who did the yanking — the one field of a live chip that may change.
+    if (w.category === 'summon' && w.caster) {
+      const caster = el.querySelector('.caster');
+      if (caster.textContent !== w.caster) caster.textContent = w.caster;
+    }
+
     // Insert-or-move to the sorted position; appendChild on an attached node is a move.
     if (stack.children[index] !== el) stack.insertBefore(el, stack.children[index] ?? null);
   });
@@ -83,23 +98,88 @@ function buildChip(w) {
 
   const verb = document.createElement('span');
   verb.className = 'verb';
-  verb.textContent = VERB[w.tier] ?? w.category ?? '';
 
   const spell = document.createElement('span');
   spell.className = 'spell';
-  if (w.ability) {
-    spell.textContent = w.ability;
-  } else {
-    // The anonymous classic form: the log said a cast is happening but not what.
-    spell.textContent = 'casting…';
-    spell.classList.add('unknown');
-  }
 
   const caster = document.createElement('span');
   caster.className = 'caster';
-  caster.textContent = w.caster;
+
+  if (w.category === 'summon') {
+    // The banner announces a fact, not a call to act: the VICTIM takes the big
+    // slot — the name is the payload — with the boss beneath. A bare confirmation
+    // line names no boss, and the caster line stays honestly empty rather than
+    // guessed (CSS collapses it so the banner doesn't carry a blank row).
+    verb.textContent = 'Summoned';
+    spell.textContent = w.victim;
+    caster.textContent = w.caster ?? '';
+  } else {
+    verb.textContent = VERB[w.tier] ?? w.category ?? '';
+    if (w.ability) {
+      spell.textContent = w.ability;
+    } else {
+      // The anonymous classic form: the log said a cast is happening but not what.
+      spell.textContent = 'casting…';
+      spell.classList.add('unknown');
+    }
+    caster.textContent = w.caster;
+  }
 
   li.append(verb, spell, caster);
+  return li;
+}
+
+// ------------------------------------------------------------ member CC states
+
+/**
+ * Crowd control currently sitting ON the group. Chips are reused by who|effect so
+ * nothing flickers across pushes, and they render in parser order (oldest first) —
+ * a stack that reorders under the player's eyes reads as new information.
+ *
+ * Deliberately NO countdown: remainingMs runs against a safety cap, not a stated
+ * duration, and drawing it would claim knowledge the log does not have. The chip
+ * leaves when the end-line lands (instant) or the cap expires (the same fade as a
+ * warning, so a capped chip never just blinks out).
+ */
+function renderEffects(effects) {
+  const keys = new Set(effects.map((e) => `${e.who}|${e.effect}`));
+
+  for (const [k, el] of effectChips) {
+    if (!keys.has(k)) {
+      el.remove();
+      effectChips.delete(k);
+    }
+  }
+
+  effects.forEach((e, index) => {
+    const k = `${e.who}|${e.effect}`;
+    let el = effectChips.get(k);
+    if (!el) {
+      el = buildEffectChip(e);
+      effectChips.set(k, el);
+    }
+    if (e.remainingMs <= FADE_MS) el.dataset.fading = '';
+    else delete el.dataset.fading;
+
+    if (effectsList.children[index] !== el) {
+      effectsList.insertBefore(el, effectsList.children[index] ?? null);
+    }
+  });
+}
+
+function buildEffectChip(e) {
+  const li = document.createElement('li');
+  li.className = 'echip';
+
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  tag.textContent = EFFECT_VERB[e.effect] ?? e.effect;
+
+  const who = document.createElement('span');
+  who.className = 'who';
+  who.textContent = e.who;
+
+  li.append(tag, who);
   return li;
 }
 

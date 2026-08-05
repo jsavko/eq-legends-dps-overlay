@@ -840,6 +840,196 @@ test('the anonymous classic cast line still warns when the caster is hostile', (
   assert.equal(c.ability, null);
 });
 
+// ------------------------------------------------------------------- summons
+
+test('a boss summon say-line raises an instant tier-3 warning naming the victim', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} Master Yael says, 'You will not evade me, Emalina!'`);
+  const [w] = p.snapshot(T(18, 48, 20)).hostileCasts;
+  assert.equal(w.category, 'summon');
+  assert.equal(w.tier, 3);
+  assert.equal(w.caster, 'Master Yael');
+  assert.equal(w.victim, 'Emalina');
+  assert.equal(w.remainingMs, 5000, 'summons live on their own shorter window');
+});
+
+test('a friendly typing the summon sentence in /say never alerts (the troll guard)', () => {
+  // summon-say outranks chat now, so this line reaches handleSummon looking exactly
+  // like Master Yael — isHostileCaster is the only thing between a troll and a cue.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 19)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(18, 48, 20)} Emalina says, 'You will not evade me, Rhain!'`);
+  assert.equal(p.snapshot(T(18, 48, 20)).hostileCasts.length, 0);
+});
+
+test('the self-confirmation folds into the say-line warning instead of stacking', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} Master Yael says, 'You will not evade me, Rhale!'`);
+  p.feed(`${D(18, 48, 22)} You have been summoned!`);
+  const casts = p.snapshot(T(18, 48, 22)).hostileCasts;
+  assert.equal(casts.length, 1, 'one yank, one chip');
+  assert.equal(casts[0].caster, 'Master Yael');
+  assert.equal(casts[0].victim, 'Rhale');
+  assert.equal(casts[0].remainingMs, 5000, 'the confirmation refreshed the clock');
+});
+
+test('the self-confirmation alone still warns, with no caster to name', () => {
+  // The fallback for a mob that words its say-line differently.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} You have been summoned!`);
+  const [w] = p.snapshot(T(18, 48, 20)).hostileCasts;
+  assert.equal(w.category, 'summon');
+  assert.equal(w.tier, 3);
+  assert.equal(w.caster, null);
+  assert.equal(w.victim, 'Rhale');
+});
+
+test('a summoned pet is named as the pet, never folded into its owner', () => {
+  // The live log has Master Yael yanking Rhale`s warder — the owner stayed put.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} Master Yael says, 'You will not evade me, Rhale\`s warder!'`);
+  const [w] = p.snapshot(T(18, 48, 20)).hostileCasts;
+  assert.equal(w.victim, 'Rhale`s warder');
+});
+
+test('a summon expires on its own shorter window, before an ordinary warning would', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} Master Yael says, 'You will not evade me, Emalina!'`);
+  p.feed(`${D(18, 48, 20)} Master Yael begins casting Inferno.`);
+  p.setNow(T(18, 48, 26));
+  p.tick();
+  const casts = p.snapshot(T(18, 48, 26)).hostileCasts;
+  assert.equal(casts.length, 1, 'the 6s cast warning outlives the 5s summon chip');
+  assert.equal(casts[0].ability, 'Inferno');
+});
+
+test('interrupting the summoner leaves the summon announcement standing', () => {
+  // A summon is a fact that already happened, not a cast in progress.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} Master Yael says, 'You will not evade me, Emalina!'`);
+  p.feed(`${D(18, 48, 21)} Master Yael begins casting Inferno.`);
+  p.feed(`${D(18, 48, 22)} Master Yael's Inferno spell is interrupted.`);
+  const casts = p.snapshot(T(18, 48, 22)).hostileCasts;
+  assert.equal(casts.length, 1, 'the interrupt clears the cast, never the summon');
+  assert.equal(casts[0].category, 'summon');
+});
+
+// ---------------------------------------------------------- member CC states
+
+test('a stun on the player raises a state chip and the end-line clears it', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} You are stunned!`);
+  const fx = p.snapshot(T(18, 48, 20)).memberEffects;
+  assert.deepEqual(fx, [{ who: 'Rhale', effect: 'stun', remainingMs: 30_000 }]);
+
+  p.feed(`${D(18, 48, 23)} You are no longer stunned.`);
+  assert.equal(p.snapshot(T(18, 48, 23)).memberEffects.length, 0);
+});
+
+test('the mez family folds onto one state; awakened ends it', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} Emalina has been mesmerized.`);
+  p.feed(`${D(18, 48, 21)} Emalina has been entranced.`);
+  const fx = p.snapshot(T(18, 48, 21)).memberEffects;
+  assert.equal(fx.length, 1, 'mesmerized and entranced are the one mez state');
+  assert.equal(fx[0].who, 'Emalina');
+  assert.equal(fx[0].effect, 'mez');
+
+  p.feed(`${D(18, 48, 24)} Emalina has been awakened by Rhain.`);
+  assert.equal(p.snapshot(T(18, 48, 24)).memberEffects.length, 0);
+});
+
+test('our own CC landing on mobs never becomes a member state', () => {
+  // 535 of the live log's mez lines are the group's enchanter doing their job.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} a shin ghoul knight has been mesmerized.`);
+  p.feed(`${D(18, 48, 21)} a shin ghoul knight has been stunned.`);
+  assert.equal(p.snapshot(T(18, 48, 21)).memberEffects.length, 0);
+});
+
+test('rooted and poisoned members are deliberately not tracked', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} Emalina has been rooted.`);
+  p.feed(`${D(18, 48, 21)} Emalina has been poisoned.`);
+  assert.equal(p.snapshot(T(18, 48, 21)).memberEffects.length, 0);
+});
+
+test('an enemy charming a group member alerts instead of roster-charming them', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 2)} Emalina has been charmed.`);
+
+  const fx = p.snapshot(T(19, 20, 2)).memberEffects;
+  assert.deepEqual(fx.map((s) => [s.who, s.effect]), [['Emalina', 'charm']]);
+  assert.equal(p.roster.isCharmed('Emalina'), false, 'a member is never a group pet');
+});
+
+test('re-charming an already-charmed mob stays on the mob path (regression)', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  // The charmed wizard now resolves to Rhain, who is friendly — the direction
+  // branch must see through that fold, or a re-charm reads as an enemy taking him.
+  p.feed(`${D(19, 20, 5)} a tal ghoul wizard has been charmed.`);
+  assert.equal(p.snapshot(T(19, 20, 5)).memberEffects.length, 0);
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), true);
+});
+
+test('death clears every state the member held', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A froglok king hits Emalina for 300 points of damage.`);
+  p.feed(`${D(18, 48, 21)} Emalina has been mesmerized.`);
+  p.feed(`${D(18, 48, 22)} You are stunned!`);
+  p.feed(`${D(18, 48, 23)} Emalina has been slain by a froglok king!`);
+  const fx = p.snapshot(T(18, 48, 23)).memberEffects;
+  assert.deepEqual(fx.map((s) => s.who), ['Rhale'], "only Emalina's states die with her");
+});
+
+test('a state with no end-line leaves at the 30s cap, not before', () => {
+  // Charm on a member has no break line at all; the cap is the only way out.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} Emalina has been mesmerized.`);
+  p.setNow(T(18, 48, 45));
+  p.tick();
+  assert.equal(p.snapshot(T(18, 48, 45)).memberEffects.length, 1, '25s in: still mezzed for all we know');
+  p.setNow(T(18, 48, 51));
+  p.tick();
+  assert.equal(p.snapshot(T(18, 48, 51)).memberEffects.length, 0);
+});
+
+test('zoning and manual reset both clear member states', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} You are stunned!`);
+  p.feed(`${D(18, 48, 21)} LOADING, PLEASE WAIT...`);
+  assert.equal(p.snapshot(T(18, 48, 21)).memberEffects.length, 0);
+
+  p.feed(`${D(18, 48, 30)} You are stunned!`);
+  p.reset();
+  assert.equal(p.snapshot(T(18, 48, 30)).memberEffects.length, 0);
+});
+
+test('a repeat of the same effect refreshes the one state instead of stacking', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} You are stunned!`);
+  p.feed(`${D(18, 48, 24)} You are stunned!`);
+  const fx = p.snapshot(T(18, 48, 24)).memberEffects;
+  assert.equal(fx.length, 1);
+  assert.equal(fx[0].remainingMs, 30_000, 'the repeat re-anchored the cap');
+});
+
+test('different effects on the same member are separate states', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} You are stunned!`);
+  p.feed(`${D(18, 48, 21)} You have been entranced.`);
+  const fx = p.snapshot(T(18, 48, 21)).memberEffects;
+  assert.deepEqual(fx.map((s) => s.effect).sort(), ['mez', 'stun']);
+
+  // The stun ending must not take the mez with it.
+  p.feed(`${D(18, 48, 22)} You are no longer stunned.`);
+  assert.deepEqual(p.snapshot(T(18, 48, 22)).memberEffects.map((s) => s.effect), ['mez']);
+});
+
 // --------------------------------------------------------------- cast timers
 
 test('a named boss casting on a rhythm earns a timer; article trash never does', () => {

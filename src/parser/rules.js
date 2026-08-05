@@ -136,6 +136,31 @@ export const RULES = [
     make: (m) => ({ kind: 'targeted', targetKind: m[1].toLowerCase(), who: m[2] }),
   },
 
+  // ------------------------------------------------------- summons, before chat
+  {
+    // (confirmed) "Master Yael says, 'You will not evade me, Emalina!'"
+    //
+    // The summon call-out — a boss yanking a player to itself, named victim and all.
+    // It arrives as an ordinary say-line, so it must precede the chat rule that would
+    // otherwise swallow it: the same placement precedent as pet-reports-to-master.
+    // The rule emits whoever SAID it verbatim; deciding whether that sayer is actually
+    // hostile is the parser's job — a player typing this sentence in /say must parse
+    // as a summon here and then fail the hostility guard there, never alert.
+    id: 'summon-say',
+    re: /^(.+?) says, 'You will not evade me, (.+?)!'$/,
+    make: (m) => ({ kind: 'summon', attacker: m[1], victim: m[2] }),
+  },
+  {
+    // (confirmed) "You have been summoned!"
+    //
+    // The game's own confirmation on the victim's client. It is the fallback for a
+    // mob that words its say-line differently — and when a say-line naming You just
+    // fired, the parser folds this into that warning rather than stacking a second.
+    id: 'summon-self',
+    re: /^You have been summoned!$/,
+    make: () => ({ kind: 'summon', attacker: null, victim: 'You' }),
+  },
+
   // ---------------------------------------------------------------- chat next
   {
     id: 'chat',
@@ -451,9 +476,40 @@ export const RULES = [
     // (confirmed) "a shin ghoul knight has been mesmerized."
     // Mez is NOT charm: a mezzed mob is asleep, not fighting for you. Typed separately
     // so it can never be mistaken for one.
+    //
+    // The same wording covers CC landing on US — "Emalina has been mesmerized.",
+    // "You have been entranced." (both confirmed live) — which is why entranced and
+    // captivated join the alternation: they are the enchanter mez family as this
+    // server words it when the target is a person rather than a mob.
     id: 'crowd-control',
-    re: /^(.+?) has been (mesmerized|awakened|poisoned|stunned|rooted)\.$/,
+    re: /^(.+?) ha(?:s|ve) been (mesmerized|entranced|captivated|awakened|poisoned|stunned|rooted)\.$/,
     make: (m) => ({ kind: 'effect', who: m[1], effect: m[2] }),
+  },
+  {
+    // (confirmed) "A wan ghoul knight has been awakened by Rhain."
+    //
+    // The mez end-line always names the waker on this server — the bare classic
+    // "has been awakened." never occurs in the live log — so the rule above can
+    // never catch it and the by-form needs its own entry.
+    id: 'cc-awakened-by',
+    re: /^(.+?) has been awakened by (.+?)\.$/,
+    make: (m) => ({ kind: 'effect', who: m[1], effect: 'awakened', by: m[2] }),
+  },
+  {
+    // (confirmed) "You are stunned!" — 691 occurrences in the live log. The second
+    // person uses "are", so the has-been form above can never reach it.
+    id: 'cc-self-stun',
+    re: /^You are stunned!$/,
+    make: () => ({ kind: 'effect', who: 'You', effect: 'stunned' }),
+  },
+  {
+    // (confirmed) "You are no longer stunned." / "captivated" / "entranced" — the
+    // explicit end-lines for CC that landed on the logging character. The alternation
+    // is deliberately ONLY the effects the parser tracks as member states: ensnared,
+    // hidden, poisoned and the rest of the "no longer" family stay unmatched noise.
+    id: 'cc-self-end',
+    re: /^You are no longer (stunned|captivated|entranced)\.$/,
+    make: (m) => ({ kind: 'effect-end', who: 'You', effect: m[1] }),
   },
 
   // ---------------------------------------------------------------------- heals

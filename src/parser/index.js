@@ -44,6 +44,35 @@ const CAST_TABLE_TTL_MS = 10_000;
 export const HOSTILE_CAST_TTL_MS = 6000;
 
 /**
+ * How long a SUMMONED chip stays up. Shorter than the cast window because a summon
+ * is over the moment it is announced — the chip is an announcement ("the boss just
+ * yanked the cleric"), not a countdown to anything.
+ */
+export const SUMMON_TTL_MS = 5000;
+
+/**
+ * Ceiling on how long a CC state chip may live without an explicit end-line.
+ *
+ * Stun and mez clear on the log's own "no longer"/"awakened" lines; charm on a member
+ * has NO break line at all. The cap is a safety net so a missed or nonexistent
+ * end-line cannot leave a stale MEZZED chip on screen forever — it is not a claim
+ * about how long any of these effects actually last.
+ */
+export const CC_STATE_CAP_MS = 30_000;
+
+/**
+ * The mez family as this server words it, plus stun — the effects worth a member
+ * state chip. Rooted/poisoned/lacerated members are deliberately absent: constant
+ * grind noise that no raid decision hangs on.
+ */
+const CC_EFFECTS = {
+  mesmerized: 'mez',
+  entranced: 'mez',
+  captivated: 'mez',
+  stunned: 'stun',
+};
+
+/**
  * Spells that take control of a mob. Charm is the only crowd control that makes the
  * mob fight for you — mez and root do not — so only these transfer damage credit.
  * "Beguile" is confirmed in EQ Legends; the rest follow classic EverQuest naming.
@@ -90,13 +119,26 @@ export class LogParser {
     /** @type {Map<string, {ability: string|null, ts: number}>} in-flight casts */
     this.casts = new Map();
     /**
-     * Enemy casts currently worth warning about, oldest first.
-     * @type {Array<{id: number, caster: string, ability: string|null,
-     *               category: string|null, tier: number, ts: number}>}
+     * Enemy casts currently worth warning about, oldest first. Summons ride this
+     * list too (category 'summon', a victim, and a shorter per-entry ttlMs) — they
+     * share the warning shape exactly: instant fact, tier 3, cue-worthy, short TTL.
+     * @type {Array<{id: number, caster: string|null, ability: string|null,
+     *               category: string|null, tier: number, ts: number,
+     *               victim?: string, ttlMs?: number}>}
      */
     this.hostileCasts = [];
     /** Monotonic id so the overlay can tell a NEW warning from a refreshed push. */
     this.hostileCastSeq = 0;
+    /**
+     * Crowd control currently sitting ON a group member, oldest first. Keyed by
+     * who|effect: the same member can be stunned and mezzed at once, but a repeat
+     * of the same effect refreshes rather than stacks. Kept apart from hostileCasts
+     * because the lifecycles differ in every particular — victim-keyed, tens of
+     * seconds long, cleared by explicit end-lines rather than interrupt or death
+     * of a caster (see the plan's rejected approach 1).
+     * @type {Array<{who: string, effect: string, ts: number}>}
+     */
+    this.ccStates = [];
     /** Recast rhythms of named casters — the learned spell timers. */
     this.rhythms = new RhythmTracker();
     /**
@@ -195,6 +237,15 @@ export class LogParser {
         break;
       case 'charm':
         this.handleCharm(event);
+        break;
+      case 'summon':
+        this.handleSummon(event);
+        break;
+      case 'effect':
+        this.handleEffect(event);
+        break;
+      case 'effect-end':
+        this.handleEffectEnd(event);
         break;
       case 'zone':
         this.handleZone(event);
@@ -471,6 +522,56 @@ export class LogParser {
   }
 
   /**
+   * A boss summoned someone — the single most DBM-shaped mechanic in the live log.
+   *
+   * Two lines can announce the same yank: the boss's say-line naming the victim, and
+   * the victim's own "You have been summoned!" confirmation. They are keyed by VICTIM
+   * so the pair folds into one warning — the confirmation refreshes the say-line's
+   * entry (and vice versa, whichever lands first) instead of stacking a duplicate.
+   *
+   * The say form carries a hostility guard: the rule table hands us whoever SAID the
+   * sentence, and with summon-say now outranking chat, a player typing it in /say
+   * reaches this method looking exactly like Master Yael. isHostileCaster is what
+   * keeps that troll from ringing a raid alert. The self-confirmation form has no
+   * sayer to vet — the game itself printed it, which is as authoritative as it gets.
+   */
+  handleSummon(event) {
+    let caster = null;
+    if (event.attacker) {
+      const resolved = this.resolve(event.attacker);
+      if (!this.isHostileCaster(resolved.name)) return;
+      caster = resolved.display;
+    }
+
+    // The victim's DISPLAY name, so a summoned pet reads as the pet ("Rhale`s
+    // warder"), not as its owner — the owner was not the one yanked.
+    const victim = this.resolve(event.victim).display;
+
+    const existing = this.hostileCasts.find(
+      (c) => c.category === 'summon' && c.victim === victim,
+    );
+    if (existing) {
+      existing.ts = event.ts;
+      // A say-line arriving after the confirmation fills in who did the yanking.
+      existing.caster ??= caster;
+      this.revision++;
+      return;
+    }
+
+    this.hostileCasts.push({
+      id: ++this.hostileCastSeq,
+      caster,
+      ability: null,
+      category: 'summon',
+      tier: 3,
+      victim,
+      ts: event.ts,
+      ttlMs: SUMMON_TTL_MS,
+    });
+    this.revision++;
+  }
+
+  /**
    * A cast was confirmed interrupted — clear its warning.
    *
    * Every entry matching the caster is cleared, not just the named spell: with
@@ -494,7 +595,11 @@ export class LogParser {
     }
 
     const before = this.hostileCasts.length;
-    this.hostileCasts = this.hostileCasts.filter((c) => c.caster !== caster.display);
+    // A summon entry survives: it is a fact that already happened, not a cast in
+    // progress — interrupting the boss's NEXT spell does not un-summon the cleric.
+    this.hostileCasts = this.hostileCasts.filter(
+      (c) => c.caster !== caster.display || c.category === 'summon',
+    );
     if (this.hostileCasts.length !== before) this.revision++;
   }
 
@@ -528,7 +633,7 @@ export class LogParser {
   pruneHostileCasts(now) {
     const before = this.hostileCasts.length;
     this.hostileCasts = this.hostileCasts.filter(
-      (c) => now - c.ts <= HOSTILE_CAST_TTL_MS && c.ts <= now,
+      (c) => now - c.ts <= (c.ttlMs ?? HOSTILE_CAST_TTL_MS) && c.ts <= now,
     );
     if (this.hostileCasts.length !== before) this.revision++;
   }
@@ -611,11 +716,26 @@ export class LogParser {
    * guess — its damage then simply goes uncounted, which is the honest outcome.
    */
   handleCharm(event) {
-    const mob = this.resolve(event.who);
+    const who = this.resolve(event.who);
+
+    // Direction check: "<who> has been charmed." covers BOTH a mob joining us and an
+    // enemy taking a group member. When the who resolves friendly it is the latter —
+    // roster-charming a player would credit the enemy's new weapon to the group, so
+    // it becomes a member-state alert instead. The isPet exclusion keeps an already-
+    // charmed mob (which resolves to its friendly owner) on the mob path, where a
+    // re-charm re-attributes it rather than raising a false member alert.
+    if (!who.isPet && this.isFriendly(who.name)) {
+      this.startCcState(who.display, 'charm', event.ts);
+      return;
+    }
+
     const charmer = this.attributeCharm(event.ts);
     if (!charmer) return;
 
-    this.roster.charm(mob.name, charmer);
+    // The RAW name, not the resolved one: a re-charm of an already-charmed mob
+    // resolves to its OWNER (that is the fold that makes its damage count), and
+    // registering the owner as their own pet would silently drop the real charm.
+    this.roster.charm(event.who, charmer);
     this.revision++;
   }
 
@@ -654,6 +774,73 @@ export class LogParser {
     return broke;
   }
 
+  /**
+   * A status effect landed on someone.
+   *
+   * Only effects on FRIENDLIES become member states — "a shin ghoul knight has been
+   * mesmerized." is the group's own CC working as intended, seen 535 times in the
+   * live log, and alerting on it would bury the one line that matters: the same
+   * wording with the cleric's name in it. The raw effect word is folded through
+   * CC_EFFECTS so mesmerized/entranced/captivated all read as the one mez state,
+   * and everything outside the table (rooted, poisoned) is deliberately dropped.
+   *
+   * "awakened" is a mez END in disguise and clears rather than starts a state.
+   */
+  handleEffect(event) {
+    const who = this.resolve(event.who);
+
+    if (event.effect === 'awakened') {
+      this.endCcState(who.display, 'mez');
+      return;
+    }
+
+    const effect = CC_EFFECTS[event.effect];
+    if (!effect) return;
+    // A pet resolves to its owner, so a friendly pet passes here through the owner's
+    // name while an enemy's pet fails with its enemy owner — no pet special-casing.
+    if (!this.isFriendly(who.name)) return;
+    this.startCcState(who.display, effect, event.ts);
+  }
+
+  /** "You are no longer stunned." — the explicit end-line the state was waiting for. */
+  handleEffectEnd(event) {
+    const effect = CC_EFFECTS[event.effect];
+    if (!effect) return;
+    this.endCcState(this.resolve(event.who).display, effect);
+  }
+
+  /** Start or refresh a member CC state. Keyed who|effect: refresh, never stack. */
+  startCcState(who, effect, ts) {
+    const existing = this.ccStates.find((s) => s.who === who && s.effect === effect);
+    if (existing) {
+      existing.ts = ts;
+    } else {
+      this.ccStates.push({ who, effect, ts });
+    }
+    this.revision++;
+  }
+
+  /** Clear a member CC state, or with effect null every state the member holds. */
+  endCcState(who, effect) {
+    const before = this.ccStates.length;
+    this.ccStates = this.ccStates.filter(
+      (s) => s.who !== who || (effect !== null && s.effect !== effect),
+    );
+    if (this.ccStates.length !== before) this.revision++;
+  }
+
+  /**
+   * Expire CC states past the cap. Runs from tick(), like warning pruning, so a
+   * chip whose end-line never came (charm has none) still leaves during a lull.
+   */
+  pruneCcStates(now) {
+    const before = this.ccStates.length;
+    this.ccStates = this.ccStates.filter(
+      (s) => now - s.ts <= CC_STATE_CAP_MS && s.ts <= now,
+    );
+    if (this.ccStates.length !== before) this.revision++;
+  }
+
   handleDeath(event) {
     // A charm ends with the mob, whichever side killed it.
     this.roster.uncharm(event.target);
@@ -664,6 +851,8 @@ export class LogParser {
     // though what the fight already learned still exports when the encounter closes.
     this.clearHostileCastsFrom(target.display);
     this.rhythms.dropCaster(target.display);
+    // Death outlives every status effect — a MEZZED chip on a corpse is a lie.
+    this.endCcState(target.display, null);
 
     if (!this.current || this.current.closed) return;
     if (this.isFriendly(target.name)) {
@@ -691,8 +880,10 @@ export class LogParser {
     // not survive: the mob is in the zone you left.
     this.roster.clearCharms();
     this.casts.clear();
-    // The casters are in the zone you left; their warnings go with them.
+    // The casters are in the zone you left; their warnings go with them — and a
+    // zone line means the player is MOVING, which no mez or stun survives.
     this.hostileCasts = [];
+    this.ccStates = [];
     this.revision++;
   }
 
@@ -727,6 +918,7 @@ export class LogParser {
    */
   tick(now = this.clock()) {
     this.pruneHostileCasts(now);
+    this.pruneCcStates(now);
     if (this.current && !this.current.closed && this.current.update(now)) {
       this.last = this.current;
       this.current = null;
@@ -742,6 +934,7 @@ export class LogParser {
     this.last = null;
     this.casts.clear();
     this.hostileCasts = [];
+    this.ccStates = [];
     // No flush: a disowned fight teaches nothing on the record, same as history.
     this.rhythms.reset();
     this.roster.clearCharms();
@@ -759,13 +952,27 @@ export class LogParser {
     // in BOTH branches: the pull often opens with the mob's first cast, before any
     // damage line has created an encounter — precisely the moment a warning matters.
     // `remainingMs` is computed here so the renderer needs no notion of log time.
-    const hostileCasts = this.hostileCasts.map((c) => ({
-      id: c.id,
-      caster: c.caster,
-      ability: c.ability,
-      category: c.category,
-      tier: c.tier,
-      remainingMs: Math.min(HOSTILE_CAST_TTL_MS, Math.max(0, HOSTILE_CAST_TTL_MS - (now - c.ts))),
+    const hostileCasts = this.hostileCasts.map((c) => {
+      const ttl = c.ttlMs ?? HOSTILE_CAST_TTL_MS;
+      return {
+        id: c.id,
+        caster: c.caster,
+        ability: c.ability,
+        category: c.category,
+        tier: c.tier,
+        victim: c.victim ?? null,
+        remainingMs: Math.min(ttl, Math.max(0, ttl - (now - c.ts))),
+      };
+    });
+
+    // Member CC states travel alongside the warnings for the same reason they do:
+    // the cleric getting mezzed on the pull, before any damage line, is precisely
+    // when the chip matters. remainingMs runs against the safety cap, not against
+    // any claimed effect duration — the log states none and we invent none.
+    const memberEffects = this.ccStates.map((s) => ({
+      who: s.who,
+      effect: s.effect,
+      remainingMs: Math.max(0, CC_STATE_CAP_MS - (now - s.ts)),
     }));
 
     // Timers only exist while a fight is running: a prediction about a mob nobody is
@@ -794,6 +1001,7 @@ export class LogParser {
         rows: [],
         hostileCasts,
         castTimers,
+        memberEffects,
       };
     }
 
@@ -803,7 +1011,15 @@ export class LogParser {
     const include = (name) =>
       !this.groupOnly || name === UNKNOWN || this.roster.includes(name, true);
     const snap = enc.snapshot(now, { includeNames: include });
-    return { ...snap, idle: false, zone: this.zone, self: this.selfName, hostileCasts, castTimers };
+    return {
+      ...snap,
+      idle: false,
+      zone: this.zone,
+      self: this.selfName,
+      hostileCasts,
+      castTimers,
+      memberEffects,
+    };
   }
 }
 

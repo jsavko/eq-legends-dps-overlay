@@ -140,11 +140,56 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
   color: var(--ink-faint);
   font-weight: 700;
 }
-/* Tier 0 has no category; the empty verb span must not leave a phantom gap. */
+/* Tier 0 has no category; the empty verb span must not leave a phantom gap.
+   Same for the caster line: a summon confirmed only by "You have been summoned!"
+   names no boss, and the banner must not carry a blank row for it. */
 .chip .verb:empty { display: none; }
+.chip .caster:empty { display: none; }
 
 /* The anonymous "begins to cast a spell." form has no name to show. */
 .chip .spell.unknown { font-style: italic; font-weight: 400; }
+
+/* ------------------------------------------------- member CC state chips */
+
+#effects {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* A state, not a cast: a flat slab with a red left edge instead of the banner's
+   top-and-bottom rules, sitting between the warnings (the call to act outranks
+   the status report) and the timers (a stated fact outranks an estimate).
+   Deliberately NO countdown or drain bar — the parser's 30s cap is a safety net,
+   not a duration, and this chip must not claim one the log never stated. */
+.echip {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.26em 0.9em;
+  font-size: 0.9em;
+  white-space: nowrap;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--slab) 96%, #3a2a18) 0%, var(--slab) 45%, var(--slab) 100%);
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--alarm);
+  border-radius: 3px;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
+  /* End-lines remove the chip instantly; only the cap expiry fades, like a warning. */
+  transition: opacity 0.6s ease;
+}
+.echip[data-fading] { opacity: 0; }
+.echip .tag {
+  color: var(--alarm-lit);
+  font-weight: 700;
+  font-size: 0.78em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.echip .who { font-weight: 600; color: var(--ink); }
 
 /* ------------------------------------------------- learned boss timer chips */
 
