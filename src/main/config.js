@@ -43,6 +43,13 @@ export const DEFAULTS = {
   /** Which metric the overlay ranks by: 'damage', 'healing' or 'taken'. */
   metric: 'damage',
 
+  /** Enemy cast warnings: the floating alert window (tray-less, top-center default). */
+  castAlerts: true,
+  /** Short cue on a NEW tier-3 warning. Off by default — sound is opt-in, always. */
+  castAlertSound: false,
+  /** Alert window position; null until the player drags it somewhere. */
+  alertsBounds: null,
+
   /**
    * Whether the "where the controls live" hint has been shown.
    *

@@ -14,6 +14,7 @@ import { matchRule } from './rules.js';
 import { resolveEntity, looksLikePlayerName } from './entities.js';
 import { Roster, parseLogFilename } from './roster.js';
 import { Encounter, DEFAULTS } from './encounter.js';
+import { classify } from './spellwatch.js';
 
 /** Row name used when damage cannot be attributed to anyone (see attributeNonMelee). */
 export const UNKNOWN = 'Unknown';
@@ -29,6 +30,17 @@ const CHARM_WINDOW_MS = 8000;
 
 /** Entries live this long in the cast table, so charm attribution outlives the 2s window. */
 const CAST_TABLE_TTL_MS = 10_000;
+
+/**
+ * How long a hostile-cast warning stays on screen with no resolution.
+ *
+ * The log never states cast times, and guessing one to draw a DBM-style progress bar
+ * would be exactly the kind of invented number this project refuses to show. Instead a
+ * warning simply lives for a fixed window generously past any EQ cast time (most sit
+ * at 2–4s) and then expires. It leaves earlier if the cast is interrupted, the caster
+ * dies, or the player zones — the three resolutions the log actually confirms.
+ */
+export const HOSTILE_CAST_TTL_MS = 6000;
 
 /**
  * Spells that take control of a mob. Charm is the only crowd control that makes the
@@ -76,6 +88,14 @@ export class LogParser {
     this.last = null;
     /** @type {Map<string, {ability: string|null, ts: number}>} in-flight casts */
     this.casts = new Map();
+    /**
+     * Enemy casts currently worth warning about, oldest first.
+     * @type {Array<{id: number, caster: string, ability: string|null,
+     *               category: string|null, tier: number, ts: number}>}
+     */
+    this.hostileCasts = [];
+    /** Monotonic id so the overlay can tell a NEW warning from a refreshed push. */
+    this.hostileCastSeq = 0;
     this.zone = null;
     /** Bumped whenever a snapshot would differ, so the UI can skip idle repaints. */
     this.revision = 0;
@@ -146,11 +166,17 @@ export class LogParser {
       case 'death':
         this.handleDeath(event);
         break;
-      case 'cast':
-        this.casts.set(this.resolve(event.attacker).name, {
+      case 'cast': {
+        const caster = this.resolve(event.attacker);
+        this.casts.set(caster.name, {
           ability: event.ability,
           ts: event.ts,
         });
+        this.noteHostileCast(event, caster);
+        break;
+      }
+      case 'interrupt':
+        this.handleInterrupt(event);
         break;
       case 'heal':
         this.handleHeal(event);
@@ -357,6 +383,104 @@ export class LogParser {
     return candidates.length === 1 ? candidates[0] : null;
   }
 
+  /**
+   * Is this resolved caster an enemy whose cast deserves a warning?
+   *
+   * Engagement outranks the name-shape heuristics for the same reason it does in the
+   * roster: a mob the group is actively fighting is hostile whatever its name looks
+   * like, including single-token named bosses that would otherwise pass for players.
+   * Beyond that, anyone friendly is out — which also silently excludes out-of-group
+   * players ("Steven begins casting Gate.") via looksLikePlayerName, and every pet
+   * that resolves to a friendly owner. Unowned pets (Gann before mapping) fight FOR
+   * the group and are not warned about either.
+   *
+   * The known gap: a single-token named mob casting before anyone has engaged or
+   * targeted it reads as a player and raises no warning until the fight starts.
+   * That is the price of never alerting on random passing players, and engagement
+   * closes it within the first swing of every real pull.
+   */
+  isHostileCaster(name) {
+    if (this.current && !this.current.closed && this.current.engagedNpcs.has(name)) return true;
+    if (this.isFriendly(name)) return false;
+    if (this.isUnownedPet(name)) return false;
+    return true;
+  }
+
+  /**
+   * Record a warning for a hostile cast.
+   *
+   * Same-named mobs are indistinguishable in the log — three cyclopes all cast as
+   * "a cyclops" — so a repeat of the same caster+spell REFRESHES the existing warning
+   * rather than stacking a duplicate row: the warning for "cyclops casting Instill"
+   * is already on screen, and whether it came from one mob or two changes nothing
+   * about the response. A different spell from the same name gets its own entry,
+   * because it might genuinely be a second mob and hiding it would be a guess.
+   */
+  noteHostileCast(event, caster) {
+    if (!this.isHostileCaster(caster.name)) return;
+
+    const existing = this.hostileCasts.find(
+      (c) => c.caster === caster.display && c.ability === event.ability,
+    );
+    if (existing) {
+      existing.ts = event.ts;
+      this.revision++;
+      return;
+    }
+
+    const cls = classify(event.ability);
+    this.hostileCasts.push({
+      id: ++this.hostileCastSeq,
+      caster: caster.display,
+      ability: event.ability,
+      category: cls?.category ?? null,
+      tier: cls?.tier ?? 0,
+      ts: event.ts,
+    });
+    this.revision++;
+  }
+
+  /**
+   * A cast was confirmed interrupted — clear its warning.
+   *
+   * Every entry matching the caster is cleared, not just the named spell: with
+   * same-named mobs the log cannot say WHICH cyclops was stopped, and a warning that
+   * lingers after the group saw "interrupted" reads as broken. A missed real cast
+   * re-alerts on the mob's next attempt within a couple of seconds; a stale warning
+   * has no such self-repair. Anonymous-cast entries (ability null) match too.
+   *
+   * The attribution cast table drops the entry as well — an interrupted spell can no
+   * longer explain stray non-melee damage or a charm landing.
+   */
+  handleInterrupt(event) {
+    const caster = this.resolve(event.attacker);
+
+    const cast = this.casts.get(caster.name);
+    if (cast && (cast.ability === event.ability || cast.ability === null)) {
+      this.casts.delete(caster.name);
+    }
+
+    const before = this.hostileCasts.length;
+    this.hostileCasts = this.hostileCasts.filter((c) => c.caster !== caster.display);
+    if (this.hostileCasts.length !== before) this.revision++;
+  }
+
+  /** Clear warnings from a caster who is now dead (a corpse finishes no casts). */
+  clearHostileCastsFrom(casterDisplay) {
+    const before = this.hostileCasts.length;
+    this.hostileCasts = this.hostileCasts.filter((c) => c.caster !== casterDisplay);
+    if (this.hostileCasts.length !== before) this.revision++;
+  }
+
+  /** Expire warnings past their window. Runs from tick(), so alerts clear during lulls. */
+  pruneHostileCasts(now) {
+    const before = this.hostileCasts.length;
+    this.hostileCasts = this.hostileCasts.filter(
+      (c) => now - c.ts <= HOSTILE_CAST_TTL_MS && c.ts <= now,
+    );
+    if (this.hostileCasts.length !== before) this.revision++;
+  }
+
   handleMiss(event) {
     const attacker = this.resolve(event.attacker);
     const target = this.resolve(event.target);
@@ -482,8 +606,12 @@ export class LogParser {
     // A charm ends with the mob, whichever side killed it.
     this.roster.uncharm(event.target);
 
-    if (!this.current || this.current.closed) return;
     const target = this.resolve(event.target);
+    // Encounter or not, a dead caster's warning is over. Friendlies never have one,
+    // so this is a no-op for player and pet deaths.
+    this.clearHostileCastsFrom(target.display);
+
+    if (!this.current || this.current.closed) return;
     if (this.isFriendly(target.name)) {
       // A player dying does not end the pull — but it is the single most important
       // fact in the damage-taken view, so it is recorded before the early return.
@@ -509,6 +637,8 @@ export class LogParser {
     // not survive: the mob is in the zone you left.
     this.roster.clearCharms();
     this.casts.clear();
+    // The casters are in the zone you left; their warnings go with them.
+    this.hostileCasts = [];
     this.revision++;
   }
 
@@ -526,6 +656,7 @@ export class LogParser {
    * @param {number} [now]
    */
   tick(now = this.clock()) {
+    this.pruneHostileCasts(now);
     if (this.current && !this.current.closed && this.current.update(now)) {
       this.last = this.current;
       this.current = null;
@@ -539,6 +670,7 @@ export class LogParser {
     this.current = null;
     this.last = null;
     this.casts.clear();
+    this.hostileCasts = [];
     this.roster.clearCharms();
     this.revision++;
   }
@@ -550,6 +682,19 @@ export class LogParser {
    * instant combat ends is useless, since reading it is the whole point.
    */
   snapshot(now = this.clock()) {
+    // Warnings ride the snapshot rather than a channel of their own, and they exist
+    // in BOTH branches: the pull often opens with the mob's first cast, before any
+    // damage line has created an encounter — precisely the moment a warning matters.
+    // `remainingMs` is computed here so the renderer needs no notion of log time.
+    const hostileCasts = this.hostileCasts.map((c) => ({
+      id: c.id,
+      caster: c.caster,
+      ability: c.ability,
+      category: c.category,
+      tier: c.tier,
+      remainingMs: Math.min(HOSTILE_CAST_TTL_MS, Math.max(0, HOSTILE_CAST_TTL_MS - (now - c.ts))),
+    }));
+
     const enc = this.current ?? this.last;
     if (!enc) {
       return {
@@ -564,6 +709,7 @@ export class LogParser {
         totalHealing: 0,
         groupHps: 0,
         rows: [],
+        hostileCasts,
       };
     }
 
@@ -573,7 +719,7 @@ export class LogParser {
     const include = (name) =>
       !this.groupOnly || name === UNKNOWN || this.roster.includes(name, true);
     const snap = enc.snapshot(now, { includeNames: include });
-    return { ...snap, idle: false, zone: this.zone, self: this.selfName };
+    return { ...snap, idle: false, zone: this.zone, self: this.selfName, hostileCasts };
   }
 }
 

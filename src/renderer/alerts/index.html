@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>EQL Cast Warnings</title>
+  <link rel="stylesheet" href="alerts.css" />
+</head>
+<body data-locked="true">
+  <!-- The whole window is an invisible box; only the chips paint. The stack grows
+       downward from the top edge so the anchor the player placed never moves. -->
+  <ol id="stack"></ol>
+
+  <!-- Only visible while unlocked: an empty invisible window cannot be dragged. -->
+  <div id="placeholder">
+    <span class="verb">Cast warnings</span>
+    <span class="hint">drag to place — warnings appear here</span>
+  </div>
+
+  <script type="module" src="alerts.js"></script>
+</body>
+</html>

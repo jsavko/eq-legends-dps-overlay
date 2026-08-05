@@ -29,6 +29,7 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {BrowserWindow|null} */ let overlayWindow = null;
 /** @type {BrowserWindow|null} */ let setupWindow = null;
 /** @type {BrowserWindow|null} */ let historyWindow = null;
+/** @type {BrowserWindow|null} */ let alertsWindow = null;
 /** @type {LogParser|null} */    let parser = null;
 /** @type {Tailer|null} */       let tailer = null;
 /** @type {ConfigStore|null} */  let config = null;
@@ -40,6 +41,7 @@ let lastRevision = -1;
 let overlayVisible = true;
 let saveBoundsTimer = null;
 let saveHistoryBoundsTimer = null;
+let saveAlertsBoundsTimer = null;
 let hoverTimer = null;
 /**
  * Where the player put the window. Auto-fit reads these and never writes them.
@@ -83,6 +85,7 @@ async function main() {
   if (config.isConfigured()) {
     await startTailing(config.get('logPath'));
     createOverlay();
+    if (config.get('castAlerts')) createAlerts();
   } else {
     createSetup('setup');
   }
@@ -208,6 +211,9 @@ function startPushLoop() {
     lastRevision = parser.revision;
 
     overlayWindow.webContents.send(CHANNELS.SNAPSHOT, snapshot);
+    if (alertsWindow && !alertsWindow.isDestroyed()) {
+      alertsWindow.webContents.send(CHANNELS.SNAPSHOT, snapshot);
+    }
   }, PUSH_INTERVAL_MS);
 }
 
@@ -453,6 +459,75 @@ function createHistory() {
   historyWindow.on('closed', () => { historyWindow = null; });
 }
 
+/**
+ * The floating cast-warning window: an invisible fixed-size box whose renderer paints
+ * only the warning chips, defaulting to top-center — where raid eyes already are.
+ *
+ * Deliberately none of the overlay's geometry machinery: nothing here auto-fits,
+ * auto-moves or bottom-anchors, so there is no resting/fitted split to get wrong.
+ * The box is generously sized for the worst realistic stack, the chips center inside
+ * it, and the only bounds that ever change are the ones the player drags to — which
+ * is why the simple history-window remember is enough. It shares the overlay's lock:
+ * click-through while locked, draggable (via CSS app-region) while not.
+ */
+function createAlerts() {
+  if (alertsWindow && !alertsWindow.isDestroyed()) return;
+
+  const area = screen.getPrimaryDisplay().workArea;
+  const width = 640;
+  // Sized for the worst stack a real session produced — a raid AE pull put 15
+  // warnings up at once (~480px) — with headroom, because a clipped warning is a
+  // silently hidden one. The box is invisible and click-through; height is free.
+  const height = 720;
+  const bounds = config.get('alertsBounds') ?? {
+    width,
+    height,
+    x: area.x + Math.round((area.width - width) / 2),
+    y: area.y + 16,
+  };
+
+  alertsWindow = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    icon: path.join(ASSETS, 'icon-256.png'),
+    focusable: true,
+    webPreferences: {
+      preload: path.join(RENDERER, 'alerts', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  alertsWindow.setAlwaysOnTop(true, 'screen-saver');
+  alertsWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  alertsWindow.loadFile(path.join(RENDERER, 'alerts', 'index.html'));
+
+  alertsWindow.on('ready-to-show', () => {
+    if (!alertsWindow || alertsWindow.isDestroyed()) return;
+    alertsWindow.setIgnoreMouseEvents(config.get('locked'));
+    alertsWindow.webContents.send(CHANNELS.LOCK_CHANGED, config.get('locked'));
+    // Ctrl+Shift+H hides the whole HUD; a warning window that survived it would be
+    // the one piece of UI the player explicitly asked to go away.
+    if (!overlayVisible) alertsWindow.hide();
+  });
+
+  const remember = () => {
+    clearTimeout(saveAlertsBoundsTimer);
+    saveAlertsBoundsTimer = setTimeout(() => {
+      if (!alertsWindow || alertsWindow.isDestroyed()) return;
+      config.set({ alertsBounds: alertsWindow.getBounds() });
+    }, 400);
+  };
+  alertsWindow.on('moved', remember);
+  alertsWindow.on('closed', () => { alertsWindow = null; });
+}
+
 // ---------------------------------------------------------------------------
 // Lock / visibility
 // ---------------------------------------------------------------------------
@@ -462,14 +537,22 @@ function createHistory() {
  * Unlocked: a normal interactive window that can be dragged and resized.
  */
 function applyLock(locked) {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    // No `forward: true`. It is the documented way to keep receiving mouse moves under
+    // click-through, but it delivered nothing here, so hover is driven by cursor polling
+    // instead (see startHoverPolling). The upside is that the window never needs mouse
+    // events back, so the game keeps every click even while the breakdown is open.
+    overlayWindow.setIgnoreMouseEvents(locked);
+    overlayWindow.webContents.send(CHANNELS.LOCK_CHANGED, locked);
+  }
 
-  // No `forward: true`. It is the documented way to keep receiving mouse moves under
-  // click-through, but it delivered nothing here, so hover is driven by cursor polling
-  // instead (see startHoverPolling). The upside is that the window never needs mouse
-  // events back, so the game keeps every click even while the breakdown is open.
-  overlayWindow.setIgnoreMouseEvents(locked);
-  overlayWindow.webContents.send(CHANNELS.LOCK_CHANGED, locked);
+  // One lock for the whole HUD: unlocking to reposition the meter is the moment to
+  // reposition the warnings too, and a separate second hotkey would just be a thing
+  // to forget.
+  if (alertsWindow && !alertsWindow.isDestroyed()) {
+    alertsWindow.setIgnoreMouseEvents(locked);
+    alertsWindow.webContents.send(CHANNELS.LOCK_CHANGED, locked);
+  }
 }
 
 /**
@@ -523,8 +606,13 @@ function toggleVisible() {
   if (overlayVisible) {
     overlayWindow.showInactive();   // show without stealing focus from the game
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+    if (alertsWindow && !alertsWindow.isDestroyed()) {
+      alertsWindow.showInactive();
+      alertsWindow.setAlwaysOnTop(true, 'screen-saver');
+    }
   } else {
     overlayWindow.hide();
+    alertsWindow?.hide();
   }
   refreshTrayMenu();
 }
@@ -620,8 +708,17 @@ function registerIpc() {
     if (patch.logPath && patch.logPath !== before.logPath) {
       await startTailing(patch.logPath);
     }
+    if (patch.castAlerts !== undefined && overlayWindow) {
+      // Torn down rather than hidden when disabled: a hidden window still costs a
+      // renderer process, for a feature the player said no to.
+      if (after.castAlerts) createAlerts();
+      else alertsWindow?.close();
+    }
 
     overlayWindow?.webContents.send(CHANNELS.CONFIG_CHANGED, after);
+    if (alertsWindow && !alertsWindow.isDestroyed()) {
+      alertsWindow.webContents.send(CHANNELS.CONFIG_CHANGED, after);
+    }
     pushStatus();
     return after;
   });

@@ -741,3 +741,101 @@ test('taken damage buckets by stated type, with the ability carrying its element
   assert.equal(row.takenAbilities.find((a) => a.name === 'Inferno').type, 'fire');
   assert.equal(row.takenAbilities.find((a) => a.name === 'Searing Arrow').type, null);
 });
+
+// ------------------------------------------------------------- cast warnings
+
+/** Epoch ms matching the D() log-line timestamps, for explicit snapshot times. */
+const T = (h, min, s) => new Date(2026, 6, 31, h, min, s).getTime();
+
+test('a hostile cast raises a warning; friendly-pet and stranger casts do not', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Instill.`);
+  p.feed(`${D(18, 48, 20)} Rhale\`s warder begins casting Healing.`);
+  p.feed(`${D(18, 48, 20)} Steven begins casting Gate.`);
+
+  const casts = p.snapshot(T(18, 48, 21)).hostileCasts;
+  assert.equal(casts.length, 1, 'only the mob warns — never our pet, never a passing player');
+  assert.equal(casts[0].caster, 'cyclops');
+  assert.equal(casts[0].ability, 'Instill');
+  assert.equal(casts[0].category, 'root');
+  assert.equal(casts[0].tier, 2);
+});
+
+test('the pull-opening cast warns before any damage line exists', () => {
+  // Fights routinely open WITH the mob's first cast; a warning gated on an encounter
+  // would miss exactly the cast the group most wants to interrupt.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 19)} A cyclops begins casting Wrath.`);
+  const snap = p.snapshot(T(18, 48, 20));
+  assert.equal(snap.idle, true, 'no encounter yet');
+  assert.equal(snap.hostileCasts.length, 1);
+});
+
+test('a confirmed interrupt clears the warning at once', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Superior Healing.`);
+  assert.equal(p.snapshot(T(18, 48, 20)).hostileCasts.length, 1);
+  p.feed(`${D(18, 48, 22)} a cyclops's Superior Healing spell is interrupted.`);
+  assert.equal(p.snapshot(T(18, 48, 22)).hostileCasts.length, 0);
+});
+
+test('an unresolved warning expires after its window', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Instill.`);
+  p.setNow(T(18, 48, 27));
+  p.tick();
+  assert.equal(p.snapshot(T(18, 48, 27)).hostileCasts.length, 0);
+});
+
+test('a dead caster takes its warning with it', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} You crush a cyclops for 40 points of damage.`);
+  p.feed(`${D(18, 48, 21)} A cyclops begins casting Superior Healing.`);
+  assert.equal(p.snapshot(T(18, 48, 21)).hostileCasts.length, 1);
+  p.feed(`${D(18, 48, 22)} A cyclops has been slain by Rhale!`);
+  assert.equal(p.snapshot(T(18, 48, 22)).hostileCasts.length, 0);
+});
+
+test('an engaged named mob warns even though its name is player-shaped', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 19)} Targeted (NPC): Zevrex`);
+  p.feed(`${D(18, 48, 20)} You crush Zevrex for 40 points of damage.`);
+  p.feed(`${D(18, 48, 21)} Zevrex begins casting Complete Healing.`);
+  const casts = p.snapshot(T(18, 48, 21)).hostileCasts;
+  assert.equal(casts.length, 1);
+  assert.equal(casts[0].category, 'heal');
+});
+
+test('the same mob re-casting refreshes the one warning instead of stacking', () => {
+  // Three cyclopes all log as "a cyclops"; whether a repeat came from one mob or two
+  // changes nothing about the response, so the warning refreshes rather than piles up.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Instill.`);
+  p.feed(`${D(18, 48, 24)} A cyclops begins casting Instill.`);
+  const casts = p.snapshot(T(18, 48, 24)).hostileCasts;
+  assert.equal(casts.length, 1);
+  assert.equal(casts[0].remainingMs, 6000);
+});
+
+test('zoning clears cast warnings with everything else', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Instill.`);
+  p.feed(`${D(18, 48, 25)} LOADING, PLEASE WAIT...`);
+  assert.equal(p.snapshot(T(18, 48, 25)).hostileCasts.length, 0);
+});
+
+test('an unlisted spell still warns — unknown is not invisible', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Utter Doom.`);
+  const [c] = p.snapshot(T(18, 48, 20)).hostileCasts;
+  assert.equal(c.ability, 'Utter Doom');
+  assert.equal(c.category, null);
+  assert.equal(c.tier, 0);
+});
+
+test('the anonymous classic cast line still warns when the caster is hostile', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins to cast a spell.`);
+  const [c] = p.snapshot(T(18, 48, 20)).hostileCasts;
+  assert.equal(c.ability, null);
+});

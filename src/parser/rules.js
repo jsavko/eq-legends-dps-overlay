@@ -392,6 +392,22 @@ export const RULES = [
     re: /^(.+?) beg(?:ins|in) to cast a spell\.$/,
     make: (m) => ({ kind: 'cast', attacker: m[1], ability: null }),
   },
+  {
+    // (confirmed) "a tal ghoul wizard's Instill spell is interrupted."
+    // (confirmed) "Emalina's Renewing Echo spell is interrupted."
+    //
+    // The one wording covers everyone — the live log has no bare "Your spell is
+    // interrupted." variant. Spell names containing an apostrophe ("Tishan's Clash")
+    // still split correctly because the caster group is non-greedy: it stops at the
+    // FIRST "'s", which is the caster's possessive.
+    //
+    // An interrupted cast can no longer explain stray damage or a charm landing, and
+    // it is what clears a hostile-cast warning — the whole point of calling for the
+    // interrupt is seeing it confirmed.
+    id: 'cast-interrupted',
+    re: /^(.+?)'s (.+?) spell is interrupted\.$/,
+    make: (m) => ({ kind: 'interrupt', attacker: m[1], ability: m[2] }),
+  },
 
   // ----------------------------------------------------------------- crowd control
   {

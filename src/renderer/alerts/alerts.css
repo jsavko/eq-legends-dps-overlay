@@ -1,0 +1,172 @@
+/*
+ * The floating cast-warning window: a stack of chips over an invisible box.
+ *
+ * Same parchment-on-smoked-glass language as the overlay, but a different job: the
+ * meter is read at leisure, a warning has to be SEEN mid-fight. So the chips run full
+ * opacity (the overlay's translucency setting deliberately does not apply here), the
+ * tier-3 banner takes the alarm red, and nothing else on the window paints at all.
+ *
+ * Like the overlay, this window can never scroll: the box is generously taller than a
+ * realistic stack (a warning lives ~6s; more than a handful at once does not happen —
+ * the live log's worst case was 4), and overflow is hidden, never scrolled.
+ */
+
+:root {
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+  --slab:      #100d0a;
+  --edge:      #2e2620;
+  --ember-lit: #e0a53f;
+
+  /* Alarm red is deliberately hotter than the damage-taken "wound" red so a warning
+     can never be mistaken for a metric color. */
+  --alarm:     #d5482f;
+  --alarm-lit: #f2825f;
+
+  --scale: 1;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  cursor: default;
+  user-select: none;
+}
+
+body {
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: calc(15px * var(--scale));
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Unlocked, the whole box is a drag handle — there is no other chrome to grab. */
+body:not([data-locked="true"]) { -webkit-app-region: drag; }
+
+#stack {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.chip {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--slab) 96%, #3a2a18) 0%, var(--slab) 45%, var(--slab) 100%);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  /* Expiry is a fade, arrival is instant — a warning must never ease in. */
+  transition: opacity 0.6s ease;
+}
+.chip[data-fading] { opacity: 0; }
+
+/* ------------------------------------------------------- tier 3: the banner */
+
+.chip[data-tier="3"] {
+  padding: 0.42em 1.1em 0.5em;
+  text-align: center;
+  border-color: color-mix(in srgb, var(--alarm) 55%, var(--edge));
+  box-shadow:
+    inset 0 2px 0 color-mix(in srgb, var(--alarm) 70%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--alarm) 40%, transparent),
+    0 2px 18px rgba(0, 0, 0, 0.65);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--alarm) 14%, var(--slab)) 0%, var(--slab) 70%);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { filter: brightness(1); }
+  50%      { filter: brightness(1.22); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chip[data-tier="3"] { animation: none; }
+}
+
+.chip[data-tier="3"] .verb {
+  display: block;
+  color: var(--alarm-lit);
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  font-size: 0.72em;
+  margin-bottom: 0.1em;
+}
+.chip[data-tier="3"] .spell { font-size: 1.5em; font-weight: 700; line-height: 1.1; }
+.chip[data-tier="3"] .caster { display: block; color: var(--ink-dim); font-size: 0.85em; margin-top: 0.12em; }
+
+/* --------------------------------------------------------- tier 2: the warn */
+
+.chip[data-tier="2"] {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.3em 0.9em;
+}
+.chip[data-tier="2"] .verb {
+  color: var(--ember-lit);
+  font-weight: 700;
+  font-size: 0.72em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.chip[data-tier="2"] .spell { font-weight: 600; }
+.chip[data-tier="2"] .caster { color: var(--ink-dim); font-size: 0.82em; }
+
+/* ------------------------------------------------- tier 1/0: the info lines */
+
+.chip[data-tier="1"],
+.chip[data-tier="0"] {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.22em 0.9em;
+  font-size: 0.85em;
+  color: var(--ink-dim);
+}
+.chip[data-tier="1"] .verb,
+.chip[data-tier="0"] .verb {
+  font-size: 0.78em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 700;
+}
+/* Tier 0 has no category; the empty verb span must not leave a phantom gap. */
+.chip .verb:empty { display: none; }
+
+/* The anonymous "begins to cast a spell." form has no name to show. */
+.chip .spell.unknown { font-style: italic; font-weight: 400; }
+
+/* ----------------------------------------------- unlocked drag placeholder */
+
+#placeholder {
+  display: none;
+  margin: 2px auto 0;
+  width: fit-content;
+  padding: 0.5em 1.4em;
+  text-align: center;
+  background: color-mix(in srgb, var(--slab) 88%, transparent);
+  border: 1px dashed var(--ink-faint);
+  border-radius: 3px;
+}
+#placeholder .verb {
+  display: block;
+  color: var(--ember-lit);
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 0.8em;
+}
+#placeholder .hint { color: var(--ink-dim); font-size: 0.8em; }
+
+/* While unlocked the placeholder marks the anchor even when warnings are live. */
+body:not([data-locked="true"]) #placeholder { display: block; }

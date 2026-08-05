@@ -44,6 +44,8 @@ function fillForm(cfg) {
   $('grace').value = cfg.postKillGraceSec;
   $('group-only').checked = cfg.groupOnly;
   $('auto-switch').checked = cfg.autoSwitchCharacter;
+  $('cast-alerts').checked = cfg.castAlerts;
+  $('cast-alert-sound').checked = cfg.castAlertSound;
   $('pet-owners').value = formatPetOwners(cfg.petOwners);
   $('hk-lock').value = cfg.hotkeys.toggleLock;
   $('hk-show').value = cfg.hotkeys.toggleVisible;
@@ -210,6 +212,8 @@ async function save() {
     postKillGraceSec: Number($('grace').value),
     groupOnly: $('group-only').checked,
     autoSwitchCharacter: $('auto-switch').checked,
+    castAlerts: $('cast-alerts').checked,
+    castAlertSound: $('cast-alert-sound').checked,
     petOwners: parsePetOwners($('pet-owners').value),
     hotkeys: {
       toggleLock: $('hk-lock').value.trim(),

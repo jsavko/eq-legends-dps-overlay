@@ -346,3 +346,23 @@ test('damage-shield verbs that state an element carry it as the type', () => {
   assert.equal(thorns.damageType, null);
   assert.equal(thorns.attacker, 'a wan ghoul knight');
 });
+
+test('an interrupted NPC cast names caster and spell (sample)', () => {
+  const e = m("a tal ghoul wizard's Instill spell is interrupted.");
+  assert.equal(e.kind, 'interrupt');
+  assert.equal(e.attacker, 'a tal ghoul wizard');
+  assert.equal(e.ability, 'Instill');
+});
+
+test('an apostrophe inside the spell name does not shift the caster split (sample)', () => {
+  const e = m("a yun ghoul wizard's Tishan's Clash spell is interrupted.");
+  assert.equal(e.attacker, 'a yun ghoul wizard');
+  assert.equal(e.ability, "Tishan's Clash");
+});
+
+test('a player interrupt uses the same possessive wording (sample)', () => {
+  const e = m("Emalina's Renewing Echo spell is interrupted.");
+  assert.equal(e.kind, 'interrupt');
+  assert.equal(e.attacker, 'Emalina');
+  assert.equal(e.ability, 'Renewing Echo');
+});
