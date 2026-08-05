@@ -1,0 +1,138 @@
+{
+  "Marrowbane pet|Water Elemental Attack": {
+    "caster": "Marrowbane pet",
+    "ability": "Water Elemental Attack",
+    "intervalMs": 7000,
+    "spreadMs": 1482.6,
+    "samples": 18,
+    "lastSeen": 1785637637000
+  },
+  "Hoptor Thaggelum pet|Disease Cloud": {
+    "caster": "Hoptor Thaggelum pet",
+    "ability": "Disease Cloud",
+    "intervalMs": 28000,
+    "spreadMs": 500,
+    "samples": 3,
+    "lastSeen": 1785699839000
+  },
+  "Quag Maelstrom|Mana Drain": {
+    "caster": "Quag Maelstrom",
+    "ability": "Mana Drain",
+    "intervalMs": 19000,
+    "spreadMs": 1482.6,
+    "samples": 5,
+    "lastSeen": 1785752753000
+  },
+  "Hoptor Thaggelum|Superior Healing": {
+    "caster": "Hoptor Thaggelum",
+    "ability": "Superior Healing",
+    "intervalMs": 8000,
+    "spreadMs": 500,
+    "samples": 6,
+    "lastSeen": 1785780529000
+  },
+  "King Tranix|Life Leech": {
+    "caster": "King Tranix",
+    "ability": "Life Leech",
+    "intervalMs": 18286,
+    "spreadMs": 1909,
+    "samples": 7,
+    "lastSeen": 1785942957000
+  },
+  "Hoptor Thaggelum|Shadow Vortex": {
+    "caster": "Hoptor Thaggelum",
+    "ability": "Shadow Vortex",
+    "intervalMs": 18000,
+    "spreadMs": 3215,
+    "samples": 6,
+    "lastSeen": 1785861012000
+  },
+  "Hoptor Thaggelum pet|Lifespike": {
+    "caster": "Hoptor Thaggelum pet",
+    "ability": "Lifespike",
+    "intervalMs": 12000,
+    "spreadMs": 2965.2,
+    "samples": 6,
+    "lastSeen": 1785859562000
+  },
+  "Baron Telyx V`Zher|Furor": {
+    "caster": "Baron Telyx V`Zher",
+    "ability": "Furor",
+    "intervalMs": 8000,
+    "spreadMs": 500,
+    "samples": 7,
+    "lastSeen": 1785872022000
+  },
+  "Footman of V`Zher|Center": {
+    "caster": "Footman of V`Zher",
+    "ability": "Center",
+    "intervalMs": 7000,
+    "spreadMs": 500,
+    "samples": 3,
+    "lastSeen": 1785872954000
+  },
+  "Master Yael|Draught of Fire": {
+    "caster": "Master Yael",
+    "ability": "Draught of Fire",
+    "intervalMs": 4000,
+    "spreadMs": 500,
+    "samples": 3,
+    "lastSeen": 1785899614000
+  },
+  "Master Yael|Immobilize": {
+    "caster": "Master Yael",
+    "ability": "Immobilize",
+    "intervalMs": 72500,
+    "spreadMs": 17791.2,
+    "samples": 6,
+    "lastSeen": 1785902356000
+  },
+  "Magus Rokyl|Immobilize": {
+    "caster": "Magus Rokyl",
+    "ability": "Immobilize",
+    "intervalMs": 4000,
+    "spreadMs": 500,
+    "samples": 13,
+    "lastSeen": 1785943914000
+  },
+  "Warlord Skarlon|Greater Healing": {
+    "caster": "Warlord Skarlon",
+    "ability": "Greater Healing",
+    "intervalMs": 8000,
+    "spreadMs": 500,
+    "samples": 3,
+    "lastSeen": 1785943053000
+  },
+  "Lord Nagafen|Shadow Vortex": {
+    "caster": "Lord Nagafen",
+    "ability": "Shadow Vortex",
+    "intervalMs": 62000,
+    "spreadMs": 5930.4,
+    "samples": 6,
+    "lastSeen": 1785943914000
+  },
+  "Warlord Skarlon pet|Ice Spear": {
+    "caster": "Warlord Skarlon pet",
+    "ability": "Ice Spear",
+    "intervalMs": 22500,
+    "spreadMs": 2223.9,
+    "samples": 4,
+    "lastSeen": 1785947916196
+  },
+  "Warlord Skarlon pet|Drowsy": {
+    "caster": "Warlord Skarlon pet",
+    "ability": "Drowsy",
+    "intervalMs": 56000,
+    "spreadMs": 2965.2,
+    "samples": 3,
+    "lastSeen": 1785947916196
+  },
+  "Warlord Skarlon|Frost Shard": {
+    "caster": "Warlord Skarlon",
+    "ability": "Frost Shard",
+    "intervalMs": 12000,
+    "spreadMs": 500,
+    "samples": 3,
+    "lastSeen": 1785947916196
+  }
+}

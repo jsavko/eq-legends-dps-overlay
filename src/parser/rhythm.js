@@ -39,8 +39,14 @@ export const QUALIFY_MAX_CV = 0.25;
 const RETRACT_SPREAD_FACTOR = 2;
 const RETRACT_FLOOR_MS = 2000;
 
-/** A stored rhythm needs this many pooled samples before it may warm-start a timer. */
-export const WARM_START_MIN_SAMPLES = 4;
+/**
+ * A stored rhythm needs this many pooled samples before it may warm-start a timer.
+ * Matches QUALIFY_MIN_GAPS on purpose: three agreeing gaps is exactly the evidence
+ * that shows a timer live mid-fight, and the same evidence written down should not
+ * become too weak to use on the next pull. (Was 4; several genuinely tight measured
+ * rhythms — Warlord Skarlon's 8s ±0.5 Greater Healing among them — carry n=3.)
+ */
+export const WARM_START_MIN_SAMPLES = 3;
 
 /** Bound per-key memory; a raid boss casts well under this in any one fight. */
 const MAX_GAPS_KEPT = 30;

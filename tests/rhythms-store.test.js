@@ -64,3 +64,31 @@ test('an empty learned list writes nothing', () => {
   store.merge('oggok', [], 1000);
   assert.equal(fs.existsSync(path.join(dir, 'oggok.json')), false);
 });
+
+test('shipped baselines fill gaps, lose to local learning, and are never written', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rhythms-'));
+  const baselines = {
+    'Quag Maelstrom|Mana Drain': { ...QUAG, lastSeen: 1 },
+    'Lord Nagafen|Shadow Vortex': {
+      caster: 'Lord Nagafen', ability: 'Shadow Vortex',
+      intervalMs: 62_000, spreadMs: 5900, samples: 6, lastSeen: 1,
+    },
+  };
+  const store = new RhythmStore(dir, baselines);
+
+  // A fresh install: everything known comes from the shipped file, on any server.
+  assert.equal(store.knownFor('oggok').length, 2);
+  assert.equal(store.knownFor('vallon').length, 2);
+
+  // This player's own fights measured Quag differently: the LOCAL rhythm replaces
+  // the baseline outright — never pooled with it, a rhythm measured here beats one
+  // shipped from someone else's server.
+  store.merge('oggok', [{ caster: 'Quag Maelstrom', ability: 'Mana Drain', intervalMs: 25_000, spreadMs: 1000, samples: 5 }], 2000);
+  const known = store.knownFor('oggok');
+  assert.equal(known.find((r) => r.caster === 'Quag Maelstrom').intervalMs, 25_000);
+  assert.equal(known.find((r) => r.caster === 'Lord Nagafen').intervalMs, 62_000, 'unlearned bosses keep the baseline');
+
+  // The file on disk holds only what was learned locally.
+  const file = JSON.parse(fs.readFileSync(path.join(dir, 'oggok.json'), 'utf8'));
+  assert.deepEqual(Object.keys(file), ['Quag Maelstrom|Mana Drain']);
+});

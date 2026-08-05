@@ -80,7 +80,7 @@ async function main() {
   config = new ConfigStore(app.getPath('userData'));
   config.load();
   history = new EncounterStore(path.join(app.getPath('userData'), 'history'));
-  rhythmStore = new RhythmStore(path.join(app.getPath('userData'), 'rhythms'));
+  rhythmStore = new RhythmStore(path.join(app.getPath('userData'), 'rhythms'), loadBaselineRhythms());
 
   registerIpc();
   createTray();
@@ -196,6 +196,19 @@ function persistEncounter(enc) {
     // History is a convenience; a full disk or a locked file must never take the
     // live overlay down with it.
     toast(`History write failed: ${err.message}`);
+  }
+}
+
+/**
+ * Boss rhythms shipped with the app: measured from real session logs by
+ * scripts/seed-rhythms.js and copied into src/main/baseline-rhythms.json — never
+ * hand-written numbers. A missing or damaged file just means no baselines.
+ */
+function loadBaselineRhythms() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(HERE, 'baseline-rhythms.json'), 'utf8'));
+  } catch {
+    return {};
   }
 }
 

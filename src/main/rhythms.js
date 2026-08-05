@@ -23,9 +23,18 @@ export const SAMPLE_CAP = 30;
 const key = (caster, ability) => `${caster}|${ability}`;
 
 export class RhythmStore {
-  /** @param {string} dir directory for per-server files (Electron's userData/rhythms) */
-  constructor(dir) {
+  /**
+   * @param {string} dir directory for per-server files (Electron's userData/rhythms)
+   * @param {Record<string, object>} [baselines]
+   *   Rhythms shipped with the app — measured from real logs by seed-rhythms, never
+   *   hand-written — so a fresh install's first raid starts pre-armed. Read-only:
+   *   they fill gaps in knownFor() and are never written back, and anything the
+   *   LOCAL store has learned for the same boss|spell outranks them, because a
+   *   rhythm measured on this player's own server beats one shipped from another's.
+   */
+  constructor(dir, baselines = {}) {
     this.dir = dir;
+    this.baselines = baselines;
   }
 
   file(server) {
@@ -43,9 +52,9 @@ export class RhythmStore {
     }
   }
 
-  /** The shape the parser's setKnownRhythms wants. */
+  /** The shape the parser's setKnownRhythms wants: baselines, overridden by learned. */
   knownFor(server) {
-    return Object.values(this.load(server));
+    return Object.values({ ...this.baselines, ...this.load(server) });
   }
 
   /**
