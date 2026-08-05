@@ -16,6 +16,7 @@ import { LogParser } from '../parser/index.js';
 import { Tailer, listLogs } from './tailer.js';
 import { ConfigStore, DEFAULT_LOG_DIR } from './config.js';
 import { EncounterStore, RECORD_VERSION, storeKey } from './history.js';
+import { RhythmStore } from './rhythms.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
 import { clampHeight, clampWidth, placeWindow } from './layout.js';
 
@@ -35,6 +36,7 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {ConfigStore|null} */  let config = null;
 /** @type {Tray|null} */         let tray = null;
 /** @type {EncounterStore|null} */ let history = null;
+/** @type {RhythmStore|null} */   let rhythmStore = null;
 
 let pushTimer = null;
 let lastRevision = -1;
@@ -78,6 +80,7 @@ async function main() {
   config = new ConfigStore(app.getPath('userData'));
   config.load();
   history = new EncounterStore(path.join(app.getPath('userData'), 'history'));
+  rhythmStore = new RhythmStore(path.join(app.getPath('userData'), 'rhythms'));
 
   registerIpc();
   createTray();
@@ -117,7 +120,9 @@ async function startTailing(logPath) {
     logFilename: path.basename(logPath),
     ...config.parserOptions(),
     onEncounterEnd: persistEncounter,
+    onRhythmsLearned: persistRhythms,
   });
+  provideKnownRhythms();
 
   tailer = new Tailer({
     filePath: logPath,
@@ -132,6 +137,8 @@ async function startTailing(logPath) {
     // A different character means a different group and a different set of totals.
     parser.setLogFilename(path.basename(to));
     parser.reset();
+    // The server may have changed with the character, and rhythms are per server.
+    provideKnownRhythms();
     config.set({ logPath: to });
     toast(`Now following ${character}`);
     refreshTrayMenu();
@@ -189,6 +196,31 @@ function persistEncounter(enc) {
     // History is a convenience; a full disk or a locked file must never take the
     // live overlay down with it.
     toast(`History write failed: ${err.message}`);
+  }
+}
+
+/**
+ * Persist a closing fight's learned boss rhythms.
+ *
+ * Same failure posture as history: the store is a convenience, and a full disk must
+ * not take the live overlay down — or even interrupt the fight report.
+ */
+function persistRhythms(learned) {
+  if (!rhythmStore || !parser) return;
+  try {
+    rhythmStore.merge(parser.server, learned, Date.now());
+  } catch (err) {
+    toast(`Rhythm save failed: ${err.message}`);
+  }
+}
+
+/** Hand the parser what previous fights on this server taught. */
+function provideKnownRhythms() {
+  if (!rhythmStore || !parser) return;
+  try {
+    parser.setKnownRhythms(rhythmStore.knownFor(parser.server));
+  } catch {
+    parser.setKnownRhythms([]);
   }
 }
 

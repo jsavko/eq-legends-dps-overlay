@@ -47,6 +47,8 @@ export const DEFAULTS = {
   castAlerts: true,
   /** Short cue on a NEW tier-3 warning. Off by default — sound is opt-in, always. */
   castAlertSound: false,
+  /** Learned recast countdowns for named bosses, shown under the warnings. */
+  castTimers: true,
   /** Alert window position; null until the player drags it somewhere. */
   alertsBounds: null,
 

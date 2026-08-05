@@ -839,3 +839,73 @@ test('the anonymous classic cast line still warns when the caster is hostile', (
   const [c] = p.snapshot(T(18, 48, 20)).hostileCasts;
   assert.equal(c.ability, null);
 });
+
+// --------------------------------------------------------------- cast timers
+
+test('a named boss casting on a rhythm earns a timer; article trash never does', () => {
+  // Casts never extend an encounter, so the fight needs a timeout longer than the
+  // cast series to stay open — as a real bossfight's steady damage would keep it.
+  const p = makeParser({ timeoutMs: 120_000 });
+  p.feed(`${D(18, 48, 0)} You crush Quag Maelstrom for 40 points of damage.`);
+  for (const s of [10, 29, 49, 68]) {
+    p.feed(`${D(18, 48 + Math.floor(s / 60), s % 60)} Quag Maelstrom begins casting Mana Drain.`);
+    p.feed(`${D(18, 48 + Math.floor(s / 60), s % 60)} A cyclops begins casting Instill.`);
+  }
+
+  const snap = p.snapshot(T(18, 49, 10));
+  assert.equal(snap.castTimers.length, 1, 'the metronomic boss and ONLY the boss');
+  const [timer] = snap.castTimers;
+  assert.equal(timer.caster, 'Quag Maelstrom');
+  assert.equal(timer.ability, 'Mana Drain');
+  assert.equal(timer.warm, false);
+  assert.ok(timer.dueMs > 0 && timer.dueMs <= timer.intervalMs);
+});
+
+test('a stored rhythm arms the timer from the first cast of the next pull', () => {
+  const p = makeParser();
+  p.setKnownRhythms([
+    { caster: 'Quag Maelstrom', ability: 'Mana Drain', intervalMs: 19_000, spreadMs: 1500, samples: 10 },
+  ]);
+  p.feed(`${D(18, 48, 0)} You crush Quag Maelstrom for 40 points of damage.`);
+  p.feed(`${D(18, 48, 10)} Quag Maelstrom begins casting Mana Drain.`);
+
+  const [timer] = p.snapshot(T(18, 48, 15)).castTimers;
+  assert.ok(timer, 'one cast plus the prior is enough on a repeat pull');
+  assert.equal(timer.warm, true);
+  assert.equal(timer.dueMs, 14_000);
+});
+
+test('closing a fight exports what it taught; a manual reset exports nothing', () => {
+  const learned = [];
+  const p = makeParser({ timeoutMs: 120_000, onRhythmsLearned: (l) => learned.push(...l) });
+  p.feed(`${D(18, 48, 0)} You crush Quag Maelstrom for 40 points of damage.`);
+  for (const s of [10, 29, 49, 68]) {
+    p.feed(`${D(18, 48 + Math.floor(s / 60), s % 60)} Quag Maelstrom begins casting Mana Drain.`);
+  }
+  p.feed(`${D(18, 50, 0)} You have entered The Ruins of Old Guk 2 (Adaptive).`);
+
+  assert.equal(learned.length, 1);
+  assert.equal(learned[0].caster, 'Quag Maelstrom');
+  assert.equal(learned[0].samples, 3);
+
+  // Second fight, then a manual reset: the tracker forgets without exporting.
+  learned.length = 0;
+  p.feed(`${D(18, 51, 0)} You crush Quag Maelstrom for 40 points of damage.`);
+  for (const s of [10, 29, 49, 68]) {
+    p.feed(`${D(18, 51 + Math.floor(s / 60), s % 60)} Quag Maelstrom begins casting Mana Drain.`);
+  }
+  p.reset();
+  assert.equal(learned.length, 0, 'a disowned fight teaches nothing on the record');
+});
+
+test('timers vanish when the fight ends', () => {
+  const p = makeParser({ timeoutMs: 120_000 });
+  p.feed(`${D(18, 48, 0)} You crush Quag Maelstrom for 40 points of damage.`);
+  for (const s of [10, 29, 49, 68]) {
+    p.feed(`${D(18, 48 + Math.floor(s / 60), s % 60)} Quag Maelstrom begins casting Mana Drain.`);
+  }
+  assert.equal(p.snapshot(T(18, 49, 10)).castTimers.length, 1);
+
+  p.feed(`${D(18, 49, 15)} You have entered The Ruins of Old Guk 2 (Adaptive).`);
+  assert.equal(p.snapshot(T(18, 49, 16)).castTimers.length, 0);
+});

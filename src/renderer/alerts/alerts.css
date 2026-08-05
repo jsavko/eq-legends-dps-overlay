@@ -146,6 +146,57 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
 /* The anonymous "begins to cast a spell." form has no name to show. */
 .chip .spell.unknown { font-style: italic; font-weight: 400; }
 
+/* ------------------------------------------------- learned boss timer chips */
+
+#timers {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* A timer wears the calm info-line look, never a warning's: the "~" and the drain
+   bar say "estimate", and nothing here may be mistaken for a cast the log stated. */
+.tchip {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  padding: 0.24em 0.9em 0.34em;
+  font-size: 0.85em;
+  color: var(--ink-dim);
+  overflow: hidden;
+  white-space: nowrap;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--slab) 96%, #3a2a18) 0%, var(--slab) 45%, var(--slab) 100%);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
+}
+.tchip .due { color: var(--ember-lit); font-weight: 700; font-variant-numeric: tabular-nums; }
+.tchip .spell { color: var(--ink); font-weight: 600; }
+.tchip .caster { font-size: 0.9em; }
+.tchip .drain {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--ember-lit);
+  opacity: 0.8;
+  /* Pushes arrive at 4 Hz; the linear transition smooths the drain between them. */
+  transition: width 0.25s linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tchip .drain { transition: none; }
+}
+
+/* A warm timer runs on last pull's rhythm, unconfirmed by this fight — the weaker
+   claim, so it drops the amber and dims until this pull's own gaps qualify. */
+.tchip[data-warm] .due { color: var(--ink-dim); }
+.tchip[data-warm] .drain { background: var(--ink-dim); }
+
 /* ----------------------------------------------- unlocked drag placeholder */
 
 #placeholder {

@@ -11,10 +11,11 @@
 
 import { parseTimestamp } from './timestamp.js';
 import { matchRule } from './rules.js';
-import { resolveEntity, looksLikePlayerName } from './entities.js';
+import { resolveEntity, looksLikePlayerName, stripArticle } from './entities.js';
 import { Roster, parseLogFilename } from './roster.js';
 import { Encounter, DEFAULTS } from './encounter.js';
 import { classify } from './spellwatch.js';
+import { RhythmTracker } from './rhythm.js';
 
 /** Row name used when damage cannot be attributed to anyone (see attributeNonMelee). */
 export const UNKNOWN = 'Unknown';
@@ -96,6 +97,14 @@ export class LogParser {
     this.hostileCasts = [];
     /** Monotonic id so the overlay can tell a NEW warning from a refreshed push. */
     this.hostileCastSeq = 0;
+    /** Recast rhythms of named casters — the learned spell timers. */
+    this.rhythms = new RhythmTracker();
+    /**
+     * Called with the qualified rhythms a closing encounter taught us, on the same
+     * close paths as onEncounterEnd — and, like it, deliberately NOT on a manual
+     * reset: a fight the player disowned teaches nothing on the record.
+     */
+    this.onRhythmsLearned = options.onRhythmsLearned ?? null;
     this.zone = null;
     /** Bumped whenever a snapshot would differ, so the UI can skip idle repaints. */
     this.revision = 0;
@@ -419,6 +428,15 @@ export class LogParser {
   noteHostileCast(event, caster) {
     if (!this.isHostileCaster(caster.name)) return;
 
+    // Named casters — no leading article on the RAW name — feed the rhythm tracker.
+    // Every cast counts, including ones that merely refresh a warning below: each
+    // real cast is what re-anchors the prediction clock. Generic article-mobs never
+    // get timers ("a ghoul scribe" rebuffing every 11s is metronomic and worthless),
+    // and the anonymous cast form has no spell to key a rhythm on.
+    if (event.ability && stripArticle(event.attacker) === String(event.attacker).trim()) {
+      this.rhythms.noteCast(caster.display, event.ability, event.ts);
+    }
+
     const existing = this.hostileCasts.find(
       (c) => c.caster === caster.display && c.ability === event.ability,
     );
@@ -454,6 +472,9 @@ export class LogParser {
    */
   handleInterrupt(event) {
     const caster = this.resolve(event.attacker);
+
+    // The mob will retry early; the gap after an interruption must not be learned.
+    this.rhythms.noteInterrupt(caster.display, event.ability);
 
     const cast = this.casts.get(caster.name);
     if (cast && (cast.ability === event.ability || cast.ability === null)) {
@@ -608,8 +629,10 @@ export class LogParser {
 
     const target = this.resolve(event.target);
     // Encounter or not, a dead caster's warning is over. Friendlies never have one,
-    // so this is a no-op for player and pet deaths.
+    // so this is a no-op for player and pet deaths. Its timers stop predicting too —
+    // though what the fight already learned still exports when the encounter closes.
     this.clearHostileCastsFrom(target.display);
+    this.rhythms.dropCaster(target.display);
 
     if (!this.current || this.current.closed) return;
     if (this.isFriendly(target.name)) {
@@ -648,6 +671,22 @@ export class LogParser {
     this.last = this.current;
     this.current = null;
     this.onEncounterEnd?.(this.last);
+    this.flushRhythms();
+  }
+
+  /**
+   * Hand a closing fight's qualified rhythms to whoever persists them, then start
+   * the tracker clean. Runs on the real close paths only — reset() skips it.
+   */
+  flushRhythms() {
+    const learned = this.rhythms.learned();
+    if (learned.length) this.onRhythmsLearned?.(learned);
+    this.rhythms.reset();
+  }
+
+  /** Rhythms learned in previous fights, from the persistent store (see main). */
+  setKnownRhythms(rhythms) {
+    this.rhythms.setKnown(rhythms);
   }
 
   /**
@@ -662,6 +701,7 @@ export class LogParser {
       this.current = null;
       this.revision++;
       this.onEncounterEnd?.(this.last);
+      this.flushRhythms();
     }
   }
 
@@ -671,6 +711,8 @@ export class LogParser {
     this.last = null;
     this.casts.clear();
     this.hostileCasts = [];
+    // No flush: a disowned fight teaches nothing on the record, same as history.
+    this.rhythms.reset();
     this.roster.clearCharms();
     this.revision++;
   }
@@ -695,6 +737,16 @@ export class LogParser {
       remainingMs: Math.min(HOSTILE_CAST_TTL_MS, Math.max(0, HOSTILE_CAST_TTL_MS - (now - c.ts))),
     }));
 
+    // Timers only exist while a fight is running: a prediction about a mob nobody is
+    // fighting is a promise the log can't keep. Warnings are facts and show anytime;
+    // timers are estimates and need the fight live to stay grounded.
+    const castTimers = this.current && !this.current.closed
+      ? this.rhythms.timers(now).map((t) => {
+          const cls = classify(t.ability);
+          return { ...t, category: cls?.category ?? null, tier: cls?.tier ?? 0 };
+        })
+      : [];
+
     const enc = this.current ?? this.last;
     if (!enc) {
       return {
@@ -710,6 +762,7 @@ export class LogParser {
         groupHps: 0,
         rows: [],
         hostileCasts,
+        castTimers,
       };
     }
 
@@ -719,7 +772,7 @@ export class LogParser {
     const include = (name) =>
       !this.groupOnly || name === UNKNOWN || this.roster.includes(name, true);
     const snap = enc.snapshot(now, { includeNames: include });
-    return { ...snap, idle: false, zone: this.zone, self: this.selfName, hostileCasts };
+    return { ...snap, idle: false, zone: this.zone, self: this.selfName, hostileCasts, castTimers };
   }
 }
 

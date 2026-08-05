@@ -46,6 +46,7 @@ function fillForm(cfg) {
   $('auto-switch').checked = cfg.autoSwitchCharacter;
   $('cast-alerts').checked = cfg.castAlerts;
   $('cast-alert-sound').checked = cfg.castAlertSound;
+  $('cast-timers').checked = cfg.castTimers;
   $('pet-owners').value = formatPetOwners(cfg.petOwners);
   $('hk-lock').value = cfg.hotkeys.toggleLock;
   $('hk-show').value = cfg.hotkeys.toggleVisible;
@@ -214,6 +215,7 @@ async function save() {
     autoSwitchCharacter: $('auto-switch').checked,
     castAlerts: $('cast-alerts').checked,
     castAlertSound: $('cast-alert-sound').checked,
+    castTimers: $('cast-timers').checked,
     petOwners: parsePetOwners($('pet-owners').value),
     hotkeys: {
       toggleLock: $('hk-lock').value.trim(),

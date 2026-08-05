@@ -9,10 +9,13 @@
  */
 
 const stack = document.getElementById('stack');
+const timersList = document.getElementById('timers');
 
 let cfg = null;
 /** @type {Map<number, HTMLElement>} chip elements by warning id */
 const chips = new Map();
+/** @type {Map<string, {el: HTMLElement, due: HTMLElement, drain: HTMLElement}>} timer chips by caster|ability */
+const timerChips = new Map();
 /** Ids present in the previous push — how a NEW tier-3 warning is told from an old one. */
 let seenIds = new Set();
 
@@ -32,7 +35,11 @@ async function init() {
   window.api.onLockChanged((locked) => {
     document.body.dataset.locked = String(locked);
   });
-  window.api.onSnapshot((snapshot) => render(snapshot.hostileCasts ?? []));
+  window.api.onSnapshot((snapshot) => {
+    const warnings = snapshot.hostileCasts ?? [];
+    render(warnings);
+    renderTimers(snapshot.castTimers ?? [], warnings);
+  });
 }
 
 function applyConfig(config) {
@@ -94,6 +101,75 @@ function buildChip(w) {
 
   li.append(verb, spell, caster);
   return li;
+}
+
+// ---------------------------------------------------------------------- timers
+
+/**
+ * The learned-rhythm countdowns, below the warnings. A timer whose cast is already
+ * LIVE as a warning hides — that is the promotion: the estimate steps aside the
+ * moment the log states the fact. Chips are reused by caster|spell so the drain
+ * bar's width transition carries smoothly across pushes.
+ */
+function renderTimers(timers, warnings) {
+  if (cfg && cfg.castTimers === false) {
+    if (timerChips.size) {
+      timersList.replaceChildren();
+      timerChips.clear();
+    }
+    return;
+  }
+
+  const live = new Set(warnings.map((w) => `${w.caster}|${w.ability}`));
+  const show = timers.filter((t) => !live.has(`${t.caster}|${t.ability}`));
+  const keys = new Set(show.map((t) => `${t.caster}|${t.ability}`));
+
+  for (const [k, chip] of timerChips) {
+    if (!keys.has(k)) {
+      chip.el.remove();
+      timerChips.delete(k);
+    }
+  }
+
+  show.forEach((t, index) => {
+    const k = `${t.caster}|${t.ability}`;
+    let chip = timerChips.get(k);
+    if (!chip) {
+      chip = buildTimerChip(t);
+      timerChips.set(k, chip);
+    }
+    if (t.warm) chip.el.dataset.warm = '';
+    else delete chip.el.dataset.warm;   // this fight's own gaps just took over
+
+    chip.due.textContent = `~${Math.ceil(t.dueMs / 1000)}s`;
+    chip.drain.style.width = `${Math.max(0, Math.min(100, (t.dueMs / t.intervalMs) * 100))}%`;
+
+    if (timersList.children[index] !== chip.el) {
+      timersList.insertBefore(chip.el, timersList.children[index] ?? null);
+    }
+  });
+}
+
+function buildTimerChip(t) {
+  const li = document.createElement('li');
+  li.className = 'tchip';
+
+  const due = document.createElement('span');
+  due.className = 'due';
+
+  const spell = document.createElement('span');
+  spell.className = 'spell';
+  spell.textContent = t.ability;
+
+  const caster = document.createElement('span');
+  caster.className = 'caster';
+  caster.textContent = t.caster;
+
+  const drain = document.createElement('i');
+  drain.className = 'drain';
+
+  li.append(due, spell, caster, drain);
+  return { el: li, due, drain };
 }
 
 // ---------------------------------------------------------------------- sound
