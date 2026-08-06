@@ -84,13 +84,30 @@ test('fall damage does not open a phantom encounter', () => {
 
 test('unattributed damage on a mob goes to the sole caster in flight', () => {
   const p = makeParser();
+  // Rhain needs STANDING before he can be credited with damage nobody was named for.
+  // A single capitalized token nobody has proven anything about is "unknown", not a
+  // player — that guess is what made a Plane of Sky bee a group member.
+  p.feed(`${D(18, 48, 20)} Rhain smites a froglok shin knight for 11 points of damage.`);
   p.feed(`${D(18, 48, 22)} Rhain begins casting Lightning Strike.`);
   p.feed(`${D(18, 48, 23)} A froglok shin knight was hit by non-melee for 200 damage.`);
 
   const row = p.snapshot().rows[0];
   assert.equal(row.name, 'Rhain');
+  assert.equal(row.damage, 211);
+  assert.equal(row.abilities.find((a) => a.name === 'Lightning Strike').damage, 200);
+});
+
+test('an unproven caster is not credited with unattributed damage', () => {
+  const p = makeParser();
+  // Identical to the test above minus the swing that established Rhain. Nothing in the
+  // log has said whether "Rhain" is a groupmate, a passer-by or a single-token mob, so
+  // the damage lands in the visible Unknown row instead of being guessed onto him.
+  p.feed(`${D(18, 48, 22)} Rhain begins casting Lightning Strike.`);
+  p.feed(`${D(18, 48, 23)} A froglok shin knight was hit by non-melee for 200 damage.`);
+
+  const row = p.snapshot().rows[0];
+  assert.equal(row.name, 'Unknown');
   assert.equal(row.damage, 200);
-  assert.equal(row.abilities[0].name, 'Lightning Strike');
 });
 
 test('ambiguous unattributed damage goes to Unknown rather than a guess', () => {
@@ -1132,4 +1149,290 @@ test('timers vanish when the fight ends', () => {
 
   p.feed(`${D(18, 49, 15)} You have entered The Ruins of Old Guk 2 (Adaptive).`);
   assert.equal(p.snapshot(T(18, 49, 16)).castTimers.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Single-token entity identity.
+//
+// `looksLikePlayerName` is a guess about SPELLING, and on the Plane of Sky it is
+// simply wrong: the bees are "Bzzazzt", "Bazzt", "Bzzzt" — single capitalized tokens
+// with no article, indistinguishable from a player name — so the parser read an entire
+// raid zone as friendly. Every line below is taken from the live bee fight.
+// ---------------------------------------------------------------------------
+
+test('an entity that damages a confirmed member is hostile, whatever its name looks like', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 44, 0)} Khanvikt has joined the group.`);
+  assert.equal(p.isFriendly('Bzzazzt'), true, 'name shape alone says player');
+
+  p.feed(`${D(10, 44, 1)} Bzzazzt stings Khanvikt for 47 points of damage.`);
+
+  assert.equal(p.isFriendly('Bzzazzt'), false);
+  assert.equal(p.isHostileCaster('Bzzazzt'), true);
+  // ...and the sting is scored as damage taken, which it never was before.
+  const khan = p.snapshot().rows.find((r) => r.name === 'Khanvikt');
+  assert.equal(khan.damageTaken, 47);
+});
+
+test('a bee the group attacks becomes hostile too, and its casts raise warnings', () => {
+  const p = makeParser();
+  // No group message at all: the logging character is the only confirmed member, and
+  // hitting the thing is proof enough on its own.
+  p.feed(`${D(10, 44, 1)} You pierce Bazzzazzt for 60 points of damage.`);
+  assert.equal(p.isFriendly('Bazzzazzt'), false);
+
+  p.feed(`${D(10, 44, 2)} Bazzzazzt begins casting Deadly Poison.`);
+  const warning = p.snapshot().hostileCasts.find((c) => c.ability === 'Deadly Poison');
+  assert.equal(warning.caster, 'Bazzzazzt');
+
+  // The damage the group did to it now counts, where the whole exchange used to be
+  // dropped as a friendly hitting a friendly.
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Rhale').damage, 60);
+});
+
+test('a charmed mob turning on the group is a charm break, not a fresh enemy', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} You slash a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} You begin casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), true);
+
+  // The ex-pet turns on us. This must take the charm-break path — the mob is released
+  // and the hit re-scored as ordinary incoming damage — and must NOT leave the mob
+  // marked hostile-by-action, which would be a second, redundant claim.
+  p.feed(`${D(19, 20, 9)} A tal ghoul wizard slashes YOU for 30 points of damage.`);
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
+  assert.equal(p.roster.isHostileByAction('tal ghoul wizard'), false);
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Rhale').damageTaken, 30);
+});
+
+test('channel chat is player proof; a summon call-out is not', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 6, 40)} Kadomony tells the group, 'the other one too from what I see'`);
+  assert.equal(p.roster.knownPlayers.has('Kadomony'), true);
+
+  // A boss wording a summon as a say-line must never become player proof.
+  p.feed(`${D(10, 6, 41)} Bazzzazzt says, 'You will not evade me, Khanvikt!'`);
+  assert.equal(p.roster.knownPlayers.has('Bazzzazzt'), false);
+
+  // Nor may a pet reporting to its Master.
+  p.feed(`${D(10, 6, 42)} Gann tells you, 'Attacking a froglok shin knight Master.'`);
+  assert.equal(p.roster.knownPlayers.has('Gann'), false);
+  assert.equal(p.roster.ownerOf('Gann'), 'Rhale');
+});
+
+test('a proven player is never claimed as somebody else\'s pet', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 6, 40)} Kadomony tells the group, 'inc'`);
+  p.feed(`${D(10, 6, 45)} Khanvikt animates an undead servant.`);
+  p.feed(`${D(10, 6, 50)} Kadomony slashes a spiroc guardian for 40 points of damage.`);
+
+  assert.equal(p.roster.ownerOf('Kadomony'), null);
+  assert.equal(p.snapshot().rows.some((r) => r.name === 'Kadomony'), true);
+});
+
+// ---------------------------------------------------------------------------
+// Binding other players' pets to their owners.
+// ---------------------------------------------------------------------------
+
+test('a summon flavour line binds the next unseen name to the summoner', () => {
+  // A long timeout so the 20s between summon and first swing stays one encounter.
+  const p = makeParser({ timeoutMs: 120_000 });
+  p.feed(`${D(10, 6, 20)} Khanvikt slashes a spiroc guardian for 50 points of damage.`);
+  p.feed(`${D(10, 6, 30)} Khanvikt animates an undead servant.`);
+  p.feed(`${D(10, 6, 40)} Kibektik slashes a spiroc guardian for 65 points of damage.`);
+
+  const rows = p.snapshot().rows;
+  assert.equal(rows.some((r) => r.name === 'Kibektik'), false, 'no row of its own');
+  const khan = rows.find((r) => r.name === 'Khanvikt');
+  assert.equal(khan.damage, 115);
+  assert.equal(khan.petDamage, 65);
+  assert.equal(khan.abilities.find((a) => a.name === 'Slash (pet)').damage, 65);
+});
+
+test('two summons at once bind nothing rather than guess', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 6, 20)} Khanvikt slashes a spiroc guardian for 50 points of damage.`);
+  p.feed(`${D(10, 6, 20)} Kadomony slashes a spiroc guardian for 50 points of damage.`);
+  p.feed(`${D(10, 6, 30)} Khanvikt animates an undead servant.`);
+  p.feed(`${D(10, 6, 31)} Kadomony animates an undead servant.`);
+  p.feed(`${D(10, 6, 40)} Kibektik slashes a spiroc guardian for 65 points of damage.`);
+
+  assert.equal(p.roster.ownerOf('Kibektik'), null);
+  // Unbound is not the same as discarded: the damage is real and keeps its own row,
+  // which is what makes it obvious the pet still needs mapping.
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Kibektik').damage, 65);
+});
+
+test('a pet-only buff binds tighter than adjacency, and corrects it', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 6, 20)} Khanvikt slashes a spiroc guardian for 50 points of damage.`);
+  p.feed(`${D(10, 6, 21)} Kadomony slashes a spiroc guardian for 50 points of damage.`);
+  // Two summoners, so nothing binds on adjacency.
+  p.feed(`${D(10, 6, 30)} Khanvikt animates an undead servant.`);
+  p.feed(`${D(10, 6, 31)} Kadomony animates an undead servant.`);
+  p.feed(`${D(10, 6, 40)} Kibektik slashes a spiroc guardian for 65 points of damage.`);
+  assert.equal(p.roster.ownerOf('Kibektik'), null);
+
+  // Two people casting at once again — matching the SPELL is what picks Khanvikt.
+  p.feed(`${D(10, 6, 46)} Kadomony begins casting Greater Healing V.`);
+  p.feed(`${D(10, 6, 46)} Khanvikt begins casting Augment Death IV.`);
+  p.feed(`${D(10, 6, 51)} Kibektik's eyes gleam with madness.`);
+  assert.equal(p.roster.ownerOf('Kibektik'), 'Khanvikt');
+});
+
+test('the shrink line is only evidence when a pet-only spell produced it', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 36, 20)} Khanvikt slashes a fire giant warrior for 50 points of damage.`);
+  // The shaman's Shrink lands on a PLAYER, and says nothing about anybody's pet.
+  p.feed(`${D(10, 36, 34)} Khanvikt begins casting Shrink.`);
+  p.feed(`${D(10, 36, 41)} Khanvikt shrinks.`);
+  assert.equal(p.roster.ownerOf('Khanvikt'), null);
+});
+
+test('the magician animation binds from the cast, since it prints no flavour line', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 50, 30)} Rhain smites a froglok shin knight for 11 points of damage.`);
+  p.feed(`${D(18, 50, 41)} Rhain begins casting Sagar's Animation.`);
+  p.feed(`${D(18, 50, 46)} Gann begins casting Center.`);
+  assert.equal(p.roster.ownerOf('Gann'), 'Rhain');
+  assert.equal(p.roster.isWeaklyBoundPet('Gann'), true);
+});
+
+test('an ordinary cast never arms the pet slot — every player is unseen exactly once', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Emalina begins casting Greater Healing V.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  assert.equal(p.roster.ownerOf('Rhain'), null, 'Rhain is a groupmate, not a pet');
+});
+
+test('a weak binding is torn down the moment its "pet" fights the group', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 50, 30)} You smite a froglok shin knight for 11 points of damage.`);
+  p.feed(`${D(18, 50, 41)} You begin casting Sagar's Animation.`);
+  // Not a pet at all — a single-token named mob that happened to appear next.
+  p.feed(`${D(18, 50, 46)} Gorgalosk begins casting Ice Comet.`);
+  assert.equal(p.roster.ownerOf('Gorgalosk'), 'Rhale');
+
+  p.feed(`${D(18, 50, 50)} Gorgalosk hits YOU for 200 points of damage.`);
+  assert.equal(p.roster.ownerOf('Gorgalosk'), null);
+  assert.equal(p.roster.notPets.has('Gorgalosk'), true, 'and never re-bound');
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Rhale').damageTaken, 200);
+});
+
+// ---------------------------------------------------------------------------
+// The in-game mapping command.
+// ---------------------------------------------------------------------------
+
+test('the mapping command works on every self chat form and acknowledges', () => {
+  for (const line of [
+    "You say, 'pet Kibektik = Khanvikt'",
+    "You tell your party, 'pet Kibektik = Khanvikt'",
+    "You tell your raid, 'pet Kibektik = Khanvikt'",
+    "You say to your guild, 'pet Kibektik = Khanvikt'",
+    "You tell eqlo:1, 'pet Kibektik = Khanvikt'",
+  ]) {
+    const p = makeParser();
+    p.feed(`${D(10, 6, 0)} ${line}`);
+    assert.equal(p.roster.ownerOf('Kibektik'), 'Khanvikt', line);
+    assert.equal(p.snapshot().notices[0].text, 'Kibektik = Khanvikt');
+  }
+});
+
+test('a third party cannot reconfigure the overlay by typing the magic words', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 6, 0)} Xilrasis tells General:1, 'pet Kibektik = Khanvikt'`);
+  p.feed(`${D(10, 6, 1)} Xilrasis tells you, 'pet Kibektik = Khanvikt'`);
+  p.feed(`${D(10, 6, 2)} You told Rhain, 'pet Kibektik = Khanvikt'`);
+  assert.equal(p.roster.ownerOf('Kibektik'), null);
+  assert.equal(p.snapshot().notices.length, 0);
+});
+
+test('malformed commands neither throw nor write anything', () => {
+  const p = makeParser();
+  for (const payload of ['pet Kibektik =', 'pet = Khanvikt', 'pet needs heals', 'pet 1 = 2']) {
+    p.feed(`${D(10, 6, 0)} You say, '${payload}'`);
+  }
+  assert.equal(p.roster.petOwners.size, 0);
+  assert.equal(p.snapshot().notices.length, 0);
+});
+
+test('the mapping command unmaps, lists, and hands the mapping to the caller', () => {
+  const saved = [];
+  const p = makeParser({ onPetOwnersChanged: (m) => saved.push(m) });
+
+  p.feed(`${D(10, 6, 0)} You say, 'pet Kibektik = Khanvikt'`);
+  assert.deepEqual(saved.at(-1), { Kibektik: 'Khanvikt' });
+
+  p.feed(`${D(10, 6, 1)} You say, 'pet ?'`);
+  assert.equal(p.snapshot().notices.at(-1).text, 'Pets: Kibektik = Khanvikt');
+
+  p.feed(`${D(10, 6, 2)} You say, 'pet Kibektik = none'`);
+  assert.equal(p.roster.ownerOf('Kibektik'), null);
+  assert.deepEqual(saved.at(-1), {});
+  // "not a pet" is the user overruling the log, so the next summon must not re-learn it.
+  assert.equal(p.roster.notPets.has('Kibektik'), true);
+});
+
+// ---------------------------------------------------------------------------
+// Procs: abilities that deal damage and are never cast.
+// ---------------------------------------------------------------------------
+
+test('a pet hit with no cast behind it is labelled a proc', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 16)} You crush a froglok shin knight for 40 points of damage.`);
+  p.feed(`${D(18, 48, 20)} Rhale\`s warder hit a froglok shin knight for 75 points of magic damage by Ykesha.`);
+
+  const row = p.snapshot().rows[0];
+  assert.equal(row.abilities.find((a) => a.name === 'Ykesha (pet proc)').damage, 75);
+  assert.equal(row.procDamage, 75);
+});
+
+test('the proc flavour line carries no damage and is never scored', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 16)} You crush a froglok shin knight for 40 points of damage.`);
+  // 746 of these in the live log, paired exactly 1:1 with the damage line above.
+  p.feed(`${D(18, 48, 20)} A froglok shin knight has been struck by the force of Ykesha.`);
+  p.feed(`${D(18, 48, 20)} Rhale\`s warder hit a froglok shin knight for 75 points of magic damage by Ykesha.`);
+  assert.equal(p.snapshot().rows[0].damage, 115, 'the flavour line must not double-count');
+});
+
+test('an ability that was cast is not a proc', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 16)} You crush a froglok shin knight for 40 points of damage.`);
+  p.feed(`${D(18, 48, 18)} Rhale\`s warder begins casting Ice Spear.`);
+  p.feed(`${D(18, 48, 20)} Rhale\`s warder hit a froglok shin knight for 71 points of cold damage by Ice Spear.`);
+
+  const row = p.snapshot().rows[0];
+  assert.equal(row.abilities.find((a) => a.name === 'Ice Spear (pet)').damage, 71);
+  assert.equal(row.procDamage, 0);
+});
+
+test('a cast seen AFTER the first hit relabels the one row retroactively', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 16)} You crush a froglok shin knight for 40 points of damage.`);
+  p.feed(`${D(18, 48, 18)} Rhale\`s warder hit a froglok shin knight for 71 points of cold damage by Ice Spear.`);
+  assert.equal(p.snapshot().rows[0].procDamage, 71);
+
+  p.feed(`${D(18, 48, 22)} Rhale\`s warder begins casting Ice Spear.`);
+  p.feed(`${D(18, 48, 24)} Rhale\`s warder hit a froglok shin knight for 29 points of cold damage by Ice Spear.`);
+
+  const row = p.snapshot().rows[0];
+  const spear = row.abilities.filter((a) => a.name.startsWith('Ice Spear'));
+  assert.equal(spear.length, 1, 'one row per ability per member, always');
+  assert.equal(spear[0].name, 'Ice Spear (pet)');
+  assert.equal(spear[0].damage, 100, 'both hits still counted');
+  assert.equal(row.procDamage, 0);
+});
+
+test('a spell rank on the cast line still matches the unranked damage line', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 16)} You crush a froglok shin knight for 40 points of damage.`);
+  p.feed(`${D(18, 48, 18)} Syphon begins casting Frost Storm VIII.`);
+  p.feed(`${D(18, 48, 20)} Syphon hit a froglok shin knight for 428 points of cold damage by Frost Storm.`);
+
+  const row = p.snapshot().rows.find((r) => r.name === 'Syphon');
+  assert.equal(row.abilities[0].name, 'Frost Storm');
+  assert.equal(row.procDamage, 0);
 });

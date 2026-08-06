@@ -186,13 +186,33 @@ test('heals parse as effective (potential) (sample)', () => {
 });
 
 test('chat is matched first so quoted combat text is never scored', () => {
-  // This is the whole reason the chat rule sits at the top of the table.
+  // This is the whole reason the chat rule sits at the top of the table. A channel
+  // line is typed as player-proof rather than plain chat — see the test below — but
+  // either way it terminates the match, which is what keeps the quoted damage out.
   const e = m("Hlep tells General:1, 'he hits me for 100 points of damage.'");
-  assert.equal(e.kind, 'chat');
+  assert.equal(e.kind, 'player-proof');
+  assert.equal(e.who, 'Hlep');
 
   assert.equal(m("Quartermaster Zevrex told you, 'Welcome to my bank!'").kind, 'chat');
   assert.equal(m("A froglok shin knight says, 'Frrroooaaakkk!'").kind, 'chat');
   assert.equal(m("You tell your party, 'incoming'").kind, 'chat');
+  // Channel names carry digits on this server ("General2:1", "NewPlayers1:2"); the
+  // pattern used to stop at the first digit, leaving those lines unmatched entirely.
+  assert.equal(m("Xilrasis tells General2:1, 'hi'").kind, 'player-proof');
+  // "You told Rhain, '...'" is a real form (152 occurrences) that the self-chat rule
+  // did not cover, so an outgoing tell reached the damage rules.
+  assert.equal(m("You told Rhain, 'he hits me for 100 points of damage.'").kind, 'chat');
+});
+
+test('only channel chat is player proof — says and tells-you are not', () => {
+  // Bare `says,` is how a boss words its summon call-out, and `tells you` is how a pet
+  // reports to its Master. Treating either as proof of a real player would make a mob
+  // friendly forever, which is the bee bug with the sign flipped.
+  assert.equal(m("Kadomony tells the group, 'the other one too'").kind, 'player-proof');
+  assert.equal(m("Khanvikt tells the guild, 'aye'").kind, 'player-proof');
+  assert.equal(m("Syphon tells the raid, 'pull'").kind, 'player-proof');
+  assert.equal(m("Gorgalosk says, 'You will not evade me!'").kind, 'chat');
+  assert.equal(m("Gann tells you, 'Attacking a froglok shin knight Master.'").kind, 'pet-owner');
 });
 
 test('unverified forms parse: DoT ticks and damage shields', () => {

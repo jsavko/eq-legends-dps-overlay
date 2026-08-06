@@ -33,7 +33,60 @@ async function init() {
 
   await loadDirectory(state.config.logDir);
   if (state.selected) await validate(state.selected);
+  await renderPets();
   refreshSaveButton();
+}
+
+/**
+ * What the parser currently knows about pets.
+ *
+ * The `Pet = Owner` box has existed since the first version and never told anyone
+ * which names needed an entry — you had to already know the answer, which made the
+ * setting unusable in practice. This shows both halves: what the log has worked out on
+ * its own, and the names still sitting in the honest "unknown" state, each one a click
+ * away from a line in the box above.
+ */
+async function renderPets() {
+  const learnedEl = $('pets-learned');
+  const list = $('pets-unmapped');
+  if (!learnedEl || !list) return;
+
+  let pets = { mapped: [], unmapped: [] };
+  try {
+    pets = await window.api.petsState();
+  } catch {
+    // No parser yet (first-run setup, before a log is chosen) — an empty list is right.
+  }
+
+  const learned = pets.mapped.filter((m) => m.weak || !state.config.petOwners?.[m.pet]);
+  learnedEl.textContent = learned.length
+    ? `Worked out from the log: ${learned.map((m) => `${m.pet} = ${m.owner}`).join(', ')}.`
+    : 'Nothing has been worked out from the log yet.';
+
+  const already = new Set(Object.keys(state.config.petOwners ?? {}));
+  const names = pets.unmapped.filter((n) => !already.has(n));
+  list.replaceChildren(...names.map((name) => {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = name;
+    btn.addEventListener('click', () => {
+      const box = $('pet-owners');
+      const lines = box.value.split('\n').filter((l) => l.trim());
+      if (!lines.some((l) => l.split('=')[0].trim() === name)) lines.push(`${name} = `);
+      box.value = lines.join('\n');
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+    });
+    li.append(btn);
+    return li;
+  }));
+  if (names.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'none';
+    list.append(li);
+  }
 }
 
 function fillForm(cfg) {

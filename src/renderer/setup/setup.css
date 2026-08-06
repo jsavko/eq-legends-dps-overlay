@@ -111,6 +111,24 @@ output {
 
 .unit { color: var(--muted); font-size: 12px; }
 .hint { color: var(--muted); font-size: 12px; margin: 12px 0 0; }
+
+/* Names the parser is showing as their own row with nothing proving they are players.
+   Clicking one seeds a "<Name> = " line in the box above; the empty state renders as a
+   plain "none" so the block occupies the same space either way. */
+.chips {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chips button {
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+.chips .empty { color: var(--muted); font-size: 12px; }
 code {
   background: var(--panel-2);
   border: 1px solid var(--line);

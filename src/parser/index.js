@@ -10,7 +10,7 @@
  */
 
 import { parseTimestamp } from './timestamp.js';
-import { matchRule } from './rules.js';
+import { matchRule, spellStem } from './rules.js';
 import { resolveEntity, looksLikePlayerName, stripArticle } from './entities.js';
 import { Roster, parseLogFilename } from './roster.js';
 import { Encounter, DEFAULTS } from './encounter.js';
@@ -22,6 +22,50 @@ export const UNKNOWN = 'Unknown';
 
 /** How long after a cast starts we are still willing to blame it for stray damage. */
 const CAST_WINDOW_MS = 2000;
+
+/**
+ * How long after a pet-only buff's cast its landing line may still be paired with it.
+ * The observed gap is 5–7s ("Khanvikt begins casting Augment Death IV." → "Kibektik's
+ * eyes gleam with madness."), which is what the cast table's own TTL already covers.
+ */
+const PET_BUFF_WINDOW_MS = 10_000;
+
+/**
+ * Spells that can only ever land on a pet.
+ *
+ * Matched by NAME for exactly the reason charm attribution is: several people are
+ * casting at any moment, and only one of them is casting Augment Death. The landing
+ * line alone proves nothing — "Khanvikt shrinks." follows the shaman's Shrink and
+ * Khanvikt is a player — so it is the pairing that carries the evidence.
+ */
+const PET_BUFF_SPELL_RE = /\b(?:augment death|tiny companion)\b/i;
+
+/**
+ * Casts that are summoning a pet, recognised by the SHAPE of the spell name.
+ *
+ * The plan hoped a bare cast would be enough — "any friendly cast arms a weak slot
+ * that only a previously-unseen name can consume" — but that does not survive the
+ * live log or the test suite. Two players casting seconds apart is structurally
+ * identical to a summon followed by its pet:
+ *
+ *   Emalina casts Greater Healing V, then Rhain casts Beguile   <- Rhain is a PLAYER
+ *   Rhain casts Sagar's Animation,  then Gann casts Center      <- Gann is a PET
+ *
+ * Every player is previously-unseen exactly once, so "unseen" cannot tell them apart
+ * and the unconstrained version folded a groupmate into a healer's row. The spell name
+ * is the only thing that distinguishes the two, which is the same conclusion charm
+ * attribution reached (see CHARM_SPELL_RE).
+ *
+ * Deliberately structural rather than enumerated: every magician animation in the log
+ * is "<Something>'s Animation" (Sagar's, Aanya's, Yegoreff's, Boltran's, Shalee's,
+ * Kintaz's, with and without roman numerals), so the family is matched by its form and
+ * a new one needs no maintenance. Necromancer and shadowknight pets need none of this
+ * — they print "animates an undead servant.", which names the owner outright.
+ */
+const SUMMON_SPELL_RE = /(?:'s Animation\b|\bSummoning\b|\bFamiliar\b|\bAnimate Dead\b)/i;
+
+/** How long a mapping-command acknowledgement stays on screen. */
+export const NOTICE_TTL_MS = 6000;
 
 /**
  * Charm has a cast time, so the "has been charmed" line lands well after the cast began.
@@ -79,7 +123,18 @@ const CC_EFFECTS = {
  */
 const CHARM_SPELL_RE = /\b(?:beguile|charm|allure|dominate|enslave|subjugate)\b/i;
 
-/** "Gann healed himself" — the target of a reflexive heal is the healer. */
+/**
+ * "Gann healed himself" — the target of a reflexive heal is the healer.
+ *
+ * The pronoun is ONLY ever used to redirect the target back to the healer. It is not,
+ * and must not become, a classification signal: it tracks the healing EFFECT, not the
+ * entity. That was tested against the full live log and is wrong in both directions —
+ * "Emalina healed itself" 903 times (Blessing of the Knight) and Emalina is a real
+ * player; "Gann healed himself" 366 times (Blessing of the Squire) and Gann is
+ * provably a pet, summoned five seconds after "Rhain begins casting Sagar's Animation."
+ * Both are proc-heals, which report neuter or gendered by their own definition
+ * whatever owns them. Do not rediscover this.
+ */
 const REFLEXIVE_RE = /^(?:him|her|it|them|your|my)sel(?:f|ves)$/i;
 
 export class LogParser {
@@ -152,6 +207,45 @@ export class LogParser {
     this.revision = 0;
     /** Lines that parsed but matched no rule — surfaced in the settings window. */
     this.unmatchedCount = 0;
+
+    /**
+     * Every canonical name this session has ever resolved.
+     *
+     * "Previously unseen" is the whole basis of summon binding: a summoned pet's
+     * generated name has, by construction, never appeared before the summon that
+     * created it, so a name that HAS appeared before cannot be the pet that just
+     * came out of one.
+     * @type {Set<string>}
+     */
+    this.seenNames = new Set();
+    /** Log time of the last line fed, so resolve() can reason about the pending summon. */
+    this.lastTs = 0;
+
+    /**
+     * Every `caster|ability` pair seen CAST this session.
+     *
+     * Unlike this.casts it is never pruned: it records what has ever been cast, not
+     * what is in flight, and that is exactly the question "is this a proc?" asks. The
+     * warder's abilities split cleanly — Ice Spear, Tainted Breath and Sicken are cast
+     * thousands of times, while Ykesha, Ignite and the Spirit of <element> Strike
+     * family deal 2,700 hits and are never cast once.
+     * @type {Set<string>}
+     */
+    this.castObserved = new Set();
+
+    /**
+     * Acknowledgements for the in-game mapping command, riding the same snapshot as
+     * the warnings. The player cannot see the parser, so a command that silently does
+     * nothing is worse than no command at all.
+     * @type {Array<{id: number, text: string, ts: number}>}
+     */
+    this.notices = [];
+    this.noticeSeq = 0;
+    /**
+     * Called with the full pet mapping whenever the in-game command changes it, so
+     * main can persist it to config. The parser stays pure Node and owns no files.
+     */
+    this.onPetOwnersChanged = options.onPetOwnersChanged ?? null;
   }
 
   setSelfName(name) {
@@ -198,6 +292,7 @@ export class LogParser {
       return null;
     }
     event.ts = parsed.ts;
+    this.lastTs = event.ts;
 
     // Advance to this line's time BEFORE handling it, so a fight that ended during a
     // quiet stretch is closed out and the next pull opens a fresh encounter rather than
@@ -218,11 +313,21 @@ export class LogParser {
         this.handleDeath(event);
         break;
       case 'cast': {
-        const caster = this.resolve(event.attacker);
+        const caster = this.resolve(event.attacker, true);
         this.casts.set(caster.name, {
           ability: event.ability,
           ts: event.ts,
         });
+        this.noteCastObserved(caster, event.ability);
+        // A summon-shaped cast weakly arms the "a pet is about to appear" slot. The
+        // magician animation prints no flavour line at all, so the cast is the only
+        // evidence there is for that class — and requiring PROVEN standing (not merely
+        // a player-shaped name) is what keeps a bee that has done nothing but sting the
+        // group from arming it.
+        if (!caster.isPet && event.ability && SUMMON_SPELL_RE.test(event.ability) &&
+            this.isProvenFriendly(caster.name)) {
+          this.roster.notePendingSummon(caster.name, event.ts, { strong: false });
+        }
         this.noteHostileCast(event, caster);
         break;
       }
@@ -250,10 +355,20 @@ export class LogParser {
       case 'zone':
         this.handleZone(event);
         break;
+      case 'pet-summon':
+        this.handlePetSummon(event);
+        break;
+      case 'pet-buff':
+        this.handlePetBuff(event);
+        break;
+      case 'pet-command':
+        this.handlePetCommand(event);
+        break;
       case 'group':
       case 'who':
       case 'targeted':
       case 'pet-owner':
+      case 'player-proof':
         this.roster.applyEvent(event);
         this.revision++;
         break;
@@ -283,26 +398,103 @@ export class LogParser {
    * no such marker, so it is looked up in the roster's ownership table, which is fed
    * by the pet-calls-you-Master line and by the user's settings.
    */
-  resolve(raw) {
+  /**
+   * @param {string} raw
+   * @param {boolean} [acting] true when this name is the one DOING something on the
+   *   line. Only an acting name may consume a pending summon: a pet announces itself
+   *   by swinging, casting or healing, whereas the first thing the log usually says
+   *   about a MOB is that we hit it — and binding on that would fold an enemy
+   *   straight into a player's row.
+   */
+  resolve(raw, acting = false) {
     const entity = resolveEntity(raw, this.selfName);
     if (entity.isPet) return entity;
 
-    const owner = this.roster.ownerOf(entity.name);
+    const firstSight = entity.name !== '' && !this.seenNames.has(entity.name);
+    if (entity.name) this.seenNames.add(entity.name);
+
+    const owner = this.roster.ownerOf(entity.name)
+      ?? (firstSight && acting ? this.bindPendingSummon(entity.name) : null);
     if (owner) {
       return { name: owner, owner, isPet: true, display: entity.display };
     }
     return entity;
   }
 
-  /** A name we are willing to show as a damage-dealing row. */
+  /**
+   * A name we are willing to show as a damage-dealing row.
+   *
+   * The order below is the order of how much the log actually proves. Membership the
+   * game stated outright comes first; then behaviour, which is fact; and only last the
+   * shape of the name, which is a guess. That last step is what read the whole Plane
+   * of Sky bee island as friendly — "Bzzazzt" is a single capitalized token with no
+   * article, so it passed for a player, and the parser scored no damage in either
+   * direction and raised none of the 639 Deadly Poison warnings that killed the group.
+   */
   isFriendly(name) {
     if (name === UNKNOWN) return true;
+
+    // The user's own pin, and the game stating membership, outrank everything below.
+    if (this.roster.overridesOff.has(name)) return false;
+    if (this.roster.overridesOn.has(name)) return true;
+    if (this.roster.isConfirmedMember(name)) return true;
+
+    // Behaviour outranks name shape. An entity the group is currently fighting is an
+    // enemy however player-shaped its name is — the same reasoning isHostileCaster has
+    // always used, which isFriendly simply never learned — and so is one caught
+    // trading damage with a confirmed member.
+    if (this.roster.isHostileByAction(name)) return false;
+    if (this.current && !this.current.closed && this.current.engagedNpcs.has(name)) return false;
+
     // A name the game called an NPC is not a player, whatever its shape. This keeps a
     // single-word named mob ("Zevrex") from being mistaken for a group member.
     if (this.roster.knownNpcs.has(name) && !this.roster.knownPlayers.has(name)) {
       return this.roster.includes(name, false);
     }
     return this.roster.includes(name, false) || looksLikePlayerName(name);
+  }
+
+  /**
+   * A friendly with standing beyond the spelling of their name.
+   *
+   * This is the third state the identity work needed. An article-less single token
+   * that nobody has proven anything about is UNKNOWN — not a player — and while it
+   * still gets its own visible row (dropping its damage would make the group total
+   * quietly wrong, and requiring proof before showing ANYTHING is what made the
+   * "target everything first" approach unusable), it is not trusted to explain stray
+   * damage or to have summoned a pet. Standing means one of: the user pinned it, it is
+   * the logging character, the log said it joined the group, it spoke on a channel,
+   * or it has actually damaged an NPC.
+   */
+  isProvenFriendly(name) {
+    if (name === UNKNOWN) return false;
+    if (!this.isFriendly(name)) return false;
+    return this.roster.includes(name, false) || this.roster.knownPlayers.has(name);
+  }
+
+  /**
+   * First sight of a name while a summon is pending — bind it to the summoner.
+   *
+   * Guarded on the same principle everywhere else here: positive proof in both
+   * directions, never inference from absence. A name with player proof is never
+   * claimed, one already proven hostile is never claimed, and one torn down before
+   * is never claimed again.
+   *
+   * @returns {string|null} the owner bound, or null
+   */
+  bindPendingSummon(name) {
+    // A summoned pet's generated name is player-SHAPED ("Kibektik", "Gann"); anything
+    // carrying an article or a space is a mob and was never in question.
+    if (!looksLikePlayerName(name)) return null;
+    if (this.roster.hasPlayerProof(name)) return null;
+    if (this.roster.isHostileByAction(name)) return null;
+
+    const pending = this.roster.takePendingSummon(this.lastTs);
+    if (!pending) return null;
+
+    const owner = this.roster.bindPet(name, pending.owner, { weak: pending.weak });
+    if (owner) this.revision++;
+    return owner;
   }
 
   ensureEncounter(ts) {
@@ -331,17 +523,17 @@ export class LogParser {
   }
 
   handleDamage(event) {
-    const attacker = this.resolve(event.attacker);
+    const attacker = this.resolve(event.attacker, true);
     const target = this.resolve(event.target);
 
     const attackerFriendly = this.isFriendly(attacker.name) || this.isUnownedPet(attacker.name);
     const targetFriendly = this.isFriendly(target.name);
 
     if (attackerFriendly && targetFriendly) {
-      // A charmed mob resolves to its owner, so it counts as friendly. The only way one
-      // friendly hits another is therefore that a charm just broke — retry the line once
-      // the charm is released so it is scored as the ordinary combat it now is.
-      if (this.breakCharm(event)) {
+      // One of the two is misclassified — friendlies do not damage each other. Work
+      // through the possibilities in order of how much the log proves, and re-score
+      // the line the moment one of them resolves.
+      if (this.resolveFriendlyFire(event, attacker, target)) {
         this.handleDamage(event);
         return;
       }
@@ -361,6 +553,7 @@ export class LogParser {
         ability: event.ability,
         isPet: attacker.isPet,
         crit: event.mods?.includes('critical') ?? false,
+        proc: this.isProc(attacker, event),
       });
       this.revision++;
       return;
@@ -397,6 +590,245 @@ export class LogParser {
       });
       this.revision++;
     }
+  }
+
+  /**
+   * Both sides of a damage line read as friendly, which cannot be true. Work out
+   * which reading was wrong, in order of how much the log actually proves.
+   *
+   *   1. A charm broke. A charmed mob resolves to its owner and so IS friendly right
+   *      up until the break, which EQ Legends announces with no line whatsoever.
+   *   2. A pet binding made from bare cast adjacency was wrong. That guess is the
+   *      cheapest thing on the table, so it is what gives way first — an entity
+   *      trading blows with the group was never anybody's pet.
+   *   3. One side is an enemy whose name merely looks like a player's. Whichever side
+   *      is NOT a confirmed group member is the enemy. Confirmed membership only, on
+   *      purpose: keying off the implicit set would let one bad guess cascade.
+   *
+   * @returns {boolean} true when something changed and the line deserves a re-score
+   */
+  resolveFriendlyFire(event, attacker, target) {
+    if (this.breakCharm(event)) return true;
+    if (this.breakWeakPetBinding(attacker, target)) return true;
+    return this.markHostileFromDamage(attacker, target);
+  }
+
+  /**
+   * Tear down a weak pet binding that has just produced an impossible line.
+   *
+   * Deliberately not conditioned on who the other side is: a weak binding is a guess
+   * made from nothing but "a friendly was casting and then this name appeared", and
+   * the first time it implies a friendly hitting a friendly, the guess is what is
+   * wrong. unbindPet also blacklists the name, so the next summon that happens to
+   * fire nearby cannot claim it all over again.
+   */
+  breakWeakPetBinding(attacker, target) {
+    for (const side of [attacker, target]) {
+      if (!side.isPet || !side.owner) continue;
+      if (!this.roster.isWeaklyBoundPet(side.display)) continue;
+      if (this.roster.unbindPet(side.display)) {
+        this.revision++;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Mark whichever side of a friendly-fire line is not a confirmed member as hostile. */
+  markHostileFromDamage(attacker, target) {
+    for (const [side, other] of [[attacker, target], [target, attacker]]) {
+      // A pet resolves to its OWNER, so marking here would brand the owner an enemy.
+      if (side.isPet) continue;
+      if (!this.roster.isConfirmedMember(other.name)) continue;
+      if (this.roster.isConfirmedMember(side.name)) continue;
+      if (this.roster.knownPlayers.has(side.name)) continue;
+      if (this.roster.noteHostileByAction(side.name)) {
+        this.revision++;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * A summon flavour line — "Khanvikt animates an undead servant." — arms the slot
+   * that the next previously-unseen name will be bound to.
+   *
+   * The rule table hands us whoever the line named without vetting them, because the
+   * same wording arrives from "a shadowknight" and "a necro acolyte". Requiring PROVEN
+   * standing here is what keeps an enemy's pet from ever folding into a group row.
+   */
+  handlePetSummon(event) {
+    const owner = this.resolve(event.owner, true);
+    if (owner.isPet || !this.isProvenFriendly(owner.name)) return;
+    this.roster.notePendingSummon(owner.name, event.ts, { strong: true });
+    this.revision++;
+  }
+
+  /**
+   * A pet-only buff landed on someone — bind them to whoever cast it.
+   *
+   * The tighter of the two bindings, and the one that corrects a mis-bind the temporal
+   * path may have made: matching on the SPELL name rather than on "the only caster in
+   * flight" survives a busy fight, which is exactly why charm attribution works the
+   * same way.
+   */
+  handlePetBuff(event) {
+    const who = this.resolve(event.who);
+    if (who.isPet) return;                          // already bound, or a backtick pet
+    if (this.roster.hasPlayerProof(who.name)) return;
+
+    const caster = this.attributePetBuff(event.ts);
+    if (!caster || caster === who.name) return;
+    if (this.roster.bindPet(who.name, caster, { weak: false })) this.revision++;
+  }
+
+  /** @returns {string|null} the friendly whose recent cast was a pet-only buff */
+  attributePetBuff(ts) {
+    this.pruneCasts(ts);
+    let best = null;
+    for (const [name, cast] of this.casts) {
+      if (ts - cast.ts > PET_BUFF_WINDOW_MS) continue;
+      if (!cast.ability || !PET_BUFF_SPELL_RE.test(cast.ability)) continue;
+      if (!this.isProvenFriendly(name)) continue;
+      if (!best || cast.ts > best.ts) best = { name, ts: cast.ts };
+    }
+    return best?.name ?? null;
+  }
+
+  /**
+   * The in-game mapping command, typed into any chat channel the player has available.
+   *
+   * The parser's only input is the log, so a line the client writes to the log is the
+   * one control channel that needs no alt-tab. Note that your OWN pet usually needs no
+   * command at all — pet-reports-to-master learns it from "<Pet> told you, '… Master.'"
+   * and that fires solo. This exists for OTHER players' pets and for a pet that never
+   * reports.
+   */
+  handlePetCommand(event) {
+    if (event.action === 'list') {
+      const entries = this.petMappings();
+      this.noteNotice(
+        entries.length
+          ? `Pets: ${entries.map((e) => `${e.pet} = ${e.owner}`).join(', ')}`
+          : 'No pet mappings yet',
+        event.ts,
+      );
+      return;
+    }
+
+    const pet = stripArticle(String(event.pet ?? '').trim());
+    if (!looksLikePlayerName(pet)) return;   // malformed: acknowledge nothing, write nothing
+
+    if (event.action === 'clear') {
+      const had = this.roster.petOwners.delete(pet) ||
+        this.roster.unbindPet(pet, { includeStrong: true });
+      // Blacklisted either way: "not a pet" is the user overruling the log, and the
+      // log would otherwise re-learn the same binding from the next summon.
+      this.roster.notPets.add(pet);
+      this.noteNotice(had ? `${pet} unmapped` : `${pet} was not mapped`, event.ts);
+      this.emitPetOwners();
+      this.revision++;
+      return;
+    }
+
+    const owner = String(event.owner ?? '').trim();
+    if (!looksLikePlayerName(owner) || owner === pet) return;
+    this.roster.notPets.delete(pet);
+    this.roster.learnedPetOwners.delete(pet);
+    this.roster.petOwners.set(pet, owner);
+    this.roster.implicit.delete(pet);
+    this.noteNotice(`${pet} = ${owner}`, event.ts);
+    this.emitPetOwners();
+    this.revision++;
+  }
+
+  /**
+   * Names that are getting a row of their own but that nothing has proven to be
+   * players — the list of things that may need a pet mapping.
+   *
+   * The `petOwners` setting has existed since the beginning and nothing ever told the
+   * player WHICH names needed it, so the feature was unusable unless you already knew
+   * the answer. A name lands here when it fights alongside the group, has said nothing
+   * on any channel, has never joined the group, has no owner and has never traded
+   * damage with a confirmed member. That is precisely the honest "unknown" state:
+   * probably somebody's pet, possibly a passer-by, and not for the parser to decide.
+   */
+  unmappedEntities() {
+    const out = new Set();
+    for (const name of this.roster.implicit) {
+      if (name === this.selfName) continue;
+      if (this.roster.hasPlayerProof(name)) continue;
+      if (this.roster.ownerOf(name)) continue;
+      if (this.roster.isHostileByAction(name)) continue;
+      out.add(name);
+    }
+    // Anything the game itself called an NPC while it was fighting for us is a pet by
+    // definition — this is the `Targeted (NPC): Gann` case, which is as sure as it gets.
+    for (const name of this.roster.knownNpcs) {
+      if (this.roster.ownerOf(name) || this.roster.hasPlayerProof(name)) continue;
+      if (this.roster.isHostileByAction(name)) continue;
+      if (this.isUnownedPet(name)) out.add(name);
+    }
+    return [...out].sort();
+  }
+
+  /** Every pet mapping in force, configured and learned alike. */
+  petMappings() {
+    const out = new Map();
+    for (const { pet, owner, weak } of this.roster.learnedPets()) out.set(pet, { pet, owner, weak });
+    for (const [pet, owner] of this.roster.petOwners) out.set(pet, { pet, owner, weak: false });
+    return [...out.values()].sort((a, b) => a.pet.localeCompare(b.pet));
+  }
+
+  /** Hand the configured mapping to whoever persists it (main writes it to config). */
+  emitPetOwners() {
+    this.onPetOwnersChanged?.(Object.fromEntries(this.roster.petOwners));
+  }
+
+  /** Show the player a short-lived line in the alerts window. */
+  noteNotice(text, ts) {
+    this.notices.push({ id: ++this.noticeSeq, text, ts });
+    this.revision++;
+  }
+
+  pruneNotices(now) {
+    const before = this.notices.length;
+    this.notices = this.notices.filter((n) => now - n.ts <= NOTICE_TTL_MS && n.ts <= now);
+    if (this.notices.length !== before) this.revision++;
+  }
+
+  /**
+   * Record that this caster has been seen casting this ability, and un-label any proc
+   * row already credited for the pair.
+   *
+   * Keyed on the DISPLAY name so a beastlord and their warder do not share a bucket:
+   * "Rhale`s warder" casting Ice Spear says nothing about whether Rhale procs it.
+   */
+  noteCastObserved(caster, ability) {
+    if (!ability) return;
+    const key = `${caster.display}|${spellStem(ability)}`;
+    if (this.castObserved.has(key)) return;
+    this.castObserved.add(key);
+    // A fight must never end with an ability mislabelled because its first hit
+    // happened to arrive before its first cast line.
+    if (this.current && !this.current.closed &&
+        this.current.unmarkProc(caster.name, ability, caster.isPet)) {
+      this.revision++;
+    }
+  }
+
+  /**
+   * Is this damage a weapon proc — an ability that deals damage but is never cast?
+   *
+   * Spell-source damage only. A DoT tick arrives long after its cast and is already
+   * its own bucket; melee and damage shields are not spells at all. The test is
+   * simply whether a cast line for this exact caster and ability has ever been seen,
+   * which is what makes it read the log rather than guess from a table of names.
+   */
+  isProc(attacker, event) {
+    if (event.source !== 'spell' || !event.ability) return false;
+    return !this.castObserved.has(`${attacker.display}|${spellStem(event.ability)}`);
   }
 
   /**
@@ -448,7 +880,10 @@ export class LogParser {
       // Pruning uses a longer TTL than this window so charm attribution still works;
       // filter here rather than delete.
       if (ts - cast.ts > CAST_WINDOW_MS) continue;
-      if (this.isFriendly(name)) candidates.push({ name, ability: cast.ability ?? 'Unknown' });
+      // Proven standing, not a player-shaped name: an entity nobody has established
+      // anything about is UNKNOWN, and crediting it with damage on the strength of its
+      // spelling is the same mistake that made a PoSky bee a group member.
+      if (this.isProvenFriendly(name)) candidates.push({ name, ability: cast.ability ?? 'Unknown' });
     }
     // Two people casting at once makes attribution a coin flip; a visible "Unknown"
     // row is more honest than a wrong name, and immediately shows the rules need work.
@@ -639,7 +1074,7 @@ export class LogParser {
   }
 
   handleMiss(event) {
-    const attacker = this.resolve(event.attacker);
+    const attacker = this.resolve(event.attacker, true);
     const target = this.resolve(event.target);
     const attackerFriendly = this.isFriendly(attacker.name);
     const targetFriendly = this.isFriendly(target.name);
@@ -683,7 +1118,7 @@ export class LogParser {
   handleHeal(event) {
     if (!this.current || this.current.closed) return;
 
-    const healer = this.resolve(event.attacker);
+    const healer = this.resolve(event.attacker, true);
     if (!this.isFriendly(healer.name) && !this.isUnownedPet(healer.name)) return;
 
     // "Gann healed himself", "Emalina healed herself" — the reflexive is the healer.
@@ -919,6 +1354,7 @@ export class LogParser {
   tick(now = this.clock()) {
     this.pruneHostileCasts(now);
     this.pruneCcStates(now);
+    this.pruneNotices(now);
     if (this.current && !this.current.closed && this.current.update(now)) {
       this.last = this.current;
       this.current = null;
@@ -975,6 +1411,15 @@ export class LogParser {
       remainingMs: Math.max(0, CC_STATE_CAP_MS - (now - s.ts)),
     }));
 
+    // Acknowledgements for the in-game mapping command. They ride the snapshot for
+    // the same reason warnings do — the alerts window is the one surface that floats
+    // over the game without taking a click away from it.
+    const notices = this.notices.map((n) => ({
+      id: n.id,
+      text: n.text,
+      remainingMs: Math.max(0, NOTICE_TTL_MS - (now - n.ts)),
+    }));
+
     // Timers only exist while a fight is running: a prediction about a mob nobody is
     // fighting is a promise the log can't keep. Warnings are facts and show anytime;
     // timers are estimates and need the fight live to stay grounded.
@@ -1002,6 +1447,7 @@ export class LogParser {
         hostileCasts,
         castTimers,
         memberEffects,
+        notices,
       };
     }
 
@@ -1019,6 +1465,7 @@ export class LogParser {
       hostileCasts,
       castTimers,
       memberEffects,
+      notices,
     };
   }
 }

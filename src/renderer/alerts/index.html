@@ -21,6 +21,12 @@
        timer is an estimate, and the estimate must never displace the fact. -->
   <ol id="timers"></ol>
 
+  <!-- Acknowledgements for the in-game "pet <Name> = <Owner>" command. Bottom of the
+       stack: the player asked for these, so they never need to outrank a warning —
+       but they do need to be SEEN, because the alternative to a visible reply is a
+       command that silently does nothing. -->
+  <ol id="notices"></ol>
+
   <!-- Only visible while unlocked: an empty invisible window cannot be dragged. -->
   <div id="placeholder">
     <span class="verb">Cast warnings</span>

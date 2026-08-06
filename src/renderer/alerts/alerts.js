@@ -11,6 +11,7 @@
 const stack = document.getElementById('stack');
 const effectsList = document.getElementById('effects');
 const timersList = document.getElementById('timers');
+const noticesList = document.getElementById('notices');
 
 let cfg = null;
 /** @type {Map<number, HTMLElement>} chip elements by warning id */
@@ -19,6 +20,8 @@ const chips = new Map();
 const effectChips = new Map();
 /** @type {Map<string, {el: HTMLElement, due: HTMLElement, drain: HTMLElement}>} timer chips by caster|ability */
 const timerChips = new Map();
+/** @type {Map<number, HTMLElement>} mapping-command acknowledgements by notice id */
+const noticeChips = new Map();
 /** Ids present in the previous push — how a NEW tier-3 warning is told from an old one. */
 let seenIds = new Set();
 
@@ -47,6 +50,7 @@ async function init() {
     render(warnings);
     renderEffects(snapshot.memberEffects ?? []);
     renderTimers(snapshot.castTimers ?? [], warnings);
+    renderNotices(snapshot.notices ?? []);
   });
 }
 
@@ -250,6 +254,42 @@ function buildTimerChip(t) {
 
   li.append(due, spell, caster, drain);
   return { el: li, due, drain };
+}
+
+// -------------------------------------------------------------------- notices
+
+/**
+ * Replies to the in-game "pet <Name> = <Owner>" command.
+ *
+ * The parser has no other way to talk back — the player is in fullscreen EverQuest,
+ * and the alerts window is the one surface that floats over it without taking a click
+ * away from the game. Chips are reused by id and fade out on the same schedule as a
+ * warning, so an acknowledgement never just blinks out of existence.
+ */
+function renderNotices(notices) {
+  const liveIds = new Set(notices.map((n) => n.id));
+  for (const [id, el] of noticeChips) {
+    if (!liveIds.has(id)) {
+      el.remove();
+      noticeChips.delete(id);
+    }
+  }
+
+  notices.forEach((n, index) => {
+    let el = noticeChips.get(n.id);
+    if (!el) {
+      el = document.createElement('li');
+      el.className = 'nchip';
+      el.textContent = n.text;
+      noticeChips.set(n.id, el);
+    }
+    if (n.remainingMs <= FADE_MS) el.dataset.fading = '';
+    else delete el.dataset.fading;
+
+    if (noticesList.children[index] !== el) {
+      noticesList.insertBefore(el, noticesList.children[index] ?? null);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------- sound

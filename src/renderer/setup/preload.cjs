@@ -11,6 +11,7 @@ const CH = {
   LOGS_VALIDATE: 'logs:validate',
   LOGS_CLEAR: 'logs:clear',
   SETUP_COMPLETE: 'setup:complete',
+  PETS_STATE: 'pets:state',
 };
 
 const modeArg = process.argv.find((a) => a.startsWith('--overlay-mode='));
@@ -24,4 +25,5 @@ contextBridge.exposeInMainWorld('api', {
   validate: (filePath) => ipcRenderer.invoke(CH.LOGS_VALIDATE, filePath),
   clearLog: () => ipcRenderer.invoke(CH.LOGS_CLEAR),
   complete: (patch) => ipcRenderer.invoke(CH.SETUP_COMPLETE, patch),
+  petsState: () => ipcRenderer.invoke(CH.PETS_STATE),
 });

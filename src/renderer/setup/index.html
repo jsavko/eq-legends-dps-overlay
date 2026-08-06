@@ -105,10 +105,18 @@
         Pets called <code>Rhale`s warder</code> are folded into their owner automatically.
         Summoned pets have their own name and the log never says whose they are, so list
         them here as <code>Pet = Owner</code>, one per line. Your own pet is detected
-        automatically once it reports to you.
+        automatically once it reports to you, and other players' pets are usually worked
+        out from the summon line. You can also map one without leaving the game by typing
+        <code>pet Kibektik = Khanvikt</code> into any chat channel.
       </p>
       <textarea id="pet-owners" rows="4" spellcheck="false"
                 placeholder="Gann = Rhain"></textarea>
+
+      <!-- Rendered ALWAYS, empty state included: the whole reason this block exists is
+           that the textarea above never told anyone WHICH names needed mapping. -->
+      <p class="hint" id="pets-learned"></p>
+      <p class="hint">Seen fighting with you, not proven to be players — click to map:</p>
+      <ul id="pets-unmapped" class="chips"></ul>
 
       <h2>Hotkeys</h2>
       <div class="row">

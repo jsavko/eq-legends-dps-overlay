@@ -121,6 +121,7 @@ async function startTailing(logPath) {
     ...config.parserOptions(),
     onEncounterEnd: persistEncounter,
     onRhythmsLearned: persistRhythms,
+    onPetOwnersChanged: persistPetOwners,
   });
   provideKnownRhythms();
 
@@ -224,6 +225,25 @@ function persistRhythms(learned) {
     rhythmStore.merge(parser.server, learned, Date.now());
   } catch (err) {
     toast(`Rhythm save failed: ${err.message}`);
+  }
+}
+
+/**
+ * Persist a pet mapping the player typed in-game ("/say pet Kibektik = Khanvikt").
+ *
+ * Surviving a restart is the entire point of routing it through config rather than
+ * leaving it in the parser: having to redo the mapping every session is exactly the
+ * friction the command exists to remove. The settings form reads the same key, so a
+ * mapping made in-game shows up there and can be edited or removed normally.
+ */
+function persistPetOwners(mapping) {
+  try {
+    const after = config.set({ petOwners: mapping });
+    for (const win of [overlayWindow, alertsWindow, setupWindow]) {
+      if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.CONFIG_CHANGED, after);
+    }
+  } catch (err) {
+    toast(`Pet mapping save failed: ${err.message}`);
   }
 }
 
@@ -767,6 +787,11 @@ function registerIpc() {
     pushStatus();
     return after;
   });
+
+  ipcMain.handle(CHANNELS.PETS_STATE, () => ({
+    mapped: parser?.petMappings() ?? [],
+    unmapped: parser?.unmappedEntities() ?? [],
+  }));
 
   ipcMain.handle(CHANNELS.LOGS_LIST, async (_e, dir) => {
     const target = dir || config.get('logDir') || DEFAULT_LOG_DIR;

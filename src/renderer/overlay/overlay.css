@@ -491,6 +491,13 @@ body[data-panel="above"] #detail {
 #d-abilities li[data-pet="true"]::before {
   background: color-mix(in srgb, var(--pet) 26%, transparent);
 }
+/* A proc is marked on the NAME, not with a bar colour of its own: the fill already
+   encodes player-vs-pet, and a third colour there would make the list a puzzle. The
+   label carries the word, so this only has to make the eye find them. */
+#d-abilities li[data-proc] .a-name {
+  font-style: italic;
+  opacity: 0.92;
+}
 #d-abilities .a-name {
   position: relative;
   /* The only elastic column (1fr), so a long name ellipsizes instead of widening the

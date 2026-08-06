@@ -345,7 +345,14 @@ function renderDamageDetail(row) {
   const sources = Object.entries(row.bySource)
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1]);
-  setChips(sources.map(([kind, value]) => [SOURCE_LABEL[kind] ?? kind, value.toLocaleString()]));
+  // The procs chip renders ALWAYS, including as a zero. Showing it only when there are
+  // procs would move every chip after it — and, on a member whose chips wrap to a
+  // second line, shove the whole ability list down — the moment a weapon happened to
+  // fire. The overlay cannot scroll, so a row pushed off the bottom is a row gone.
+  setChips([
+    ...sources.map(([kind, value]) => [SOURCE_LABEL[kind] ?? kind, value.toLocaleString()]),
+    ['procs', (row.procDamage ?? 0).toLocaleString()],
+  ]);
 
   // EVERY ability, never a top-N slice. The parser was credited with the damage; a
   // breakdown that hides the bottom of the list reads as damage gone missing — DoTs
@@ -496,6 +503,10 @@ function setAbilities(list, { value, detail, share }) {
     ...list.map((a) => {
       const li = document.createElement('li');
       li.dataset.pet = String(Boolean(a.pet));   // taken abilities carry no pet flag
+      // A proc is a fact about the ability, not a fourth column: the label already
+      // says "(pet proc)", and this only tints it so the group reads at a glance.
+      if (a.proc) li.dataset.proc = '';
+      else delete li.dataset.proc;
       li.style.setProperty('--w', `${(value(a) / best) * 100}%`);
 
       const n = document.createElement('span');

@@ -88,9 +88,9 @@ export function parseMods(raw) {
  * collect-unknown.js reports a genuinely unrecognised line rather than chat noise.
  */
 const CHAT_RE = new RegExp(
-  '^(.+?) (?:' +
-    'tells (?:you|the group|the guild|the raid|[A-Za-z]+:\\d+)|' +
-    'told (?:you|the group)|' +
+  '^(.+?) (' +
+    'tells (?:you|the group|the guild|the raid|[A-Za-z]+\\d*:\\d+)|' +
+    'told (?:you|the group|[A-Za-z]+)|' +
     'says?(?: out of character)?|' +
     'shouts?|' +
     'auctions?|' +
@@ -98,7 +98,40 @@ const CHAT_RE = new RegExp(
   '),\\s'
 );
 
-const SELF_CHAT_RE = /^You (?:tell|say|shout|auction|whisper)\b/;
+/**
+ * The self forms. "told"/"said" are included because the log really does write
+ * "You told Rhain, '...'" (152 occurrences) — without them an outgoing tell reaches
+ * the damage rules, where any combat text the player quoted would score.
+ */
+const SELF_CHAT_RE = /^You (?:tells?|told|says?|said|shouts?|auctions?|whispers?)\b/;
+
+/**
+ * Channel forms that PROVE the speaker is a real player.
+ *
+ * Deliberately narrow, because the cost of a false positive here is the bee bug in
+ * reverse — a mob marked a player is friendly forever, and its damage stops counting:
+ *   - bare `says,` is out: mobs use it for summon call-outs
+ *     ("Bazzzazzt says, 'You will not evade me, Khanvikt!'")
+ *   - `tells you` / `told you` are out: that is how a pet reports to its Master
+ *   - `shouts` is out: EverQuest mobs shout, and the live log contains no player
+ *     shouts at all, so including it would be pure risk for no coverage
+ * What is left needs a player client to produce: a group, guild, raid or custom
+ * channel line. 917 distinct names arrive this way and not one is a pet or a bee.
+ */
+const PLAYER_PROOF_CHANNEL_RE = /^(?:tells (?:the group|the guild|the raid|[A-Za-z]+\d*:\d+)|auctions?)$/;
+
+/**
+ * The self-originated chat forms the in-game mapping command may ride on.
+ *
+ * Not tied to one channel on purpose: party chat does not exist when you are solo —
+ * which is exactly when you would be mapping your own pet — guild chat needs a guild
+ * and raid chat needs a raid. `/echo` and self-tells are both rejected by Legends, so
+ * these five (all proven in the live log) are what remains. Only the SELF form is
+ * matched: everyone else's chat lands in the same log, and a third-person rule would
+ * let anyone in /general reconfigure the overlay by typing the magic words.
+ */
+const SELF_CHANNEL =
+  'You (?:say|tell your party|tell your raid|say to your guild|tell [A-Za-z]+\\d*:\\d+)';
 
 /**
  * @typedef {Object} LogEvent
@@ -161,11 +194,44 @@ export const RULES = [
     make: () => ({ kind: 'summon', attacker: null, victim: 'You' }),
   },
 
+  // --------------------------------------------------- the mapping command, before chat
+  {
+    // (confirmed forms) "You say, 'pet ?'"
+    //
+    // The parser's only input is the log, so anything the client writes to the log can
+    // be a control channel. This is the list form; see SELF_CHANNEL for why it is not
+    // tied to one chat command. Must precede the chat rules, which would swallow it —
+    // the same placement precedent as pet-reports-to-master and summon-say.
+    id: 'pet-command-list',
+    re: new RegExp('^' + SELF_CHANNEL + ", 'pet \\?'$"),
+    make: () => ({ kind: 'pet-command', action: 'list' }),
+  },
+  {
+    // (confirmed forms) "You tell your party, 'pet Kibektik = Khanvikt'"
+    //                   "You say, 'pet Kibektik = none'"
+    //
+    // Anchored to the ENTIRE quoted message, not a substring, so chatter that merely
+    // contains the words is ignored — "pet needs heals" cannot match. No `eqlo` prefix:
+    // the anchor plus the self form is what provides safety, and a prefix would only
+    // make the command harder to type. Names are letters only, which is what EQ allows,
+    // so a malformed command falls through to the chat rule and writes nothing.
+    id: 'pet-command-set',
+    re: new RegExp('^' + SELF_CHANNEL + ", 'pet ([A-Za-z]{2,32}) *= *([A-Za-z]{2,32})'$"),
+    make: (m) => (/^none$/i.test(m[2])
+      ? { kind: 'pet-command', action: 'clear', pet: m[1] }
+      : { kind: 'pet-command', action: 'set', pet: m[1], owner: m[2] }),
+  },
+
   // ---------------------------------------------------------------- chat next
   {
+    // The speaker and the channel are captured, not discarded: talking on a group,
+    // guild, raid or custom channel is something only a player client can do, which
+    // makes those forms the cleanest player proof in the log (see roster.js).
     id: 'chat',
     re: CHAT_RE,
-    make: () => ({ kind: 'chat' }),
+    make: (m) => (PLAYER_PROOF_CHANNEL_RE.test(m[2])
+      ? { kind: 'player-proof', who: m[1] }
+      : { kind: 'chat' }),
   },
   {
     id: 'chat-self',
@@ -459,6 +525,63 @@ export const RULES = [
     make: (m) => ({ kind: 'resist', target: m[1], attacker: m[2], ability: m[3] }),
   },
 
+  // ------------------------------------------------------------------- pet summons
+  // A summoned pet gets a GENERATED name — "Kibektik", "Gann" — with none of the
+  // backtick possessive that makes `` Rhale`s warder `` self-describing, and the log
+  // never says whose it is. These flavour lines are the one place the owner is stated
+  // outright, so they are what ties the two together (see roster.js's pendingSummon).
+  //
+  // None of them assumes the summoner is friendly: the very same wording arrives from
+  // "a shadowknight", "a necro acolyte" and "a froglok sentry" in the live log. The
+  // friendly guard belongs in index.js, where the roster is.
+  {
+    // (confirmed) "Khanvikt animates an undead servant." — necromancer and shadowknight,
+    // 20 occurrences, 18 of them from friendlies.
+    id: 'pet-summon-undead',
+    re: /^(.+?) animates an undead servant\.$/,
+    make: (m) => ({ kind: 'pet-summon', owner: m[1] }),
+  },
+  {
+    // (confirmed) "Venun summons a frenzied spirit." / "Brewgore summons a guardian
+    // spirit." / "Tormax summons a companion spirit." — shaman and beastlord.
+    id: 'pet-summon-spirit',
+    re: /^(.+?) summons an? (?:frenzied|guardian|companion) spirit\.$/,
+    make: (m) => ({ kind: 'pet-summon', owner: m[1] }),
+  },
+  {
+    // (confirmed) "Crusader summons forth a minor familiar." — the magician familiar.
+    // The magician's ANIMATION has no flavour line at all, which is why index.js also
+    // treats a bare cast as weak evidence a pet is about to appear.
+    id: 'pet-summon-familiar',
+    re: /^(.+?) summons forth a minor familiar\.$/,
+    make: (m) => ({ kind: 'pet-summon', owner: m[1] }),
+  },
+  {
+    // (confirmed) "Kibektik's eyes gleam with madness." — Augment Death landing.
+    // (confirmed) "Rhale`s warder's eyes gleam with madness." — a provable pet, which
+    // is what establishes the line is pet-only: every one of the 60-odd names it names
+    // in the live log is either a backtick pet or a generated pet name.
+    //
+    // Paired with the CAST that produced it, this is the tighter binding: "Khanvikt
+    // begins casting Augment Death IV." five seconds before "Kibektik's eyes gleam with
+    // madness." is what proves Kibektik is Khanvikt's, and it corrects a mis-bind the
+    // temporal path may have made.
+    id: 'pet-buff-gleam',
+    re: /^(.+?)'s eyes gleam with madness\.$/,
+    make: (m) => ({ kind: 'pet-buff', who: m[1] }),
+  },
+  {
+    // (confirmed) "Kibektik shrinks." — Tiny Companion landing.
+    //
+    // NOT pet-only on its own: "Khanvikt shrinks." follows "Khanvikt begins casting
+    // Shrink." and Khanvikt is a player. Only the pairing with a pet-only spell name
+    // makes it evidence, exactly as charm attribution matches on the spell rather than
+    // on whoever happened to be casting (see index.js).
+    id: 'pet-buff-shrink',
+    re: /^(.+?) shrinks\.$/,
+    make: (m) => ({ kind: 'pet-buff', who: m[1] }),
+  },
+
   // ----------------------------------------------------------------- crowd control
   {
     // (confirmed) "a tal ghoul wizard has been charmed."
@@ -558,9 +681,15 @@ export const RULES = [
   },
 
   // ----------------------------------------------------------------- group state
-  // Not present in the sample session; wording follows classic EverQuest. The roster
-  // also learns membership implicitly from combat, so the overlay works even if this
-  // server words these differently (see roster.js).
+  // (confirmed) All four wordings are verified against the live log — 21 third-person
+  // join/leave lines ("Kadomony has joined the group.", "Khanvikt has left the group.")
+  // and 16 self forms ("You have joined the group." ×10, "You have been removed from
+  // the group." ×6). They were carried as unverified classic-EverQuest guesses for a
+  // long time and turn out to have been right all along.
+  //
+  // This matters more than membership alone: explicit membership outranks every
+  // heuristic below it, so wiring these up shrinks the blast radius of any single
+  // misclassification — and a join/leave line is also proof the name is a real player.
   {
     id: 'group-joined',
     re: /^(.+?) has joined the group\.$/,
@@ -599,6 +728,21 @@ export const RULES = [
     }),
   },
 
+  // ----------------------------------------------------------------- proc flavour
+  {
+    // (confirmed) "A spiroc guardian has been struck by the force of Ykesha."
+    //
+    // The flavour half of a weapon proc. It carries NO damage and must never be
+    // scored: the damage arrives on its own `spell-damage` line
+    // ("Rhale`s warder hit a spiroc guardian for 75 points of magic damage by Ykesha."),
+    // and the pairing is exactly 1:1 — 746 flavour lines, 746 damage lines across the
+    // whole log. Matching it as a typed no-op keeps collect-unknown.js quiet without
+    // letting a single point of Ykesha damage count twice.
+    id: 'proc-flavor',
+    re: /^(.+?) has been struck by the force of (.+?)\.$/,
+    make: (m) => ({ kind: 'proc-flavor', target: m[1], ability: m[2] }),
+  },
+
   // ------------------------------------------------------------------- logging on
   {
     // (confirmed) "Logging to 'eqlog.txt' is now *ON*."
@@ -627,6 +771,25 @@ export function normalizeVerb(verb) {
     stem = base;                               // already the base form
   }
   return stem.charAt(0).toUpperCase() + stem.slice(1);
+}
+
+/**
+ * Strip a spell's rank suffix: "Frost Storm VIII" -> "Frost Storm".
+ *
+ * This server ranks spells with a trailing roman numeral, and it prints that rank on
+ * the CAST line but NOT on the damage line:
+ *
+ *   Syphon begins casting Frost Storm VIII.
+ *   Syphon hit a spiroc guardian for 428 points of cold damage by Frost Storm.
+ *
+ * Anything that pairs the two has to collapse them first. Proc detection is the
+ * obvious case — without this, every ranked spell in the game reads as an ability that
+ * deals damage and is never cast, which is exactly the definition of a proc and
+ * exactly the wrong answer (163k of Syphon's Frost Storm damage labelled a proc when
+ * he cast it 454 times).
+ */
+export function spellStem(name) {
+  return String(name ?? '').trim().replace(/\s+[IVXLC]+$/, '');
 }
 
 /**

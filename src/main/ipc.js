@@ -36,6 +36,13 @@ export const CHANNELS = {
   HISTORY_LIST: 'history:list',
   HISTORY_GET: 'history:get',
   HISTORY_CLEAR: 'history:clear',
+  /**
+   * What the parser currently knows about pets: mappings in force, and names that are
+   * getting their own row with nothing proving they are players. The settings form has
+   * always been able to WRITE a mapping; this is what finally tells the player which
+   * names need one.
+   */
+  PETS_STATE: 'pets:state',
 
   // renderer -> main (fire and forget)
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',

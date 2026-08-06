@@ -462,6 +462,9 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
 
 .resist { color: var(--gold); font-weight: 600; }
 .pet-tag { color: var(--ink-dim); font-style: italic; }
+/* An ability that deals damage and is never cast — a weapon proc. Italic on its own
+   for a player's procs; a pet's already carry .pet-tag's dim, and the two compose. */
+.proc-tag { font-style: italic; }
 
 /* "fire 13,011 FR" chips under the taken tables. */
 .b-chips {

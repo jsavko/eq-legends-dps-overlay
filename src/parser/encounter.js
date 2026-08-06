@@ -14,6 +14,8 @@
  * making the player stare at a stale number for the full 15s timeout.
  */
 
+import { spellStem } from './rules.js';
+
 const SECOND = 1000;
 
 export const DEFAULTS = {
@@ -30,6 +32,12 @@ function newCombatant(name) {
     name,
     damage: 0,
     petDamage: 0,
+    /**
+     * Damage from abilities that deal damage but are never cast — weapon procs.
+     * A separate axis from petDamage, not a slice of it: a player's own weapon procs
+     * and their pet's both land here, and pet proc damage is counted in both.
+     */
+    procDamage: 0,
     hits: 0,
     misses: 0,
     crits: 0,
@@ -141,8 +149,9 @@ export class Encounter {
    * @param {string} hit.ability
    * @param {boolean} hit.isPet   true when the swing came from this member's pet
    * @param {boolean} hit.crit
+   * @param {boolean} [hit.proc]  true when no cast for this ability has ever been seen
    */
-  addDamage({ name, amount, ts, source, ability, isPet, crit }) {
+  addDamage({ name, amount, ts, source, ability, isPet, crit, proc }) {
     const c = this.combatant(name);
 
     c.damage += amount;
@@ -156,15 +165,19 @@ export class Encounter {
     // Pet swings get their own ability rows so the breakdown can tell
     // "your Crush" apart from "your warder's Crush".
     const key = isPet ? `${ability} (pet)` : ability;
-    let ab = c.byAbility.get(key);
-    if (!ab) {
-      ab = { damage: 0, hits: 0, crits: 0, max: 0, pet: Boolean(isPet) };
-      c.byAbility.set(key, ab);
+    const ab = this.abilityRow(c, key, ability, isPet, proc);
+    // A cast has now been seen for an ability we had been calling a proc, so it never
+    // was one. Take the credit back BEFORE this hit lands, and keep the one row —
+    // splitting proc and non-melee into separate rows would strand a stale one here.
+    if (ab.proc && !proc) {
+      ab.proc = false;
+      c.procDamage -= ab.damage;
     }
     ab.damage += amount;
     ab.hits += 1;
     if (crit) ab.crits += 1;
     if (amount > ab.max) ab.max = amount;
+    if (ab.proc) c.procDamage += amount;
 
     const second = Math.floor(ts / SECOND);
     c.window.set(second, (c.window.get(second) ?? 0) + amount);
@@ -219,6 +232,49 @@ export class Encounter {
     this.totalHealing += effective;
   }
 
+  /**
+   * Get or create the per-ability row.
+   *
+   * `ability` is stored alongside the key because the key already carries the "(pet)"
+   * suffix, and the snapshot needs the bare name back to render "Ykesha (pet proc)".
+   */
+  abilityRow(c, key, ability, isPet, proc = false) {
+    let ab = c.byAbility.get(key);
+    if (!ab) {
+      ab = {
+        ability, damage: 0, hits: 0, crits: 0, max: 0,
+        pet: Boolean(isPet), proc: Boolean(proc),
+      };
+      c.byAbility.set(key, ab);
+    }
+    return ab;
+  }
+
+  /**
+   * A cast was finally observed for an ability already credited as a proc, and no
+   * further hit is guaranteed to arrive to correct the label. Clear it now, so no
+   * fight can end with an ability mislabelled purely because its first hit happened
+   * to precede its first cast line.
+   *
+   * @returns {boolean} true if a row was relabelled
+   */
+  unmarkProc(name, ability, isPet) {
+    const c = this.combatants.get(name);
+    if (!c) return false;
+    // Matched on the rank-stripped stem, because the cast line carries a rank that the
+    // damage line does not: "Frost Storm VIII" has to find the "Frost Storm" row.
+    const stem = spellStem(ability);
+    let changed = false;
+    for (const ab of c.byAbility.values()) {
+      if (!ab.proc || ab.pet !== Boolean(isPet)) continue;
+      if (spellStem(ab.ability) !== stem) continue;
+      ab.proc = false;
+      c.procDamage -= ab.damage;
+      changed = true;
+    }
+    return changed;
+  }
+
   /** Record a swing that produced no damage. Misses lower accuracy but not DPS. */
   addMiss({ name, ts, isPet, ability }) {
     const c = this.combatant(name);
@@ -226,12 +282,7 @@ export class Encounter {
     if (c.firstTs === null) c.firstTs = ts;
     c.lastTs = ts;
 
-    const key = isPet ? `${ability} (pet)` : ability;
-    let ab = c.byAbility.get(key);
-    if (!ab) {
-      ab = { damage: 0, hits: 0, crits: 0, max: 0, pet: Boolean(isPet) };
-      c.byAbility.set(key, ab);
-    }
+    const ab = this.abilityRow(c, isPet ? `${ability} (pet)` : ability, ability, isPet);
     // Deliberately not counted in ab.hits — hits/(hits+misses) must stay a real accuracy.
     ab.misses = (ab.misses ?? 0) + 1;
   }
@@ -433,6 +484,7 @@ export class Encounter {
 
         damage: c.damage,
         petDamage: c.petDamage,
+        procDamage: c.procDamage,
         playerDamage: c.damage - c.petDamage,
         dps: c.damage / durationSec,
         rollingDps: this.rollingTotal(c.window, t) / rollingSec,
@@ -444,13 +496,16 @@ export class Encounter {
         bySource: { ...c.bySource },
         abilities: [...c.byAbility.entries()]
           .map(([name, a]) => ({
-            name,
+            // The label is derived here rather than baked into the map key, so that
+            // clearing a proc label retroactively cannot strand a stale row.
+            name: a.proc ? `${a.ability} (${a.pet ? 'pet proc' : 'proc'})` : name,
             damage: a.damage,
             hits: a.hits,
             misses: a.misses ?? 0,
             crits: a.crits,
             max: a.max,
             pet: a.pet,
+            proc: Boolean(a.proc),
           }))
           .sort((a, b) => b.damage - a.damage),
 

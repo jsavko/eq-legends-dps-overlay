@@ -429,13 +429,17 @@ function damageBreakdown(r) {
     `${r.hits} hits`,
     r.crits > 0 && `${r.crits} crits`,
     `max ${r.maxHit.toLocaleString()}`,
+    // Always present, zero included, so the head line is the same length on a fight
+    // with no procs as on one full of them. `?? 0` covers records written before
+    // procs were tracked at all.
+    `${(r.procDamage ?? 0).toLocaleString()} proc`,
   ]);
   return [head, heading('Abilities'), table(
     ['ability', 'damage', 'share', 'hits', 'crits', 'max'],
     r.abilities.map((a) => ({
       bar: a.damage,
       cells: [
-        a.pet ? petTag(a.name) : a.name,
+        abilityName(a),
         a.damage.toLocaleString(),
         dim(pct(r.damage > 0 ? a.damage / r.damage : 0)),
         dim(String(a.hits)),
@@ -459,7 +463,7 @@ function healingBreakdown(r) {
     r.healAbilities.map((a) => ({
       bar: a.healing,
       cells: [
-        a.pet ? petTag(a.name) : a.name,
+        abilityName(a),
         a.healing.toLocaleString(),
         dim(a.overhealing.toLocaleString()),
         dim(String(a.casts)),
@@ -587,10 +591,16 @@ function resistTag(type) {
   return s;
 }
 
-function petTag(name) {
+/**
+ * An ability's name cell. Pet and proc are marked on the NAME rather than given
+ * columns of their own — the label already reads "Ykesha (pet proc)", so this only has
+ * to help the eye group them, and a new column would widen every table in the pane.
+ */
+function abilityName(a) {
+  if (!a.pet && !a.proc) return a.name;
   const s = document.createElement('span');
-  s.className = 'pet-tag';
-  s.textContent = name;
+  s.className = [a.pet && 'pet-tag', a.proc && 'proc-tag'].filter(Boolean).join(' ');
+  s.textContent = a.name;
   return s;
 }
 
