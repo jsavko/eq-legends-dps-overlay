@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { abilityColumns } from '../src/renderer/overlay/breakdown.js';
+import { abilityColumns, splitShares } from '../src/renderer/overlay/breakdown.js';
 
 // The real case that motivated this: Rhale's 19-ability row from the live log.
 // One 24px row-height column is 456px tall.
@@ -42,4 +42,29 @@ test('zero or nonsense input degrades to one column', () => {
   assert.equal(abilityColumns({ count: 0, rowHeight: 24, available: 100 }), 1);
   assert.equal(abilityColumns({ count: 5, rowHeight: 0, available: 100 }), 1);
   assert.equal(abilityColumns({ count: NaN, rowHeight: 24, available: 100 }), 1);
+});
+
+test('splitShares divides a normal split and sums to 100', () => {
+  assert.deepEqual(splitShares(143022, 61552), { playerPct: 70, petPct: 30 });
+});
+
+test('splitShares rounds as complements so the pair always sums to 100', () => {
+  // 2/3 vs 1/3 rounds independently to 67 + 33 — fine — but 1/6 vs 5/6 style
+  // splits are where independent rounding drifts. Pin a case per direction.
+  assert.deepEqual(splitShares(2, 1), { playerPct: 67, petPct: 33 });
+  assert.deepEqual(splitShares(1, 2), { playerPct: 33, petPct: 67 });
+  assert.deepEqual(splitShares(1005, 995), { playerPct: 50, petPct: 50 });
+  const { playerPct, petPct } = splitShares(999, 2);
+  assert.equal(playerPct + petPct, 100);
+});
+
+test('splitShares is null when there is nothing to split', () => {
+  // A taken-view row can render with zero taken, shown only for a death.
+  assert.equal(splitShares(0, 0), null);
+  assert.equal(splitShares(NaN, 5), null);
+});
+
+test('splitShares gives a petless player 100/0, and a pet-only total 0/100', () => {
+  assert.deepEqual(splitShares(5000, 0), { playerPct: 100, petPct: 0 });
+  assert.deepEqual(splitShares(0, 5000), { playerPct: 0, petPct: 100 });
 });

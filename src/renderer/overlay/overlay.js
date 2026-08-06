@@ -12,7 +12,7 @@
  *    every push would restart every animation and make the bars stutter.
  */
 
-import { abilityColumns } from './breakdown.js';
+import { abilityColumns, splitShares } from './breakdown.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -331,10 +331,7 @@ function renderDetail(row) {
 function renderDamageDetail(row) {
   els.dTotal.textContent = `${row.damage.toLocaleString()} dmg · ${formatNumber(row.dps)} dps`;
 
-  const petPct = row.damage > 0 ? (row.petDamage / row.damage) * 100 : 0;
-  setSplit(petPct,
-    `player ${row.playerDamage.toLocaleString()}`,
-    `pet ${row.petDamage.toLocaleString()}`);
+  setSplit(row.playerDamage, row.petDamage);
 
   setStats(els.dStats, [
     ['hits', row.hits],
@@ -369,10 +366,7 @@ function renderDamageDetail(row) {
 function renderHealDetail(row) {
   els.dTotal.textContent = `${row.healing.toLocaleString()} healed · ${formatNumber(row.hps)} hps`;
 
-  const petPct = row.healing > 0 ? (row.petHealing / row.healing) * 100 : 0;
-  setSplit(petPct,
-    `player ${row.playerHealing.toLocaleString()}`,
-    `pet ${row.petHealing.toLocaleString()}`);
+  setSplit(row.playerHealing, row.petHealing);
 
   setStats(els.dStats, [
     ['heals', row.heals],
@@ -402,10 +396,7 @@ function renderHealDetail(row) {
 function renderTakenDetail(row) {
   els.dTotal.textContent = `${row.damageTaken.toLocaleString()} taken · ${formatNumber(row.dtps)} dtps`;
 
-  const petPct = row.damageTaken > 0 ? (row.petDamageTaken / row.damageTaken) * 100 : 0;
-  setSplit(petPct,
-    `player ${row.playerDamageTaken.toLocaleString()}`,
-    `pet ${row.petDamageTaken.toLocaleString()}`);
+  setSplit(row.playerDamageTaken, row.petDamageTaken);
 
   setStats(els.dStats, [
     ['hits taken', row.hitsTaken],
@@ -462,11 +453,24 @@ function setTypeChips(byType) {
   );
 }
 
-function setSplit(petPct, selfLabel, petLabel) {
+/**
+ * The player/pet split line: bar widths plus the legend labels, from raw values.
+ * All three metric views want the identical line, so the wording lives here. The
+ * percentages come from splitShares (complementary rounding, so the pair sums to
+ * 100); when it returns null there is nothing to divide and the labels stay plain
+ * totals — `player 0 · 100%` on a death-only row would be a made-up number.
+ */
+function setSplit(playerValue, petValue) {
+  const shares = splitShares(playerValue, petValue);
+  const petPct = shares ? shares.petPct : 0;
   els.dSelfBar.style.width = `${100 - petPct}%`;
   els.dPetBar.style.width = `${petPct}%`;
-  els.dSelfLabel.textContent = selfLabel;
-  els.dPetLabel.textContent = petLabel;
+  els.dSelfLabel.textContent = shares
+    ? `player ${playerValue.toLocaleString()} · ${shares.playerPct}%`
+    : `player ${playerValue.toLocaleString()}`;
+  els.dPetLabel.textContent = shares
+    ? `pet ${petValue.toLocaleString()} · ${shares.petPct}%`
+    : `pet ${petValue.toLocaleString()}`;
 }
 
 function setChips(pairs) {

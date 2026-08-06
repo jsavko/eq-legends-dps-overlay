@@ -25,6 +25,29 @@
  * @param {number} [args.maxColumns]
  * @returns {number} 1 .. maxColumns
  */
+/**
+ * Percentage split for the player/pet legend line.
+ *
+ * The two figures must read as parts of one whole, so they are rounded as
+ * complements: pet gets `Math.round`, player gets the remainder. Rounding each
+ * independently can print 66% + 33% or 67% + 34% — a pair that does not sum to 100
+ * reads as damage missing, which is the exact failure the breakdown exists to avoid.
+ *
+ * Returns null when the total is zero (a taken-view row can render with nothing
+ * taken, shown only because someone died) — the caller omits the percentages
+ * entirely rather than inventing a `player 0 · 100%`.
+ *
+ * @param {number} playerValue
+ * @param {number} petValue
+ * @returns {{ playerPct: number, petPct: number } | null}
+ */
+export function splitShares(playerValue, petValue) {
+  const total = playerValue + petValue;
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const petPct = Math.round((petValue / total) * 100);
+  return { playerPct: 100 - petPct, petPct };
+}
+
 export function abilityColumns({ count, rowHeight, available, maxColumns = 3 }) {
   if (!Number.isFinite(count) || count <= 0) return 1;
   if (!Number.isFinite(rowHeight) || rowHeight <= 0) return 1;
