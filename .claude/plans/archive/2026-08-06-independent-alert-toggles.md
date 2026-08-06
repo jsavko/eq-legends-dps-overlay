@@ -189,7 +189,7 @@ Two consequences worth stating plainly rather than discovering later:
       a fight running, confirm the window appears/disappears at the right moments and the
       hotkey mutes without disturbing the meter
 - [x] `docs/changelog/2026-08-06-independent-alert-toggles.md`
-- [ ] Bump `package.json` as its own commit, then `scripts/dev.sh dist` (kill the running
+- [x] Bump `package.json` as its own commit, then `scripts/dev.sh dist` (kill the running
       overlay first — build fails on locked files)
 
 ## Notes
