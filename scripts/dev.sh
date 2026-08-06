@@ -15,7 +15,8 @@
 #   scripts/dev.sh sync       sync only
 #   scripts/dev.sh install    sync, then force a fresh npm install
 #   scripts/dev.sh test       run the test suite in WSL (no sync needed)
-#   scripts/dev.sh dist       sync, then build the portable .exe
+#   scripts/dev.sh dist       sync, then build the Setup installer and the portable .exe
+#   scripts/dev.sh release    dist, then publish the build as a GitHub release
 #
 set -euo pipefail
 
@@ -23,6 +24,7 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WIN_DIR="/mnt/c/eqoverlay-dev"
 WIN_PATH='C:\eqoverlay-dev'
 NPM='/mnt/c/Program Files/nodejs/npm.cmd'
+REPO='jsavko/eq-legends-dps-overlay'
 
 command -v rsync >/dev/null || { echo "rsync is required: sudo apt install rsync"; exit 1; }
 [ -x "$NPM" ] || { echo "Windows npm not found at $NPM"; exit 1; }
@@ -59,7 +61,48 @@ case "${1:-start}" in
     sync_tree
     [ -d "$WIN_DIR/node_modules" ] || win_npm install
     win_npm run dist
-    echo "portable exe -> $WIN_PATH\\dist"
+    echo "installer + portable exe -> $WIN_PATH\\dist"
+    ;;
+  release)
+    # Build on the Windows side, publish from WSL. electron-builder could upload the
+    # artifacts itself, but that would need a GH_TOKEN in the *Windows* environment;
+    # `gh` over here is already authenticated and pushes the same files.
+    sync_tree
+    [ -d "$WIN_DIR/node_modules" ] || win_npm install
+
+    command -v gh >/dev/null || { echo "gh CLI is required to publish a release"; exit 1; }
+    ver="$(cd "$SRC" && node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")"
+    commit="$(git -C "$SRC" rev-parse HEAD)"
+
+    # A release tag is a promise that this source is fetchable. Refuse to make that
+    # promise about a commit that exists only in this checkout.
+    git -C "$SRC" fetch --quiet origin || echo "warning: could not reach origin; the push check may be stale"
+    if ! git -C "$SRC" branch -r --contains "$commit" --list 'origin/*' | grep -q .; then
+      echo "HEAD ($commit) is not on origin — push it, then release."
+      exit 1
+    fi
+
+    win_npm run dist
+
+    setup="$WIN_DIR/dist/EQL-DPS-Overlay-Setup-$ver.exe"
+    portable="$WIN_DIR/dist/EQL-DPS-Overlay-$ver.exe"
+    # latest.yml is what a running copy actually reads: version, filename and the sha512
+    # electron-updater verifies the download against. The .blockmap next to the installer
+    # is what lets it fetch only the changed chunks instead of 80 MB every time.
+    assets=("$setup" "$setup.blockmap" "$WIN_DIR/dist/latest.yml" "$portable")
+    for f in "${assets[@]}"; do
+      [ -f "$f" ] || { echo "missing release asset: $f"; exit 1; }
+    done
+
+    # A duplicate tag fails here, which is the guard we want against re-releasing a
+    # version that people may already be running.
+    gh release create "v$ver" \
+      --repo "$REPO" \
+      --target "$commit" \
+      --title "v$ver" \
+      --generate-notes \
+      "${assets[@]}"
+    echo "released v$ver -> https://github.com/$REPO/releases/tag/v$ver"
     ;;
   start)
     sync_tree
@@ -67,7 +110,7 @@ case "${1:-start}" in
     win_npm start
     ;;
   *)
-    echo "usage: scripts/dev.sh [sync|install|test|dist|start]"
+    echo "usage: scripts/dev.sh [sync|install|test|dist|release|start]"
     exit 1
     ;;
 esac

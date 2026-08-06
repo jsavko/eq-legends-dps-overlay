@@ -4,10 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A real-time DPS/HPS overlay for **EverQuest Legends**. It tails the game's chat log
+A real-time combat overlay for **EverQuest Legends**. It tails the game's chat log
 (`eqlog_<Character>_<server>.txt`), parses combat lines into typed events, aggregates them
 into encounters, and floats a click-through Electron window over the game showing live
-group damage with hover breakdowns.
+group numbers with hover breakdowns. `Ctrl+Shift+M` cycles three metrics: **damage**
+(ember), **healing** (teal), **damage taken** (dried-blood red). Every encounter that
+closes is persisted to a per-character JSONL history, browsable in a dedicated History
+window (tray → History…).
 
 ## The two-worlds setup — read this before running anything
 
@@ -23,6 +26,7 @@ There are three ways the app gets launched, with different staleness:
 | `scripts/dev.sh start` | Always current — syncs, then runs from live source |
 | `C:\eqoverlay-dev\dist\win-unpacked\EQL DPS Overlay.exe` | Snapshot from the last `dev.sh dist`. **Syncing does NOT update it** — the source is baked into `app.asar` at build time |
 | `C:\eqoverlay-dev\dist\EQL-DPS-Overlay-<ver>.exe` (portable) | Same: snapshot from the last `dev.sh dist` |
+| `C:\eqoverlay-dev\dist\EQL-DPS-Overlay-Setup-<ver>.exe` (installer) | Same, and the artifact other people get — it installs to `%LOCALAPPDATA%\Programs` and self-updates from there |
 
 The user habitually launches the `win-unpacked` exe. **After any code change, run
 `scripts/dev.sh dist` or the user will see no difference.** The build fails while the
@@ -35,11 +39,13 @@ overlay is running (locked files) — quit it first (tray → Quit, or
 npm test                        # full suite, WSL-side (node --test, no Electron needed)
 node --test tests/rules.test.js # a single test file
 scripts/dev.sh start            # sync + run the overlay on Windows from live source
-scripts/dev.sh dist             # sync + rebuild the portable exe and win-unpacked
+scripts/dev.sh dist             # sync + rebuild the Setup installer, portable exe and win-unpacked
+scripts/dev.sh release          # dist, then publish v<package.json version> to GitHub Releases
 scripts/dev.sh sync             # sync only (does NOT update dist builds)
 node scripts/replay.js <log> --print                       # parse a log, print encounters
 node scripts/replay.js <log> --write <file> --speed 5      # re-emit a log in wall-clock order; point the overlay at it and it looks live
 node scripts/collect-unknown.js <log>                      # report lines no rule matched (writes unknown-lines.txt)
+node scripts/backfill-history.js <log> --dir <dir>         # replay a log into the encounter history store (dedup-safe, --dry-run supported)
 ```
 
 A live session's log for empirical checks:
@@ -50,6 +56,9 @@ Logs are **latin1**, never utf8 — EQ writes single-byte text and utf8 mangles 
 ## Architecture
 
 Data flows one way: log file → tailer → parser → snapshot → IPC push (4 Hz) → renderer.
+A second, slower flow branches off at encounter close: parser `onEncounterEnd` →
+JSONL history store → History window. `docs/architecture.md` walks the whole pipeline
+with the actual event kinds and record shapes.
 
 **`src/parser/` is pure Node — no Electron imports anywhere.** That is why the whole
 scoring pipeline is unit-testable in WSL and replayable offline. Keep it that way.
@@ -73,16 +82,36 @@ scoring pipeline is unit-testable in WSL and replayable offline. Keep it that wa
 - `index.js` (`LogParser`) — orchestrates all of the above; `feed(line)` → typed event,
   `snapshot()` → what the overlay renders. Unattributed non-melee damage is credited to
   the sole friendly with a cast in flight (2s window) or shown as an explicit "Unknown"
-  row — never guessed onto a player.
+  row — never guessed onto a player. Fires `onEncounterEnd(encounter)` on both close
+  paths (timeout/zone and all-slain+grace) but **not** on a manual reset — resets are
+  deliberately unrecorded in history.
 
 **`src/main/`** — Electron main: window management, tray, hotkeys, config
 (`%APPDATA%\eq-legends-dps-overlay`), log tailer, 4 Hz snapshot pusher.
 `layout.js` is pure (no Electron) so window geometry is unit-tested.
 `ipc.js` is the single channel registry, imported by main and preloads alike.
+`history.js` is the `EncounterStore`: append-only JSONL, one file per character
+(`<userData>/history/<Char>_<server>.jsonl`), directory injected so it unit-tests
+against a temp dir. Deliberately NOT SQLite — a native module is exactly the wrong
+dependency for the two-worlds build, and the volume never justifies it. History write
+failures toast rather than propagate; a full disk must not take the live overlay down.
+`updater.js` decides what self-update this copy gets from where its exe is sitting
+(`updateMode` is pure and unit-tested); `electron-updater` is imported dynamically so
+that logic stays testable in WSL, where importing it would reach for Electron and throw.
 
 **`src/renderer/overlay/`** — the overlay view. Holds no parser state, only the last
 snapshot. Rows are reused, not rebuilt (bar transitions survive pushes). `breakdown.js`
 is pure (column arithmetic, unit-tested).
+
+**`src/renderer/history/`** — the History window: three fixed panes (fight list rail →
+fight stats → members + full breakdown). Every click swaps content *inside* a pane;
+nothing resizes, expands, or pushes other content around — that no-reflow rule is the
+window's reason to exist (its predecessor, an accordion tab in settings, was removed
+for reflowing on every click). `organize.js` is the pure half (boss heuristic, filters,
+day grouping, formatters), unit-tested in WSL like `breakdown.js`.
+
+**`src/renderer/setup/`** — first-run setup and the settings form. Cool slate palette;
+the overlay and history window share the warm parchment palette instead.
 
 ## Invariants that are easy to break
 
@@ -92,8 +121,15 @@ is pure (column arithmetic, unit-tested).
   on-screen room: the window grows (both dimensions while the hover breakdown is open,
   up to the work area), and the ability list flows into columns when one column would
   outgrow the screen. Never "fix" an overflow with `overflow-y: auto` or a max-height.
-- **The breakdown shows EVERY ability.** No top-N slices, no "+N more". A cap is how
-  DoT damage once "disappeared" (credited in totals, invisible in the list).
+  This applies to the OVERLAY only — the history and settings windows take real mouse
+  input and their panes scroll internally by design.
+- **The history window never reflows.** Selecting a fight, member, metric or filter
+  swaps content inside a fixed pane; panes must sit on the same pixel for every fight.
+  (Example of the failure class: a deaths line that rendered only on death-fights pushed
+  everything below it 23px — it now renders always, faint "no deaths" on clean fights.)
+- **Breakdowns show EVERY ability.** No top-N slices, no "+N more" — in the overlay
+  hover panel and the history window alike. A cap is how DoT damage once "disappeared"
+  (credited in totals, invisible in the list).
 - **Resting vs fitted bounds.** The renderer reports *measurements* (`height`,
   `extraWidth`, `panelOpen`) over `FIT_WINDOW`; main owns the resting bounds and the
   clamps. `remember` persists only resting values, and `lastFit*` distinguishes our
@@ -107,7 +143,19 @@ is pure (column arithmetic, unit-tested).
   the panel opens *above* the rows (`data-panel="above"`).
 - **Honest numbers over guessed ones.** Ambiguous attribution goes to "Unknown", not to
   the most plausible player. Overhealing is exact (EQ prints `effective (potential)`),
-  never estimated.
+  never estimated. Damage with no stated type stays "untyped" — a spell-name→school
+  lookup table would be guessing and was deliberately not built.
+- **No native modules, ever.** A native dependency would need a win32 build under
+  Windows npm AND a linux build for the WSL test suite — this is why history is JSONL
+  and not SQLite. Pure-JS runtime dependencies are allowed but stay rare; the only one
+  is `electron-updater`.
+- **Updates install on quit, never mid-session.** The overlay runs for hours during
+  raids, so there is no restart prompt anywhere: an NSIS-installed copy downloads in the
+  background and swaps itself when the app exits. Update notices are meter toasts, not
+  cast alerts — the alerts window is for combat warnings the player must act on now.
+  Only `%LOCALAPPDATA%\Programs` copies update themselves; `win-unpacked` (what James
+  launches) is deliberately excluded, since "updating" it would install a second copy
+  and leave the running one stale. See `src/main/updater.js`.
 
 ## Verifying renderer changes without the game
 
@@ -125,6 +173,10 @@ See `docs/changelog/2026-08-02-breakdown-shows-every-ability.md` for a worked ex
 - Comments explain *why*, at length, in full sentences — match that register; a bare
   "what" comment is out of place here.
 - Every completed piece of work gets a `docs/changelog/YYYY-MM-DD-<slug>.md`; plans live
-  in `.claude/plans/` and are archived to `.claude/plans/archive/` on completion.
+  in `.claude/plans/` and are archived to `.claude/plans/archive/` on completion. The
+  changelogs are the project's institutional memory — check them before re-deriving why
+  something is the way it is.
+- UI redesigns get a Pencil mockup approved by the user before implementation (the
+  history window shipped against an approved mock; that is the expected flow).
 - Version bumps are their own commits ("Bump to 0.1.2") — bump `package.json` when
   cutting a new dist for the user.

@@ -21,12 +21,28 @@ live damage for everyone in your group, with each member's pet folded into their
 
 ## Sending it to someone else
 
-`scripts/dev.sh dist` produces a single portable executable at
-`C:\eqoverlay-dev\dist\EQL-DPS-Overlay-<version>.exe` (~74 MB). No installer, no Node,
-no dev toolchain — copy the file and run it.
+Every release ships two Windows builds of the same code, and which one you take decides
+whether you ever have to think about updates again:
 
-It is **not code-signed**, so Windows SmartScreen shows "Windows protected your PC" on
-first run: *More info* → *Run anyway*. Signing needs a paid certificate.
+- **`EQL-DPS-Overlay-Setup-<version>.exe`** — the installer, and what to hand someone.
+  It installs to `%LOCALAPPDATA%\Programs` without asking for admin, then **keeps itself
+  up to date**: it checks GitHub on launch and every four hours, downloads a new version
+  in the background, and installs it the next time you quit. Never mid-session — this
+  thing is on screen during raids.
+- **`EQL-DPS-Overlay-<version>.exe`** — the portable build (~74 MB). No installer, no
+  Node, no dev toolchain: copy the file and run it. A single self-contained exe cannot
+  replace itself, so this one only *tells* you when a new version is out and leaves the
+  download to you.
+
+Both come from `scripts/dev.sh dist`, into `C:\eqoverlay-dev\dist`. `scripts/dev.sh
+release` builds them and publishes the lot to
+[GitHub Releases](https://github.com/jsavko/eq-legends-dps-overlay/releases), which is
+where the updater looks.
+
+Neither build is **code-signed**, so Windows SmartScreen shows "Windows protected your
+PC" the first time: *More info* → *Run anyway*. Signing needs a paid certificate. That
+click is once per person, not once per version — automatic updates arrive without the
+mark-of-the-web that triggers the warning.
 
 On first launch it opens the setup screen, finds the default Logs folder, and preselects
 whichever `eqlog_*.txt` was written most recently — so on a machine with several
@@ -38,7 +54,8 @@ list. Settings live in `%APPDATA%\eq-legends-dps-overlay`, separate from the app
 ```bash
 scripts/dev.sh install     # sync to C:\eqoverlay-dev and install (first time)
 scripts/dev.sh start       # run the overlay
-scripts/dev.sh dist        # build a portable .exe into C:\eqoverlay-dev\dist
+scripts/dev.sh dist        # build installer + portable .exe into C:\eqoverlay-dev\dist
+scripts/dev.sh release     # dist, then publish this version to GitHub Releases
 scripts/dev.sh test        # run the test suite in WSL
 ```
 
@@ -177,8 +194,8 @@ src/renderer/   overlay (transparent HUD) and setup (first run + settings)
 ```
 
 The parser has no Electron dependency on purpose: it can be tested offline, replayed, and
-put behind a different front end without a rewrite. The app depends on `electron` alone —
-no native modules, so no node-gyp.
+put behind a different front end without a rewrite. Runtime dependencies are `electron`
+and `electron-updater` — both pure JS, no native modules, so no node-gyp.
 
 ## Not in this version
 

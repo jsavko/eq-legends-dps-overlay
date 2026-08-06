@@ -19,6 +19,7 @@ import { EncounterStore, RECORD_VERSION, storeKey } from './history.js';
 import { RhythmStore } from './rhythms.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
 import { clampHeight, clampWidth, placeWindow } from './layout.js';
+import { startUpdater, updateMode } from './updater.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(HERE, '..', 'renderer');
@@ -39,6 +40,7 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {RhythmStore|null} */   let rhythmStore = null;
 
 let pushTimer = null;
+let stopUpdater = null;
 let lastRevision = -1;
 let overlayVisible = true;
 let saveBoundsTimer = null;
@@ -96,6 +98,13 @@ async function main() {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlay();
   });
+
+  // Last, and never awaited: an updater that cannot start — no network, a tree without
+  // the dependency installed — must not stand between the player and their overlay.
+  const mode = updateMode({ isPackaged: app.isPackaged, exePath: process.execPath, env: process.env });
+  startUpdater({ mode, toast })
+    .then((stop) => { stopUpdater = stop; })
+    .catch((err) => { console.warn('[updater] failed to start:', err?.message ?? err); });
 }
 
 // Deliberately NOT quitting here: the tray is the app's home, and closing the settings
@@ -106,6 +115,7 @@ app.on('will-quit', () => {
   tailer?.stop();
   clearInterval(pushTimer);
   clearInterval(hoverTimer);
+  stopUpdater?.();
   tray?.destroy();
 });
 

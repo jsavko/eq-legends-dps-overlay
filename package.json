@@ -11,7 +11,10 @@
     "replay": "node scripts/replay.js",
     "icons": "node scripts/make-icons.js",
     "collect-unknown": "node scripts/collect-unknown.js",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -24,8 +27,21 @@
       "src/**/*",
       "package.json"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "jsavko",
+        "repo": "eq-legends-dps-overlay"
+      }
+    ],
     "win": {
       "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
         {
           "target": "portable",
           "arch": [
@@ -35,6 +51,11 @@
       ],
       "icon": "src/assets/icon.ico",
       "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "EQL-DPS-Overlay-Setup-${version}.exe"
     },
     "portable": {
       "artifactName": "EQL-DPS-Overlay-${version}.exe"
