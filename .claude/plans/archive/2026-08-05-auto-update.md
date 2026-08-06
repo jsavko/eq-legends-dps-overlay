@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 # Auto-update: stop hand-delivering the exe
 
@@ -127,10 +127,12 @@ Key wiring decisions:
 
 ## Tasks
 
-- [ ] One-time: `gh repo edit jsavko/eq-legends-dps-overlay --visibility public
+- [x] One-time: `gh repo edit jsavko/eq-legends-dps-overlay --visibility public
       --accept-visibility-change-consequences` (recent `gh` requires the second flag;
       James's call, confirmed 2026-08-05: "this isn't a sensitive project". Still
-      private as of 2026-08-06).
+      private as of 2026-08-06). **Done 2026-08-06** — `gh` 2.45.0 does not have
+      `--accept-visibility-change-consequences` (a later addition) and does not need
+      it; the plain `--visibility public` went through non-interactively.
 - [x] `package.json`: add `"dependencies": { "electron-updater": "^6" }`; set
       `win.target` to BOTH `nsis` (per-user default, `oneClick`, artifact
       `EQL-DPS-Overlay-Setup-${version}.exe`) and `portable` (existing block and
@@ -166,10 +168,14 @@ Key wiring decisions:
       note the friend-facing artifact is now the Setup installer.
 - [x] `npm test` — suite stays green (no pure-module changes expected).
 - [x] `docs/changelog/2026-08-06-auto-update.md`.
-- [ ] Bump to 0.6.0 (own commit — 0.4.0 was taken by enemy cast warnings while this
+- [x] Bump to 0.6.0 (own commit — 0.4.0 was taken by enemy cast warnings while this
       plan waited), run `scripts/dev.sh release`, verify the release shows all FOUR
       assets (Setup exe, its `.blockmap`, `latest.yml`, portable exe), and send the
       friend the release link — the last manual send ever.
+      **Done 2026-08-06:** https://github.com/jsavko/eq-legends-dps-overlay/releases/tag/v0.6.0
+      carries all four assets, the tag pins the bump commit (`fd765ae`), and
+      `latest.yml` fetches anonymously over plain HTTPS — the exact request the
+      friend's copy makes. Sending the link is James's to do.
 
 ## Notes
 
