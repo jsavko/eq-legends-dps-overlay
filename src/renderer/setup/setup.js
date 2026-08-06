@@ -99,13 +99,17 @@ function fillForm(cfg) {
   $('auto-switch').checked = cfg.autoSwitchCharacter;
   $('cast-alerts').checked = cfg.castAlerts;
   $('cast-alert-sound').checked = cfg.castAlertSound;
+  $('summon-alerts').checked = cfg.summonAlerts;
+  $('cc-alerts').checked = cfg.ccAlerts;
   $('cast-timers').checked = cfg.castTimers;
   $('pet-owners').value = formatPetOwners(cfg.petOwners);
   $('hk-lock').value = cfg.hotkeys.toggleLock;
   $('hk-show').value = cfg.hotkeys.toggleVisible;
   $('hk-reset').value = cfg.hotkeys.resetEncounter;
   $('hk-metric').value = cfg.hotkeys.toggleMetric;
+  $('hk-alerts').value = cfg.hotkeys.toggleAlerts ?? '';
   syncOutputs();
+  syncAlertSound();
 }
 
 function syncOutputs() {
@@ -113,9 +117,15 @@ function syncOutputs() {
   $('scale-out').textContent = `${Number($('scale').value).toFixed(2)}×`;
 }
 
+/** The cue only plays for drawn interrupt warnings, so it follows their checkbox. */
+function syncAlertSound() {
+  $('cast-alert-sound').disabled = !$('cast-alerts').checked;
+}
+
 function wireEvents() {
   $('opacity').addEventListener('input', syncOutputs);
   $('scale').addEventListener('input', syncOutputs);
+  $('cast-alerts').addEventListener('change', syncAlertSound);
 
   $('browse-dir').addEventListener('click', async () => {
     const r = await window.api.pick('directory');
@@ -268,6 +278,8 @@ async function save() {
     autoSwitchCharacter: $('auto-switch').checked,
     castAlerts: $('cast-alerts').checked,
     castAlertSound: $('cast-alert-sound').checked,
+    summonAlerts: $('summon-alerts').checked,
+    ccAlerts: $('cc-alerts').checked,
     castTimers: $('cast-timers').checked,
     petOwners: parsePetOwners($('pet-owners').value),
     hotkeys: {
@@ -275,6 +287,7 @@ async function save() {
       toggleVisible: $('hk-show').value.trim(),
       resetEncounter: $('hk-reset').value.trim(),
       toggleMetric: $('hk-metric').value.trim(),
+      toggleAlerts: $('hk-alerts').value.trim(),
     },
   };
 

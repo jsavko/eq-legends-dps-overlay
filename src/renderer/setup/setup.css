@@ -68,6 +68,10 @@ h2:not(:first-child) { margin-top: 22px; }
 }
 .row.checkbox { align-items: flex-start; }
 .row.checkbox > label { flex: 1; color: var(--text); }
+/* A sub-setting of the checkbox above it — indented so the dependency is visible
+   rather than only discovered when it greys out. */
+.row.checkbox.indent { margin-left: 22px; }
+.row.checkbox input:disabled + label { color: var(--muted); }
 
 input[type="text"], input[type="number"] {
   flex: 1;

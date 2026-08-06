@@ -6,6 +6,11 @@
  * breathe animation on every 4 Hz push and make the banner strobe. A warning's
  * content never changes for a given id (a re-cast refreshes the same id's clock in
  * the parser), so reuse costs nothing.
+ *
+ * Four independent categories share this window — interrupt warnings, summon banners,
+ * crowd control and boss timers — each gated on its own config key. The snapshot always
+ * carries all four (the parser knows nothing about settings); deciding what to draw is
+ * this file's job, and main decides whether the window exists at all from the same keys.
  */
 
 const stack = document.getElementById('stack');
@@ -38,10 +43,9 @@ const FADE_MS = 700;
 init();
 
 async function init() {
-  cfg = await window.api.getConfig();
-  applyConfig(cfg);
+  applyConfig(await window.api.getConfig());
 
-  window.api.onConfig((next) => { cfg = next; applyConfig(next); });
+  window.api.onConfig(applyConfig);
   window.api.onLockChanged((locked) => {
     document.body.dataset.locked = String(locked);
   });
@@ -55,13 +59,60 @@ async function init() {
 }
 
 function applyConfig(config) {
+  cfg = config;
   document.documentElement.style.setProperty('--scale', config.scale ?? 1);
+
+  // A category switched off clears its chips HERE, on the config push, rather than
+  // waiting for the next snapshot: the push loop skips ticks when nothing has changed,
+  // so between fights "next snapshot" can be minutes away — long enough for the player
+  // to watch the thing they just turned off sit there.
+  if (!on('castAlerts')) dropChips((el) => el.dataset.category !== 'summon');
+  if (!on('summonAlerts')) dropChips((el) => el.dataset.category === 'summon');
+  if (!on('ccAlerts')) clearChips(effectChips, effectsList);
+  if (!on('castTimers')) clearChips(timerChips, timersList);
+}
+
+/**
+ * Is a category switched on?
+ *
+ * A missing key reads as ON, matching the config defaults: a window built by a newer
+ * main process than this renderer expects must not silently swallow warnings.
+ */
+function on(key) {
+  return !cfg || cfg[key] !== false;
+}
+
+/**
+ * Empty one category's list.
+ *
+ * Every category is gated twice — here when its switch goes off, and at render time
+ * when a snapshot arrives — so the teardown lives in one place rather than being
+ * re-typed per list, where a fifth category could get it subtly wrong.
+ */
+function clearChips(map, list) {
+  if (!map.size) return;
+  list.replaceChildren();
+  map.clear();
+}
+
+/** Drop the stack chips matching a predicate — the stack holds two categories. */
+function dropChips(match) {
+  for (const [id, el] of chips) {
+    if (!match(el)) continue;
+    el.remove();
+    chips.delete(id);
+  }
 }
 
 function render(warnings) {
+  // Interrupt warnings and summon banners are two categories in ONE stack: they share
+  // the ordering rule, and splitting them into separate lists would let a tier-2 summon
+  // sit above a tier-3 interrupt call. So they are filtered here, not partitioned.
+  const shown = warnings.filter((w) => on(w.category === 'summon' ? 'summonAlerts' : 'castAlerts'));
+
   // Highest severity on top; within a tier, oldest first so lines don't reorder
   // under the player's eyes as new casts of the same weight arrive.
-  const ordered = warnings.slice().sort((a, b) => (b.tier - a.tier) || (a.id - b.id));
+  const ordered = shown.slice().sort((a, b) => (b.tier - a.tier) || (a.id - b.id));
   const liveIds = new Set(ordered.map((w) => w.id));
 
   for (const [id, el] of chips) {
@@ -76,7 +127,11 @@ function render(warnings) {
     if (!el) {
       el = buildChip(w);
       chips.set(w.id, el);
-      if (w.tier === 3 && !seenIds.has(w.id) && cfg?.castAlertSound) cue();
+      // The cue belongs to the interrupt-warning category, which is why the settings
+      // checkbox sits under it and greys out with it. Summons are tier 3 too and still
+      // beep while warnings are on — but a player who switched warnings off has a
+      // disabled sound checkbox in front of them, and a beep would make a liar of it.
+      if (w.tier === 3 && !seenIds.has(w.id) && cfg?.castAlertSound && on('castAlerts')) cue();
     }
     if (w.remainingMs <= FADE_MS) el.dataset.fading = '';
     else delete el.dataset.fading;
@@ -99,6 +154,9 @@ function buildChip(w) {
   const li = document.createElement('li');
   li.className = 'chip';
   li.dataset.tier = String(w.tier);
+  // Which switch owns this chip: the stack mixes two categories, and a live toggle has
+  // to be able to pick its own chips back out of it.
+  li.dataset.category = w.category === 'summon' ? 'summon' : 'warning';
 
   const verb = document.createElement('span');
   verb.className = 'verb';
@@ -146,6 +204,11 @@ function buildChip(w) {
  * warning, so a capped chip never just blinks out).
  */
 function renderEffects(effects) {
+  if (!on('ccAlerts')) {
+    clearChips(effectChips, effectsList);
+    return;
+  }
+
   const keys = new Set(effects.map((e) => `${e.who}|${e.effect}`));
 
   for (const [k, el] of effectChips) {
@@ -196,11 +259,8 @@ function buildEffectChip(e) {
  * bar's width transition carries smoothly across pushes.
  */
 function renderTimers(timers, warnings) {
-  if (cfg && cfg.castTimers === false) {
-    if (timerChips.size) {
-      timersList.replaceChildren();
-      timerChips.clear();
-    }
+  if (!on('castTimers')) {
+    clearChips(timerChips, timersList);
     return;
   }
 

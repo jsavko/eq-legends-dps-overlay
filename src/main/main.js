@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 import { LogParser } from '../parser/index.js';
 import { Tailer, listLogs } from './tailer.js';
-import { ConfigStore, DEFAULT_LOG_DIR } from './config.js';
+import { ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, alertsEnabled } from './config.js';
 import { EncounterStore, RECORD_VERSION, storeKey } from './history.js';
 import { RhythmStore } from './rhythms.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
@@ -90,7 +90,8 @@ async function main() {
   if (config.isConfigured()) {
     await startTailing(config.get('logPath'));
     createOverlay();
-    if (config.get('castAlerts')) createAlerts();
+    // One window, four switches: it exists if ANY category is on and mute is off.
+    if (alertsEnabled(config.all)) createAlerts();
   } else {
     createSetup('setup');
   }
@@ -248,10 +249,7 @@ function persistRhythms(learned) {
  */
 function persistPetOwners(mapping) {
   try {
-    const after = config.set({ petOwners: mapping });
-    for (const win of [overlayWindow, alertsWindow, setupWindow]) {
-      if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.CONFIG_CHANGED, after);
-    }
+    broadcastConfig(config.set({ petOwners: mapping }));
   } catch (err) {
     toast(`Pet mapping save failed: ${err.message}`);
   }
@@ -411,6 +409,22 @@ function createTray() {
   });
 }
 
+/**
+ * One tray checkbox for one boolean config key.
+ *
+ * `checked` reads the stored value every rebuild rather than caching it, so the tray
+ * and the settings form can never disagree about what is on — refreshTrayMenu runs
+ * from CONFIG_SET for exactly that reason.
+ */
+function alertToggle(label, key) {
+  return {
+    label,
+    type: 'checkbox',
+    checked: config.get(key) !== false,
+    click: () => setAlertOption({ [key]: config.get(key) === false }),
+  };
+}
+
 /** Rebuild the menu so the checkmarks and labels reflect current state. */
 function refreshTrayMenu() {
   if (!tray) return;
@@ -449,6 +463,34 @@ function refreshTrayMenu() {
       label: 'Reset encounter',
       accelerator: keys.resetEncounter,
       click: () => { parser?.reset(); toast('Encounter reset'); },
+    },
+    { type: 'separator' },
+    // A submenu, not five more top-level items: the menu is already nine entries, and
+    // these are settings you reach for occasionally rather than the every-pull controls
+    // above. Mute rides here too, next to the categories it silences.
+    {
+      label: 'Alerts',
+      submenu: [
+        {
+          label: 'Mute alerts',
+          type: 'checkbox',
+          checked: config.get('alertsMuted') === true,
+          accelerator: keys.toggleAlerts,
+          toolTip: 'Silence every alert for now, without losing the choices below',
+          click: toggleAlerts,
+        },
+        { type: 'separator' },
+        alertToggle('Interrupt warnings', 'castAlerts'),
+        alertToggle('Summon announcements', 'summonAlerts'),
+        alertToggle('Crowd control on the group', 'ccAlerts'),
+        alertToggle('Boss spell timers', 'castTimers'),
+        { type: 'separator' },
+        {
+          ...alertToggle('Sound for interrupt warnings', 'castAlertSound'),
+          // A beep for a warning that isn't drawn is a noise with no explanation.
+          enabled: config.get('castAlerts') !== false,
+        },
+      ],
     },
     { type: 'separator' },
     // "Show me past fights" is a destination people look for by name, so it gets its
@@ -603,6 +645,57 @@ function createAlerts() {
   alertsWindow.on('closed', () => { alertsWindow = null; });
 }
 
+/**
+ * Bring the alert window into line with the settings — the single place that decides
+ * whether it exists.
+ *
+ * Called from every path that can change an alert key (settings, tray, mute hotkey) so
+ * no caller has to remember the create-or-close half of a toggle. Closed rather than
+ * hidden: a hidden window still costs a renderer process for a feature the player just
+ * said no to. Gated on the overlay existing because during first-run setup there is no
+ * HUD yet for a warning to float over.
+ */
+function syncAlertsWindow() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (alertsEnabled(config.all)) createAlerts();
+  else alertsWindow?.close();
+}
+
+/**
+ * Push the current config to every window that listens for it.
+ *
+ * The alert window gates each category at render time, so a toggle only takes effect
+ * when this lands — which is what makes a tray checkbox flip chips off mid-fight.
+ */
+function broadcastConfig(cfg) {
+  for (const win of [overlayWindow, alertsWindow, setupWindow]) {
+    if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.CONFIG_CHANGED, cfg);
+  }
+}
+
+/** Flip one alert setting from the tray: persist, resync the window, redraw the menu. */
+function setAlertOption(patch) {
+  const after = config.set(patch);
+  syncAlertsWindow();
+  broadcastConfig(after);
+  refreshTrayMenu();
+}
+
+/**
+ * Mute: the session gesture, bound to a hotkey because the moment you want it is
+ * mid-pull with a boss on the screen.
+ *
+ * Deliberately not "uncheck every category" — the categories are preferences and this
+ * is a temporary silence, so it suppresses the window without touching them. It is also
+ * narrower than Ctrl+Shift+H: that hides the whole HUD including the meter, this leaves
+ * the numbers up and only takes the warnings away.
+ */
+function toggleAlerts() {
+  const alertsMuted = !config.get('alertsMuted');
+  setAlertOption({ alertsMuted });
+  toast(alertsMuted ? 'Alerts muted' : 'Alerts unmuted');
+}
+
 // ---------------------------------------------------------------------------
 // Lock / visibility
 // ---------------------------------------------------------------------------
@@ -714,6 +807,7 @@ function registerHotkeys() {
     toast('Encounter reset');
   }, 'reset');
   bind(keys.toggleMetric, toggleMetric, 'damage/healing');
+  bind(keys.toggleAlerts, toggleAlerts, 'mute alerts');
 }
 
 /** The metric cycle: damage → healing → taken → damage. */
@@ -783,17 +877,14 @@ function registerIpc() {
     if (patch.logPath && patch.logPath !== before.logPath) {
       await startTailing(patch.logPath);
     }
-    if (patch.castAlerts !== undefined && overlayWindow) {
-      // Torn down rather than hidden when disabled: a hidden window still costs a
-      // renderer process, for a feature the player said no to.
-      if (after.castAlerts) createAlerts();
-      else alertsWindow?.close();
-    }
+    // Any of the four categories, or the mute, can be what brings the window into or
+    // out of existence — the predicate decides, not the individual key.
+    if (ALERT_KEYS.some((key) => patch[key] !== undefined)) syncAlertsWindow();
 
-    overlayWindow?.webContents.send(CHANNELS.CONFIG_CHANGED, after);
-    if (alertsWindow && !alertsWindow.isDestroyed()) {
-      alertsWindow.webContents.send(CHANNELS.CONFIG_CHANGED, after);
-    }
+    broadcastConfig(after);
+    // The tray carries the same switches as the settings form, so a change made in
+    // one has to redraw the other — without this the checkmarks quietly go stale.
+    refreshTrayMenu();
     pushStatus();
     return after;
   });

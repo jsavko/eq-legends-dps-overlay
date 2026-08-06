@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ConfigStore, DEFAULTS, DEFAULT_LOG_DIR } from '../src/main/config.js';
+import { ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled } from '../src/main/config.js';
 
 function tmpdir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'eqcfg-'));
@@ -84,6 +84,85 @@ test('parserOptions converts seconds to the milliseconds the parser wants', () =
     groupOnly: true,
     petOwners: {},
   });
+});
+
+// --------------------------------------------------------------- alert switches
+
+/** A config with every alert category off, to switch one back on per case. */
+const NO_ALERTS = { castAlerts: false, summonAlerts: false, ccAlerts: false, castTimers: false };
+
+test('any single alert category keeps the alert window alive', () => {
+  for (const key of ['castAlerts', 'summonAlerts', 'ccAlerts', 'castTimers']) {
+    assert.equal(
+      alertsEnabled({ ...NO_ALERTS, [key]: true }), true,
+      `${key} alone must be enough to justify the window`
+    );
+  }
+});
+
+test('the alert window is gone once the last category is off', () => {
+  assert.equal(alertsEnabled(NO_ALERTS), false);
+  assert.equal(alertsEnabled(DEFAULTS), true, 'a fresh install shows alerts');
+});
+
+test('mute beats the categories without erasing them', () => {
+  const cfg = { ...DEFAULTS, alertsMuted: true };
+  assert.equal(alertsEnabled(cfg), false);
+  // The whole point of a separate key: the preferences survive the mute.
+  assert.equal(cfg.castAlerts, true);
+  assert.equal(alertsEnabled({ ...cfg, alertsMuted: false }), true, 'unmuting restores them');
+});
+
+test('a config predating a category treats it as on rather than dropping its alerts', () => {
+  assert.equal(alertsEnabled({ castAlerts: false, summonAlerts: false, ccAlerts: false }), true);
+});
+
+test('an old "alerts off" config keeps meaning no alerts at all', () => {
+  // castAlerts used to own the window; it now only owns interrupt warnings, so without
+  // this the other three categories would appear unbidden on upgrade.
+  const dir = tmpdir();
+  fs.writeFileSync(
+    path.join(dir, 'config.json'),
+    JSON.stringify({ castAlerts: false, castAlertSound: false, castTimers: true })
+  );
+
+  const store = new ConfigStore(dir);
+  store.load();
+  assert.equal(store.get('summonAlerts'), false);
+  assert.equal(store.get('ccAlerts'), false);
+  assert.equal(store.get('castTimers'), false, 'an inert stored timer flag must not spring to life');
+  assert.equal(alertsEnabled(store.all), false);
+});
+
+test('a config already carrying the new keys is left exactly as written', () => {
+  const dir = tmpdir();
+  fs.writeFileSync(
+    path.join(dir, 'config.json'),
+    JSON.stringify({ castAlerts: false, summonAlerts: true, ccAlerts: false, castTimers: true })
+  );
+
+  const store = new ConfigStore(dir);
+  store.load();
+  assert.equal(store.get('summonAlerts'), true, 'the migration must not fire a second time');
+  assert.equal(store.get('castTimers'), true);
+  assert.equal(alertsEnabled(store.all), true);
+});
+
+test('a config with alerts on is untouched by the migration', () => {
+  const dir = tmpdir();
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ castAlerts: true }));
+
+  const store = new ConfigStore(dir);
+  store.load();
+  assert.equal(store.get('summonAlerts'), DEFAULTS.summonAlerts);
+  assert.equal(store.get('ccAlerts'), DEFAULTS.ccAlerts);
+  assert.equal(store.get('castTimers'), DEFAULTS.castTimers);
+});
+
+test('the mute hotkey has a default binding that clashes with nothing else', () => {
+  const bindings = Object.values(DEFAULTS.hotkeys);
+  assert.equal(bindings.length, new Set(bindings).size, 'two actions on one accelerator');
+  assert.equal(DEFAULTS.hotkeys.toggleAlerts, 'Control+Shift+A');
 });
 
 test('the pet mapping is replaced wholesale, so an entry can be removed', () => {

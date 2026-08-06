@@ -43,12 +43,31 @@ export const DEFAULTS = {
   /** Which metric the overlay ranks by: 'damage', 'healing' or 'taken'. */
   metric: 'damage',
 
-  /** Enemy cast warnings: the floating alert window (tray-less, top-center default). */
+  /**
+   * The four alert categories, each on its own switch.
+   *
+   * None of these owns the alert window — `alertsEnabled()` derives its existence from
+   * all of them together, so a player who only wants summon banners gets a window with
+   * nothing else in it, and turning the last category off closes the window entirely.
+   */
+  /** Interrupt/cast warnings for enemy casts. NOT the window: see alertsEnabled(). */
   castAlerts: true,
-  /** Short cue on a NEW tier-3 warning. Off by default — sound is opt-in, always. */
-  castAlertSound: false,
+  /** "Summoned <name>" banners — a fact that already happened, not a call to act. */
+  summonAlerts: true,
+  /** Crowd control sitting on the group right now: stunned / mezzed / charmed chips. */
+  ccAlerts: true,
   /** Learned recast countdowns for named bosses, shown under the warnings. */
   castTimers: true,
+  /** Short cue on a NEW tier-3 warning. Off by default — sound is opt-in, always. */
+  castAlertSound: false,
+  /**
+   * Session mute, deliberately separate from the four category switches.
+   *
+   * The hotkey is a gesture ("shut up for this pull"); the checkboxes are preferences.
+   * Folding mute into "uncheck everything" would throw the player's category choices
+   * away the moment they hit the key, with nothing to restore them from.
+   */
+  alertsMuted: false,
   /** Alert window position; null until the player drags it somewhere. */
   alertsBounds: null,
 
@@ -75,8 +94,31 @@ export const DEFAULTS = {
     toggleVisible: 'Control+Shift+H',
     resetEncounter: 'Control+Shift+R',
     toggleMetric: 'Control+Shift+M',
+    toggleAlerts: 'Control+Shift+A',
   },
 };
+
+/** The category switches, in the order they read in the settings form and the tray. */
+export const ALERT_CATEGORIES = ['castAlerts', 'summonAlerts', 'ccAlerts', 'castTimers'];
+
+/** Every key that can change whether the alert window should exist. */
+export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
+
+/**
+ * Should the alert window exist at all?
+ *
+ * Four independent switches collapse to one OS window, and getting that wrong either
+ * strands a renderer process for a feature nobody asked for or drops warnings on the
+ * floor — so the decision lives here, pure and testable in WSL, rather than in an
+ * Electron-shaped conditional in main.js. Mute wins over every category: it suppresses
+ * the window wholesale while leaving the preferences underneath it intact.
+ */
+export function alertsEnabled(cfg) {
+  if (!cfg || cfg.alertsMuted) return false;
+  // A missing key reads as its default (on) rather than off: a config that predates a
+  // category must not silently swallow the warnings that category draws.
+  return ALERT_CATEGORIES.some((key) => cfg[key] !== false);
+}
 
 export class ConfigStore {
   /** @param {string} dir directory to hold config.json (Electron's userData) */
@@ -89,7 +131,7 @@ export class ConfigStore {
   load() {
     try {
       const raw = fs.readFileSync(this.file, 'utf8');
-      this.data = merge(DEFAULTS, JSON.parse(raw));
+      this.data = merge(DEFAULTS, migrateAlerts(JSON.parse(raw)));
     } catch {
       // Missing or corrupt config is not an error — the defaults are the answer, and
       // a corrupt file gets overwritten on the next save rather than blocking startup.
@@ -134,6 +176,27 @@ export class ConfigStore {
       petOwners: this.data.petOwners,
     };
   }
+}
+
+/**
+ * One-shot upgrade for configs written before the alert switch was split in four.
+ *
+ * `castAlerts: false` used to mean "no alerts at all" — it created and destroyed the
+ * whole window. It now means only "no interrupt warnings", so a stored false would let
+ * summon banners and CC chips appear for a player who had explicitly turned alerts off.
+ * The tell is the absence of `summonAlerts`: no version that writes that key ever meant
+ * the old thing, so the rule can never fire twice or fight a deliberate later choice.
+ *
+ * A stored `castTimers: true` is overridden rather than respected, because under the old
+ * scheme it was inert: the settings form wrote it on every save, but with no window to
+ * draw in it never showed a countdown. Honouring it now would spring one on a player who
+ * has had silence for months. A stored `castAlerts: true` needs nothing — it already
+ * means what it says.
+ */
+function migrateAlerts(raw) {
+  if (!raw || typeof raw !== 'object') return raw;
+  if (raw.castAlerts !== false || 'summonAlerts' in raw) return raw;
+  return { ...raw, summonAlerts: false, ccAlerts: false, castTimers: false };
 }
 
 /**

@@ -82,16 +82,34 @@
         <label for="auto-switch">Follow character switches automatically</label>
       </div>
 
-      <h2>Cast warnings</h2>
+      <h2>Alerts</h2>
+      <p class="hint no-top">
+        A floating window, top-center of the screen — unlock the overlay to move it.
+        Each of these is independent; the window opens for whichever are on.
+      </p>
       <div class="row checkbox">
         <input id="cast-alerts" type="checkbox" />
         <label for="cast-alerts">Warn about enemy casts
-          <span class="unit">floating window, top-center of the screen — unlock the overlay to move it</span>
+          <span class="unit">interrupt calls for what the boss is casting right now</span>
+        </label>
+      </div>
+      <!-- Indented under the checkbox it belongs to: a cue for a warning that isn't
+           being drawn is a beep with no explanation on screen. -->
+      <div class="row checkbox indent">
+        <input id="cast-alert-sound" type="checkbox" />
+        <label for="cast-alert-sound">Play a sound for interrupt-now warnings</label>
+      </div>
+      <div class="row checkbox">
+        <input id="summon-alerts" type="checkbox" />
+        <label for="summon-alerts">Announce summons
+          <span class="unit">who the boss just yanked to it — a fact that already happened, not a call to act</span>
         </label>
       </div>
       <div class="row checkbox">
-        <input id="cast-alert-sound" type="checkbox" />
-        <label for="cast-alert-sound">Play a sound for interrupt-now warnings</label>
+        <input id="cc-alerts" type="checkbox" />
+        <label for="cc-alerts">Show crowd control on the group
+          <span class="unit">who is stunned, mezzed or charmed right now</span>
+        </label>
       </div>
       <div class="row checkbox">
         <input id="cast-timers" type="checkbox" />
@@ -99,6 +117,12 @@
           <span class="unit">countdowns learned from each boss's own recast rhythm — estimates, always marked "~"</span>
         </label>
       </div>
+      <p class="hint">
+        With all four off the window is closed entirely, so the in-game
+        <code>pet Name = Owner</code> command has nowhere to answer you — it still works,
+        it just cannot say so. <code>Control+Shift+A</code> mutes the lot for a pull
+        without losing these choices.
+      </p>
 
       <h2>Named pets</h2>
       <p class="hint no-top">
@@ -134,6 +158,10 @@
       <div class="row">
         <label for="hk-metric">Damage / healing / taken</label>
         <input id="hk-metric" type="text" spellcheck="false" />
+      </div>
+      <div class="row">
+        <label for="hk-alerts">Mute alerts</label>
+        <input id="hk-alerts" type="text" spellcheck="false" />
       </div>
       <p class="hint">
         Electron accelerator syntax, e.g. <code>Control+Shift+L</code>.
