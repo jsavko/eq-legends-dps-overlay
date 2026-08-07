@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 ---
 # Boss timers get their own window
 
@@ -213,7 +213,7 @@ wholesale and the panel disappears with it.
       replayed snapshot from the Warlord Skarlon fight (the 4-slot worst case) plus the
       Nagafen fight, checking: no row moves when a slot is added, the CAST state holds its
       row, a lapsed row shows a dash.
-- [ ] Bump `package.json` to 0.7.0 in its own commit; `scripts/dev.sh dist`.
+- [x] Bump `package.json` to 0.7.0 in its own commit; `scripts/dev.sh dist`.
 - [x] `docs/changelog/2026-08-06-boss-timers-own-window.md`; update the CLAUDE.md
       architecture section to name `src/renderer/timers/` and the four-window layout.
 
