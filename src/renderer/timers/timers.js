@@ -168,10 +168,9 @@ function paint(slot, t, casting) {
  * spell IS being cast; the retracted prediction is what the log just superseded.
  */
 function detail(t, casting) {
-  if (!casting) {
-    if (t.state === 'ended') return 'slain';
-    if (t.state === 'lapsed') return 'late · pattern broke';
-  }
+  // There is no 'slain' wording any more: a dead caster's rows leave the panel the
+  // moment it dies rather than lingering as a dimmed corpse row.
+  if (!casting && t.state === 'lapsed') return 'late · pattern broke';
   // A warm row deliberately shows no interval: it is running on a rhythm learned in an
   // earlier fight, and printing "13.0s ±0.8" would dress last week's number up as this
   // pull's measurement.

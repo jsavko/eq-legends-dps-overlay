@@ -172,13 +172,25 @@ export class RhythmTracker {
   }
 
   /**
-   * A dead caster predicts nothing further. Its slots survive as 'ended' rows until
-   * the fight closes — collapsing them would move every row below — and its learned
-   * gaps still count at export.
+   * A dead caster's slots LEAVE the panel at once.
+   *
+   * They used to survive as dimmed 'ended' rows until the fight closed, on the
+   * reasoning that removing one shoves the surviving rows up and a row that moves is
+   * the bug this window was built to fix. In practice that reasoning was backwards: a
+   * countdown for a corpse is a row you have to actively ignore for the rest of the
+   * pull, and on the common single-boss fight the "surviving rows" it protected are
+   * the same dead boss's other abilities — so nothing moves, the panel simply empties.
+   * On a multi-caster pull the shift is real and is the accepted price; a dead mob's
+   * recast clock is not information.
+   *
+   * `lastTs` is still nulled so nothing about a corpse can predict, and the entry
+   * stays in the map because what the fight learned must still export on close.
    */
   dropCaster(caster) {
     for (const entry of this.entries.values()) {
-      if (entry.caster === caster) entry.lastTs = null;
+      if (entry.caster !== caster) continue;
+      entry.lastTs = null;
+      entry.dead = true;
     }
   }
 
@@ -219,12 +231,14 @@ export class RhythmTracker {
    * row impossible to read. Nothing is dropped here; the fight ending drops all of it
    * at once, via reset().
    *
+   * The one exception to "nothing is dropped here" is death: a slain caster's slots
+   * leave immediately, because a countdown for a corpse is not information. See
+   * dropCaster.
+   *
    * `state` says what the row may claim:
    *   'armed'  — a live prediction; `dueMs` counts down.
    *   'lapsed' — the pattern broke (or never re-qualified). `dueMs` is null, and the
    *              UI must show a dash: a retracted prediction has no honest number.
-   *   'ended'  — the caster is dead. Also null; the row dims rather than collapsing
-   *              the panel and shoving the surviving rows up.
    *
    * @returns {Array<{caster, ability, dueMs, intervalMs, spreadMs, warm, since, state}>}
    *   `warm` marks a prediction running on a stored rhythm rather than this fight's
@@ -234,6 +248,10 @@ export class RhythmTracker {
   timers(now) {
     const out = [];
     for (const [k, entry] of this.entries) {
+      // The corpse check comes first: a slain caster has no row at all, whatever it
+      // had armed. It stays in `entries` so learned() can still export its gaps.
+      if (entry.dead) continue;
+
       const est = this.estimate(entry, k);
 
       // A LIVE prediction needs all three: an estimate, a caster still alive, and
@@ -259,7 +277,7 @@ export class RhythmTracker {
         spreadMs: est?.spreadMs ?? null,
         warm: est?.warm ?? false,
         since: entry.armedTs,
-        state: dueMs !== null ? 'armed' : entry.lastTs === null ? 'ended' : 'lapsed',
+        state: dueMs !== null ? 'armed' : 'lapsed',
       });
     }
     // First-claimed first, and never re-sorted by what is due next. Ties keep Map

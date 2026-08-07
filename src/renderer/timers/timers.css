@@ -99,7 +99,7 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
 
 /*
  * One slot, one (caster, ability) pair, for the whole fight. The height is fixed and
- * identical in every state — armed, warm, due, CAST, lapsed, ended — because the
+ * identical in every state — armed, warm, due, CAST, lapsed — because the
  * entire point of this window is that the row you learned to glance at stays put.
  */
 .slot {
@@ -189,14 +189,12 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
   letter-spacing: 0.1em;
 }
 
-/* Lapsed and ended: the prediction is gone, the row is not. Both show a dash and
-   never a number — a retracted estimate has nothing honest left to count. */
-.slot[data-state="lapsed"] .due,
-.slot[data-state="ended"] .due { color: var(--ink-faint); }
-.slot[data-state="lapsed"] .spell,
-.slot[data-state="ended"] .spell { color: var(--ink-faint); font-weight: 400; }
-.slot[data-state="lapsed"] .caster,
-.slot[data-state="ended"] .caster { color: #4a4237; font-style: italic; }
+/* Lapsed: the prediction is gone, the row is not. It shows a dash and never a number —
+   a retracted estimate has nothing honest left to count. (There is no 'ended' state to
+   style: a slain caster's rows leave the panel outright.) */
+.slot[data-state="lapsed"] .due { color: var(--ink-faint); }
+.slot[data-state="lapsed"] .spell { color: var(--ink-faint); font-weight: 400; }
+.slot[data-state="lapsed"] .caster { color: #4a4237; font-style: italic; }
 
 /* ----------------------------------------------- unlocked drag placeholder */
 

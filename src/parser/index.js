@@ -1334,8 +1334,9 @@ export class LogParser {
 
     const target = this.resolve(event.target);
     // Encounter or not, a dead caster's warning is over. Friendlies never have one,
-    // so this is a no-op for player and pet deaths. Its timers stop predicting too —
-    // though what the fight already learned still exports when the encounter closes.
+    // so this is a no-op for player and pet deaths. Its timer rows LEAVE the panel at
+    // the same moment — a countdown for a corpse is not information — though what the
+    // fight already learned from it still exports when the encounter closes.
     this.clearHostileCastsFrom(target.display);
     this.rhythms.dropCaster(target.display);
     // Death outlives every status effect — a MEZZED chip on a corpse is a lie.

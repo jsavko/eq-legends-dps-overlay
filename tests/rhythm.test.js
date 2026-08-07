@@ -110,16 +110,40 @@ test('in-fight evidence outranks the stored prior once it qualifies', () => {
   assert.equal(timer.warm, false);
 });
 
-test('a dead caster stops predicting; its evidence still exports', () => {
+test('a dead caster leaves the panel at once; its evidence still exports', () => {
   const t = new RhythmTracker();
   feed(t, 'Quag Maelstrom', 'Mana Drain', [0, 19, 39, 58]);
   assert.equal(t.timers(60 * S)[0].state, 'armed');
 
   t.dropCaster('Quag Maelstrom');
-  const [ended] = t.timers(61 * S);
-  assert.equal(ended.state, 'ended', 'the row dims in place rather than collapsing the panel');
-  assert.equal(ended.dueMs, null);
+  assert.deepEqual(t.timers(61 * S), [], 'a countdown for a corpse is not information');
   assert.equal(t.learned().length, 1, 'the kill does not erase what the fight taught');
+});
+
+test('killing one caster leaves the others predicting', () => {
+  // The price of dropping a dead caster's rows: on a multi-caster pull the survivors
+  // move up. What must NOT happen is the survivors going quiet along with the corpse.
+  const t = new RhythmTracker();
+  feed(t, 'Quag Maelstrom', 'Mana Drain', [0, 19, 39, 58]);
+  feed(t, 'Lord Nagafen', 'Lava Breath', [0, 19, 39, 58]);
+  assert.equal(t.timers(60 * S).length, 2);
+
+  t.dropCaster('Quag Maelstrom');
+  const left = t.timers(61 * S);
+  assert.deepEqual(left.map((s) => s.caster), ['Lord Nagafen']);
+  assert.equal(left[0].state, 'armed');
+});
+
+test('a boss dying empties the panel even while the fight runs on', () => {
+  // The single-boss case, which is most of them: the adds are still up and the
+  // encounter is still open, but there is nothing left to count down.
+  const t = new RhythmTracker();
+  feed(t, 'Lord Nagafen', 'Lava Breath', [0, 19, 39, 58]);
+  feed(t, 'Lord Nagafen', 'Shadow Vortex', [5, 24, 44, 63]);
+  assert.equal(t.timers(64 * S).length, 2);
+
+  t.dropCaster('Lord Nagafen');
+  assert.deepEqual(t.timers(65 * S), [], 'every row belonged to the corpse');
 });
 
 test('a caster that dies before ever arming claims no slot', () => {
@@ -158,11 +182,11 @@ test('the states never reach the export — learned() sees only the gaps', () =>
   assert.equal(t.timers(91 * S).length, 2, 'both pairs have claimed a slot');
   const before = t.learned();
 
-  // Retract one, kill the other's caster: both rows are now stateful non-predictions.
+  // Retract one, kill the other's caster: one row lapses, the other leaves entirely.
   t.dropCaster('Lord Nagafen');
-  assert.deepEqual(t.timers(200 * S).map((s) => s.state), ['lapsed', 'ended']);
+  assert.deepEqual(t.timers(200 * S).map((s) => s.state), ['lapsed']);
 
-  assert.deepEqual(t.learned(), before, 'a lapsed or ended row still exports its rhythm');
+  assert.deepEqual(t.learned(), before, 'a lapsed row and a dead one both still export');
   assert.equal(before.length, 2);
 });
 

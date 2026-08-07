@@ -148,8 +148,11 @@ the overlay, alerts, timers and history windows share the warm parchment palette
   at the bottom of the alert stack, where a measured session displaced them 524 times
   and hid them behind their own cast warning 10,525 times. So: slots come from the
   parser in first-armed order and are *never* re-sorted by what is due next; a slot is
-  held for the whole fight in every state; every state renders at the same fixed row
-  height. Sorting the panel by `dueMs` would reintroduce the exact bug it replaced.
+  held through every state it can reach — armed, warm, due, CAST, lapsed — and every
+  one of them renders at the same fixed row height. Sorting the panel by `dueMs` would
+  reintroduce the exact bug it replaced. The **one** exception is death: a slain
+  caster's rows leave immediately, because a countdown for a corpse is not information
+  and on the common single-boss pull the panel simply empties rather than shifting.
 - **The history window never reflows.** Selecting a fight, member, metric or filter
   swaps content inside a fixed pane; panes must sit on the same pixel for every fight.
   (Example of the failure class: a deaths line that rendered only on death-fights pushed

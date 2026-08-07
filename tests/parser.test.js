@@ -1147,6 +1147,23 @@ test('a named boss casting on a rhythm earns a timer; article trash never does',
   assert.ok(timer.dueMs > 0 && timer.dueMs <= timer.intervalMs);
 });
 
+test('killing the boss clears its timers while the fight runs on', () => {
+  // End-to-end from a real death line: the panel must not keep counting down a corpse's
+  // recast for the rest of a pull whose adds are still up.
+  const p = makeParser({ timeoutMs: 120_000 });
+  p.feed(`${D(18, 48, 0)} You crush Quag Maelstrom for 40 points of damage.`);
+  p.feed(`${D(18, 48, 0)} You crush a cyclops for 40 points of damage.`);
+  for (const s of [10, 29, 49, 68]) {
+    p.feed(`${D(18, 48 + Math.floor(s / 60), s % 60)} Quag Maelstrom begins casting Mana Drain.`);
+  }
+  assert.equal(p.snapshot(T(18, 49, 10)).castTimers.length, 1);
+
+  p.feed(`${D(18, 49, 11)} Quag Maelstrom has been slain by Rhale!`);
+  const snap = p.snapshot(T(18, 49, 12));
+  assert.equal(snap.castTimers.length, 0, 'the corpse takes its countdown with it');
+  assert.equal(snap.active, true, 'and the cyclops keeps the fight open');
+});
+
 test('a stored rhythm arms the timer from the first cast of the next pull', () => {
   const p = makeParser();
   p.setKnownRhythms([
