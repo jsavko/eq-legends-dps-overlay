@@ -60,6 +60,18 @@ const VOLLEY_MS = 2500;
 
 const key = (caster, ability) => `${caster}|${ability}`;
 
+/**
+ * A fresh per-fight entry.
+ *
+ * `armedTs` is null until the entry first produces a prediction — it is the moment
+ * the pair CLAIMED a slot in the timers window, and it never moves afterwards. That
+ * is what keeps a row where the player learned to find it: ordering by `dueMs` would
+ * reshuffle the panel every time one countdown overtook another.
+ */
+function newEntry(caster, ability, ts, source) {
+  return { caster, ability, gaps: [], lastTs: ts, skipNextGap: false, source, armedTs: null };
+}
+
 function median(values) {
   const sorted = values.slice().sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -118,8 +130,7 @@ export class RhythmTracker {
     const k = key(caster, ability);
     let entry = this.entries.get(k);
     if (!entry) {
-      entry = { caster, ability, gaps: [], lastTs: ts, skipNextGap: false, source };
-      this.entries.set(k, entry);
+      this.entries.set(k, newEntry(caster, ability, ts, source));
       return;
     }
 
@@ -130,7 +141,9 @@ export class RhythmTracker {
     // seen restarts a landings-built entry from scratch.
     if (source === 'landed' && entry.source === 'cast') return;
     if (source === 'cast' && entry.source === 'landed') {
-      this.entries.set(k, { caster, ability, gaps: [], lastTs: ts, skipNextGap: false, source });
+      // The slot is not re-claimed: `armedTs` carries over so a spell that switches
+      // evidence mid-fight keeps the row the player has already learned to look at.
+      this.entries.set(k, { ...newEntry(caster, ability, ts, source), armedTs: entry.armedTs });
       return;
     }
 
@@ -158,7 +171,11 @@ export class RhythmTracker {
     if (entry) entry.skipNextGap = true;
   }
 
-  /** A dead caster's timers are over; its learned gaps still count at export. */
+  /**
+   * A dead caster predicts nothing further. Its slots survive as 'ended' rows until
+   * the fight closes — collapsing them would move every row below — and its learned
+   * gaps still count at export.
+   */
   dropCaster(caster) {
     for (const entry of this.entries.values()) {
       if (entry.caster === caster) entry.lastTs = null;
@@ -175,46 +192,80 @@ export class RhythmTracker {
   }
 
   /**
-   * Active predictions at `now`.
+   * The best estimate available for one entry, or null if none is earned yet.
    *
    * In-fight evidence outranks the stored prior: what THIS pull is doing beats what
    * last week's pull did. The prior only fills in before three gaps exist.
+   */
+  estimate(entry, k) {
+    const inFight = this.inFightEstimate(entry);
+    if (inFight) return { ...inFight, warm: false };
+
+    const prior = this.known.get(k ?? key(entry.caster, entry.ability));
+    if (prior && prior.samples >= WARM_START_MIN_SAMPLES) {
+      return { intervalMs: prior.intervalMs, spreadMs: prior.spreadMs, warm: true };
+    }
+    return null;
+  }
+
+  /**
+   * Every slot this fight has claimed, in the order it claimed them.
    *
-   * @returns {Array<{caster, ability, dueMs, intervalMs, spreadMs, warm}>}
+   * This returns SLOTS, not live countdowns: once a (caster, ability) pair has armed
+   * once it stays in the list for the rest of the fight, and the caller paints it
+   * wherever it first appeared. That is the whole point — the previous design dropped
+   * an entry the moment its prediction retracted and re-added it on the next cast,
+   * which measured out as 72 vanish-and-return cycles in one live session and made a
+   * row impossible to read. Nothing is dropped here; the fight ending drops all of it
+   * at once, via reset().
+   *
+   * `state` says what the row may claim:
+   *   'armed'  — a live prediction; `dueMs` counts down.
+   *   'lapsed' — the pattern broke (or never re-qualified). `dueMs` is null, and the
+   *              UI must show a dash: a retracted prediction has no honest number.
+   *   'ended'  — the caster is dead. Also null; the row dims rather than collapsing
+   *              the panel and shoving the surviving rows up.
+   *
+   * @returns {Array<{caster, ability, dueMs, intervalMs, spreadMs, warm, since, state}>}
    *   `warm` marks a prediction running on a stored rhythm rather than this fight's
    *   own gaps — the UI labels both as estimates, but a warm one is the weaker claim.
+   *   `since` is when the slot was claimed, and the sort key.
    */
   timers(now) {
     const out = [];
     for (const [k, entry] of this.entries) {
-      if (entry.lastTs === null) continue;
+      const est = this.estimate(entry, k);
 
-      let est = this.inFightEstimate(entry);
-      let warm = false;
-      if (!est) {
-        const prior = this.known.get(k);
-        if (prior && prior.samples >= WARM_START_MIN_SAMPLES) {
-          est = { intervalMs: prior.intervalMs, spreadMs: prior.spreadMs };
-          warm = true;
-        }
+      // A LIVE prediction needs all three: an estimate, a caster still alive, and
+      // reality not yet past the point where "a bit late" became "the pattern broke".
+      let dueMs = null;
+      if (est && entry.lastTs !== null) {
+        const overdue = now - (entry.lastTs + est.intervalMs);
+        const tolerance = Math.max(est.spreadMs * RETRACT_SPREAD_FACTOR, RETRACT_FLOOR_MS);
+        if (overdue <= tolerance) dueMs = Math.max(0, -overdue);
       }
-      if (!est) continue;
 
-      const dueTs = entry.lastTs + est.intervalMs;
-      const overdue = now - dueTs;
-      const tolerance = Math.max(est.spreadMs * RETRACT_SPREAD_FACTOR, RETRACT_FLOOR_MS);
-      if (overdue > tolerance) continue;   // the pattern broke — retract, don't lie
+      // A slot is claimed the first time the pair actually predicts something, and
+      // never afterwards — so a re-arm, a re-anchor or a retraction all reuse the row
+      // the player already knows. A pair that has never predicted has no row at all.
+      if (dueMs !== null && entry.armedTs === null) entry.armedTs = now;
+      if (entry.armedTs === null) continue;
 
       out.push({
         caster: entry.caster,
         ability: entry.ability,
-        dueMs: Math.max(0, dueTs - now),
-        intervalMs: est.intervalMs,
-        spreadMs: est.spreadMs,
-        warm,
+        dueMs,
+        intervalMs: est?.intervalMs ?? null,
+        spreadMs: est?.spreadMs ?? null,
+        warm: est?.warm ?? false,
+        since: entry.armedTs,
+        state: dueMs !== null ? 'armed' : entry.lastTs === null ? 'ended' : 'lapsed',
       });
     }
-    return out.sort((a, b) => a.dueMs - b.dueMs);
+    // First-claimed first, and never re-sorted by what is due next. Ties keep Map
+    // insertion order, since Array#sort is stable — two slots arming in the same
+    // tick still land in a deterministic order.
+    return out.sort((a, b) => a.since - b.since);
   }
 
   /**

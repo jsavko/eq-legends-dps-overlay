@@ -1,5 +1,10 @@
 /**
- * Electron main process: owns the parser, the tailer, both windows and the hotkeys.
+ * Electron main process: owns the parser, the tailer, every window and the hotkeys.
+ *
+ * Four float over the game or sit beside it — the meter, the alert banners, the boss
+ * timers and the history browser — plus the settings form. Each keeps its own bounds
+ * key and none derives its placement from another's; what they share is the lock
+ * gesture and the hide hotkey, not a position.
  *
  * The renderers are pure views. Every piece of state lives here and is pushed to them
  * at a fixed rate (see ipc.js), which keeps a busy raid from turning into an IPC storm.
@@ -14,7 +19,9 @@ import { fileURLToPath } from 'node:url';
 
 import { LogParser } from '../parser/index.js';
 import { Tailer, listLogs } from './tailer.js';
-import { ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, alertsEnabled } from './config.js';
+import {
+  ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, alertsEnabled, timersEnabled,
+} from './config.js';
 import { EncounterStore, RECORD_VERSION, storeKey } from './history.js';
 import { RhythmStore } from './rhythms.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
@@ -32,6 +39,7 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {BrowserWindow|null} */ let setupWindow = null;
 /** @type {BrowserWindow|null} */ let historyWindow = null;
 /** @type {BrowserWindow|null} */ let alertsWindow = null;
+/** @type {BrowserWindow|null} */ let timersWindow = null;
 /** @type {LogParser|null} */    let parser = null;
 /** @type {Tailer|null} */       let tailer = null;
 /** @type {ConfigStore|null} */  let config = null;
@@ -46,6 +54,7 @@ let overlayVisible = true;
 let saveBoundsTimer = null;
 let saveHistoryBoundsTimer = null;
 let saveAlertsBoundsTimer = null;
+let saveTimersBoundsTimer = null;
 let hoverTimer = null;
 /**
  * Where the player put the window. Auto-fit reads these and never writes them.
@@ -90,8 +99,10 @@ async function main() {
   if (config.isConfigured()) {
     await startTailing(config.get('logPath'));
     createOverlay();
-    // One window, four switches: it exists if ANY category is on and mute is off.
+    // One window, three switches: it exists if ANY category is on and mute is off.
     if (alertsEnabled(config.all)) createAlerts();
+    // The timers get their own, on their own switch — see createTimersWindow.
+    if (timersEnabled(config.all)) createTimersWindow();
   } else {
     createSetup('setup');
   }
@@ -284,8 +295,8 @@ function startPushLoop() {
     lastRevision = parser.revision;
 
     overlayWindow.webContents.send(CHANNELS.SNAPSHOT, snapshot);
-    if (alertsWindow && !alertsWindow.isDestroyed()) {
-      alertsWindow.webContents.send(CHANNELS.SNAPSHOT, snapshot);
+    for (const win of [alertsWindow, timersWindow]) {
+      if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.SNAPSHOT, snapshot);
     }
   }, PUSH_INTERVAL_MS);
 }
@@ -483,12 +494,18 @@ function refreshTrayMenu() {
         alertToggle('Interrupt warnings', 'castAlerts'),
         alertToggle('Summon announcements', 'summonAlerts'),
         alertToggle('Crowd control on the group', 'ccAlerts'),
-        alertToggle('Boss spell timers', 'castTimers'),
-        { type: 'separator' },
         {
           ...alertToggle('Sound for interrupt warnings', 'castAlertSound'),
           // A beep for a warning that isn't drawn is a noise with no explanation.
           enabled: config.get('castAlerts') !== false,
+        },
+        { type: 'separator' },
+        // Below the line because it is not one of the categories above: the timers
+        // draw in a window of their own, placed on their own. It stays in this menu
+        // because the mute at the top still silences it.
+        {
+          ...alertToggle('Boss spell timers', 'castTimers'),
+          toolTip: 'A panel of its own — unlock the overlay to place it',
         },
       ],
     },
@@ -646,6 +663,85 @@ function createAlerts() {
 }
 
 /**
+ * The boss-timer panel: a framed slot list inside a transparent click-through box.
+ *
+ * A separate window from the alerts on purpose. A banner has to cross your eyeline and
+ * belongs top-centre; a countdown is a fixture you consult and belongs wherever you
+ * keep the buff window. Sharing one box meant every banner that arrived pushed the
+ * countdowns down the screen — 524 displacements in one measured session — which is
+ * the whole reason this window exists.
+ *
+ * The same deliberate absence of geometry machinery as the alert window: nothing here
+ * auto-fits or auto-moves. The box is sized for far more slots than any observed fight
+ * needed (the worst case across a whole live session was four), the panel top-anchors
+ * inside it so a slot arriving never moves the ones above it, and the only bounds that
+ * change are the ones the player drags to.
+ *
+ * Its placement is its own. `timersBounds` is written only by the handler below and
+ * read only here — never derived from the overlay's bounds, which move constantly
+ * under auto-fit and would walk this window across the screen with them.
+ */
+function createTimersWindow() {
+  if (timersWindow && !timersWindow.isDestroyed()) return;
+
+  const area = screen.getPrimaryDisplay().workArea;
+  // Room for the panel at the largest text size the settings offer (1.8×, which takes
+  // the 296px panel to ~533px) and for far more slots than any fight has produced.
+  // The box is invisible and click-through; only its generosity is load-bearing,
+  // since a clipped countdown would be a silently hidden one.
+  const width = 560;
+  const height = 560;
+  const bounds = config.get('timersBounds') ?? {
+    width,
+    height,
+    // Right edge at eye level rather than at the top: roughly where EQ players keep
+    // the buff window, and clear of the meter's own default patch of screen. The
+    // panel right-aligns inside the box, so this puts it 20px off the screen edge.
+    x: area.x + area.width - width - 20,
+    y: area.y + Math.round(area.height * 0.4),
+  };
+
+  timersWindow = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    icon: path.join(ASSETS, 'icon-256.png'),
+    focusable: true,
+    webPreferences: {
+      preload: path.join(RENDERER, 'timers', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  timersWindow.setAlwaysOnTop(true, 'screen-saver');
+  timersWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  timersWindow.loadFile(path.join(RENDERER, 'timers', 'index.html'));
+
+  timersWindow.on('ready-to-show', () => {
+    if (!timersWindow || timersWindow.isDestroyed()) return;
+    timersWindow.setIgnoreMouseEvents(config.get('locked'));
+    timersWindow.webContents.send(CHANNELS.LOCK_CHANGED, config.get('locked'));
+    if (!overlayVisible) timersWindow.hide();
+  });
+
+  const remember = () => {
+    clearTimeout(saveTimersBoundsTimer);
+    saveTimersBoundsTimer = setTimeout(() => {
+      if (!timersWindow || timersWindow.isDestroyed()) return;
+      config.set({ timersBounds: timersWindow.getBounds() });
+    }, 400);
+  };
+  timersWindow.on('moved', remember);
+  timersWindow.on('closed', () => { timersWindow = null; });
+}
+
+/**
  * Bring the alert window into line with the settings — the single place that decides
  * whether it exists.
  *
@@ -661,22 +757,38 @@ function syncAlertsWindow() {
   else alertsWindow?.close();
 }
 
+/** The same create-or-close decision for the timers, from their own one switch. */
+function syncTimersWindow() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (timersEnabled(config.all)) createTimersWindow();
+  else timersWindow?.close();
+}
+
 /**
  * Push the current config to every window that listens for it.
  *
  * The alert window gates each category at render time, so a toggle only takes effect
- * when this lands — which is what makes a tray checkbox flip chips off mid-fight.
+ * when this lands — which is what makes a tray checkbox flip chips off mid-fight. The
+ * timers window needs it for `--scale`, and to drop its slots the instant it is
+ * switched off rather than at whatever minute the next snapshot arrives.
  */
 function broadcastConfig(cfg) {
-  for (const win of [overlayWindow, alertsWindow, setupWindow]) {
+  for (const win of [overlayWindow, alertsWindow, timersWindow, setupWindow]) {
     if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.CONFIG_CHANGED, cfg);
   }
 }
 
-/** Flip one alert setting from the tray: persist, resync the window, redraw the menu. */
+/**
+ * Flip one alert setting from the tray: persist, resync the windows, redraw the menu.
+ *
+ * Both syncs run for every switch rather than one per key. Mute is the reason — it is
+ * the one key that owns both windows — and a per-key routing table here would be a
+ * second copy of what `alertsEnabled`/`timersEnabled` already decide.
+ */
 function setAlertOption(patch) {
   const after = config.set(patch);
   syncAlertsWindow();
+  syncTimersWindow();
   broadcastConfig(after);
   refreshTrayMenu();
 }
@@ -715,11 +827,13 @@ function applyLock(locked) {
   }
 
   // One lock for the whole HUD: unlocking to reposition the meter is the moment to
-  // reposition the warnings too, and a separate second hotkey would just be a thing
-  // to forget.
-  if (alertsWindow && !alertsWindow.isDestroyed()) {
-    alertsWindow.setIgnoreMouseEvents(locked);
-    alertsWindow.webContents.send(CHANNELS.LOCK_CHANGED, locked);
+  // reposition the warnings and the timers too, and a separate hotkey per window
+  // would just be three things to forget instead of one. Placement stays separate —
+  // only the GESTURE is shared.
+  for (const win of [alertsWindow, timersWindow]) {
+    if (!win || win.isDestroyed()) continue;
+    win.setIgnoreMouseEvents(locked);
+    win.webContents.send(CHANNELS.LOCK_CHANGED, locked);
   }
 }
 
@@ -774,13 +888,15 @@ function toggleVisible() {
   if (overlayVisible) {
     overlayWindow.showInactive();   // show without stealing focus from the game
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
-    if (alertsWindow && !alertsWindow.isDestroyed()) {
-      alertsWindow.showInactive();
-      alertsWindow.setAlwaysOnTop(true, 'screen-saver');
+    for (const win of [alertsWindow, timersWindow]) {
+      if (!win || win.isDestroyed()) continue;
+      win.showInactive();
+      win.setAlwaysOnTop(true, 'screen-saver');
     }
   } else {
     overlayWindow.hide();
     alertsWindow?.hide();
+    timersWindow?.hide();
   }
   refreshTrayMenu();
 }
@@ -877,9 +993,11 @@ function registerIpc() {
     if (patch.logPath && patch.logPath !== before.logPath) {
       await startTailing(patch.logPath);
     }
-    // Any of the four categories, or the mute, can be what brings the window into or
-    // out of existence — the predicate decides, not the individual key.
+    // Any of the three categories, or the mute, can be what brings the alert window
+    // into or out of existence — the predicate decides, not the individual key. The
+    // timers window answers to its own switch, and to the same mute.
     if (ALERT_KEYS.some((key) => patch[key] !== undefined)) syncAlertsWindow();
+    if (TIMER_KEYS.some((key) => patch[key] !== undefined)) syncTimersWindow();
 
     broadcastConfig(after);
     // The tray carries the same switches as the settings form, so a change made in

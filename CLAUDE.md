@@ -60,6 +60,14 @@ A second, slower flow branches off at encounter close: parser `onEncounterEnd` �
 JSONL history store → History window. `docs/architecture.md` walks the whole pipeline
 with the actual event kinds and record shapes.
 
+**Four windows float over or beside the game**, each with its own bounds key and none
+deriving its placement from another's: the **meter** (`bounds`), the **alerts** banner
+stack (`alertsBounds`, top-centre — a warning must cross your eyeline), the **boss
+timers** panel (`timersBounds`, wherever you keep the buff window — a countdown is a
+fixture you consult), and the **History** browser (`historyBounds`). The same snapshot
+is pushed to the first three. What they share is the *gesture*, not the position: one
+`applyLock` unlock makes the whole HUD draggable, and Ctrl+Shift+H hides it together.
+
 **`src/parser/` is pure Node — no Electron imports anywhere.** That is why the whole
 scoring pipeline is unit-testable in WSL and replayable offline. Keep it that way.
 
@@ -103,6 +111,15 @@ that logic stays testable in WSL, where importing it would reach for Electron an
 snapshot. Rows are reused, not rebuilt (bar transitions survive pushes). `breakdown.js`
 is pure (column arithmetic, unit-tested).
 
+**`src/renderer/timers/`** — the boss-timer panel: learned recast countdowns in fixed
+slots, shaped after EQ's buff window. A (caster, ability) pair claims a slot the first
+time it arms and **holds that row for the whole fight** — through the cast (the row says
+`CAST` instead of vanishing), through a retraction (a dash, never an invented number),
+through the caster dying. Slot lifetime lives in `rhythm.js` (`state`, `since`), not
+here, so the honesty rules stay unit-testable; this renderer only paints. Between
+fights the panel is *gone* — not an empty frame — except while unlocked, where the drag
+placeholder shows because an empty window cannot be positioned.
+
 **`src/renderer/history/`** — the History window: three fixed panes (fight list rail →
 fight stats → members + full breakdown). Every click swaps content *inside* a pane;
 nothing resizes, expands, or pushes other content around — that no-reflow rule is the
@@ -111,7 +128,7 @@ for reflowing on every click). `organize.js` is the pure half (boss heuristic, f
 day grouping, formatters), unit-tested in WSL like `breakdown.js`.
 
 **`src/renderer/setup/`** — first-run setup and the settings form. Cool slate palette;
-the overlay and history window share the warm parchment palette instead.
+the overlay, alerts, timers and history windows share the warm parchment palette instead.
 
 ## Invariants that are easy to break
 
@@ -121,8 +138,18 @@ the overlay and history window share the warm parchment palette instead.
   on-screen room: the window grows (both dimensions while the hover breakdown is open,
   up to the work area), and the ability list flows into columns when one column would
   outgrow the screen. Never "fix" an overflow with `overflow-y: auto` or a max-height.
-  This applies to the OVERLAY only — the history and settings windows take real mouse
-  input and their panes scroll internally by design.
+  This applies to every click-through window — the overlay, the alerts and the timers —
+  and never to the history and settings windows, which take real mouse input and scroll
+  their panes internally by design. The click-through windows that do not auto-fit
+  (alerts, timers) buy the same guarantee with a generously oversized invisible box
+  instead of geometry code: sized for the worst realistic content at the largest text
+  size, so nothing is ever clipped.
+- **A boss-timer row never moves.** That window exists because the timers used to sit
+  at the bottom of the alert stack, where a measured session displaced them 524 times
+  and hid them behind their own cast warning 10,525 times. So: slots come from the
+  parser in first-armed order and are *never* re-sorted by what is due next; a slot is
+  held for the whole fight in every state; every state renders at the same fixed row
+  height. Sorting the panel by `dueMs` would reintroduce the exact bug it replaced.
 - **The history window never reflows.** Selecting a fight, member, metric or filter
   swaps content inside a fixed pane; panes must sit on the same pixel for every fight.
   (Example of the failure class: a deaths line that rendered only on death-fights pushed

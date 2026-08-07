@@ -44,7 +44,7 @@ export const DEFAULTS = {
   metric: 'damage',
 
   /**
-   * The four alert categories, each on its own switch.
+   * The three alert categories, each on its own switch.
    *
    * None of these owns the alert window — `alertsEnabled()` derives its existence from
    * all of them together, so a player who only wants summon banners gets a window with
@@ -56,7 +56,15 @@ export const DEFAULTS = {
   summonAlerts: true,
   /** Crowd control sitting on the group right now: stunned / mezzed / charmed chips. */
   ccAlerts: true,
-  /** Learned recast countdowns for named bosses, shown under the warnings. */
+  /**
+   * Learned recast countdowns for named bosses.
+   *
+   * Deliberately NOT one of the alert categories: the timers have their own window
+   * (see timersEnabled), because a countdown is a fixture you consult and a banner is
+   * an interruption — they want opposite places on the screen, and sharing one window
+   * meant every banner that arrived shoved the countdowns down the screen. The key
+   * keeps its name so configs written before the split still say what they meant.
+   */
   castTimers: true,
   /** Short cue on a NEW tier-3 warning. Off by default — sound is opt-in, always. */
   castAlertSound: false,
@@ -70,6 +78,16 @@ export const DEFAULTS = {
   alertsMuted: false,
   /** Alert window position; null until the player drags it somewhere. */
   alertsBounds: null,
+  /**
+   * Boss-timer window position; null until the player drags it somewhere.
+   *
+   * Its own key, written only by that window's own move handler and read only when it
+   * is created. The meter's bounds are not a starting point for it: the meter moves
+   * itself constantly (auto-fit, bottom-anchoring, hover-widening) and deriving one
+   * window's placement from another's live bounds is how the overlay used to climb
+   * the screen.
+   */
+  timersBounds: null,
 
   /**
    * Whether the "where the controls live" hint has been shown.
@@ -99,10 +117,13 @@ export const DEFAULTS = {
 };
 
 /** The category switches, in the order they read in the settings form and the tray. */
-export const ALERT_CATEGORIES = ['castAlerts', 'summonAlerts', 'ccAlerts', 'castTimers'];
+export const ALERT_CATEGORIES = ['castAlerts', 'summonAlerts', 'ccAlerts'];
 
 /** Every key that can change whether the alert window should exist. */
 export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
+
+/** Every key that can change whether the boss-timer window should exist. */
+export const TIMER_KEYS = ['castTimers', 'alertsMuted'];
 
 /**
  * Should the alert window exist at all?
@@ -118,6 +139,18 @@ export function alertsEnabled(cfg) {
   // A missing key reads as its default (on) rather than off: a config that predates a
   // category must not silently swallow the warnings that category draws.
   return ALERT_CATEGORIES.some((key) => cfg[key] !== false);
+}
+
+/**
+ * Should the boss-timer window exist at all?
+ *
+ * One switch, not a set — the timers are a single surface with a single job, which is
+ * exactly why they stopped being an alert category. Mute still wins: "shut up for this
+ * pull" that left one panel talking would be the one surface ignoring the hotkey.
+ */
+export function timersEnabled(cfg) {
+  if (!cfg || cfg.alertsMuted) return false;
+  return cfg.castTimers !== false;
 }
 
 export class ConfigStore {

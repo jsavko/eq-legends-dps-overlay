@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled } from '../src/main/config.js';
+import {
+  ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled, timersEnabled,
+} from '../src/main/config.js';
 
 function tmpdir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'eqcfg-'));
@@ -92,12 +94,19 @@ test('parserOptions converts seconds to the milliseconds the parser wants', () =
 const NO_ALERTS = { castAlerts: false, summonAlerts: false, ccAlerts: false, castTimers: false };
 
 test('any single alert category keeps the alert window alive', () => {
-  for (const key of ['castAlerts', 'summonAlerts', 'ccAlerts', 'castTimers']) {
+  for (const key of ['castAlerts', 'summonAlerts', 'ccAlerts']) {
     assert.equal(
       alertsEnabled({ ...NO_ALERTS, [key]: true }), true,
       `${key} alone must be enough to justify the window`
     );
   }
+});
+
+test('the timers are no longer an alert category — they have their own window', () => {
+  // The alert window must not exist for a surface it no longer draws: an otherwise
+  // silent player with only the timers on would get an empty renderer process.
+  assert.equal(alertsEnabled({ ...NO_ALERTS, castTimers: true }), false);
+  assert.equal(timersEnabled({ ...NO_ALERTS, castTimers: true }), true);
 });
 
 test('the alert window is gone once the last category is off', () => {
@@ -114,7 +123,27 @@ test('mute beats the categories without erasing them', () => {
 });
 
 test('a config predating a category treats it as on rather than dropping its alerts', () => {
-  assert.equal(alertsEnabled({ castAlerts: false, summonAlerts: false, ccAlerts: false }), true);
+  assert.equal(alertsEnabled({ castAlerts: false, summonAlerts: false }), true, 'ccAlerts is missing, so on');
+  assert.equal(timersEnabled({}), true, 'a missing castTimers reads as its default');
+});
+
+test('the timers window follows its own switch, and loses to mute', () => {
+  assert.equal(timersEnabled(DEFAULTS), true, 'a fresh install shows timers');
+  assert.equal(timersEnabled({ ...DEFAULTS, castTimers: false }), false);
+
+  // Mute is "shut up for this pull", and a panel that survived it would be the one
+  // surface ignoring the hotkey — while the preference underneath stays untouched.
+  const muted = { ...DEFAULTS, alertsMuted: true };
+  assert.equal(timersEnabled(muted), false);
+  assert.equal(muted.castTimers, true);
+  assert.equal(timersEnabled({ ...muted, alertsMuted: false }), true);
+});
+
+test('the timers window has bounds of its own, defaulting to unplaced', () => {
+  // Its own key is what keeps its placement independent of the meter's, which moves
+  // itself constantly — see the "window climbs the screen" history in layout.js.
+  assert.equal(DEFAULTS.timersBounds, null);
+  assert.ok('alertsBounds' in DEFAULTS && 'bounds' in DEFAULTS, 'three windows, three keys');
 });
 
 test('an old "alerts off" config keeps meaning no alerts at all', () => {
@@ -132,6 +161,7 @@ test('an old "alerts off" config keeps meaning no alerts at all', () => {
   assert.equal(store.get('ccAlerts'), false);
   assert.equal(store.get('castTimers'), false, 'an inert stored timer flag must not spring to life');
   assert.equal(alertsEnabled(store.all), false);
+  assert.equal(timersEnabled(store.all), false, 'and no timer window springs up either');
 });
 
 test('a config already carrying the new keys is left exactly as written', () => {

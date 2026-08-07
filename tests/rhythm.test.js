@@ -67,12 +67,19 @@ test('an overdue prediction retracts instead of counting past zero', () => {
   feed(t, 'Quag Maelstrom', 'Mana Drain', [0, 19, 39, 58]);
 
   const due = (58 + 19) * S;
-  assert.equal(t.timers(due + 1 * S).length, 1, 'slightly late is within tolerance');
-  assert.equal(t.timers(due + 30 * S).length, 0, 'far past due means the pattern broke');
+  assert.equal(t.timers(due + 1 * S)[0].state, 'armed', 'slightly late is within tolerance');
 
-  // The next real cast brings the timer back.
+  // The slot HOLDS — the row is the thing the window exists to keep still — but the
+  // number does not: a broken pattern has no honest countdown left to show.
+  const [lapsed] = t.timers(due + 30 * S);
+  assert.equal(lapsed.state, 'lapsed', 'far past due means the pattern broke');
+  assert.equal(lapsed.dueMs, null, 'a retracted prediction must never claim a number');
+
+  // The next real cast re-arms it in place, keeping the slot it already had.
   t.noteCast('Quag Maelstrom', 'Mana Drain', due + 31 * S);
-  assert.equal(t.timers(due + 32 * S).length, 1);
+  const [rearmed] = t.timers(due + 32 * S);
+  assert.equal(rearmed.state, 'armed');
+  assert.equal(rearmed.since, lapsed.since, 're-arming must not claim a new slot');
 });
 
 test('a stored rhythm warm-starts a timer from the FIRST cast of the fight', () => {
@@ -106,9 +113,57 @@ test('in-fight evidence outranks the stored prior once it qualifies', () => {
 test('a dead caster stops predicting; its evidence still exports', () => {
   const t = new RhythmTracker();
   feed(t, 'Quag Maelstrom', 'Mana Drain', [0, 19, 39, 58]);
+  assert.equal(t.timers(60 * S)[0].state, 'armed');
+
   t.dropCaster('Quag Maelstrom');
-  assert.equal(t.timers(60 * S).length, 0);
+  const [ended] = t.timers(61 * S);
+  assert.equal(ended.state, 'ended', 'the row dims in place rather than collapsing the panel');
+  assert.equal(ended.dueMs, null);
   assert.equal(t.learned().length, 1, 'the kill does not erase what the fight taught');
+});
+
+test('a caster that dies before ever arming claims no slot', () => {
+  // Two gaps is not evidence, so nothing was ever on screen for this pair — and a row
+  // appearing for a mob that is already dead would be the panel inventing history.
+  const t = new RhythmTracker();
+  feed(t, 'Quag Maelstrom', 'Mana Drain', [0, 19, 38]);
+  t.dropCaster('Quag Maelstrom');
+  assert.equal(t.timers(40 * S).length, 0);
+});
+
+test('slots keep first-armed order however the countdowns overtake each other', () => {
+  const t = new RhythmTracker();
+  // Slow one qualifies first, at t=90; the fast one only at t=95 — so the slow spell
+  // owns the top row even though it is always the further away of the two.
+  feed(t, 'Lord Nagafen', 'Shadow Vortex', [0, 30, 60, 90]);
+  const first = t.timers(91 * S);
+  assert.deepEqual(first.map((s) => s.ability), ['Shadow Vortex']);
+
+  feed(t, 'Lord Nagafen', 'Lava Breath', [80, 85, 90, 95]);
+  const both = t.timers(96 * S);
+  assert.deepEqual(both.map((s) => s.ability), ['Shadow Vortex', 'Lava Breath']);
+  assert.ok(both[0].dueMs > both[1].dueMs, 'the top row is the LATER of the two');
+  assert.equal(both[0].since, first[0].since, 'an existing slot is not re-claimed');
+
+  // A re-anchoring cast must not reshuffle the panel either.
+  t.noteCast('Lord Nagafen', 'Shadow Vortex', 120 * S);
+  assert.deepEqual(t.timers(121 * S).map((s) => s.ability), ['Shadow Vortex', 'Lava Breath']);
+});
+
+test('the states never reach the export — learned() sees only the gaps', () => {
+  const t = new RhythmTracker();
+  feed(t, 'Quag Maelstrom', 'Mana Drain', [0, 19, 39, 58]);
+  assert.equal(t.timers(60 * S)[0].state, 'armed');
+  feed(t, 'Lord Nagafen', 'Shadow Vortex', [0, 30, 60, 90]);
+  assert.equal(t.timers(91 * S).length, 2, 'both pairs have claimed a slot');
+  const before = t.learned();
+
+  // Retract one, kill the other's caster: both rows are now stateful non-predictions.
+  t.dropCaster('Lord Nagafen');
+  assert.deepEqual(t.timers(200 * S).map((s) => s.state), ['lapsed', 'ended']);
+
+  assert.deepEqual(t.learned(), before, 'a lapsed or ended row still exports its rhythm');
+  assert.equal(before.length, 2);
 });
 
 test('a lull longer than a cycle boundary is not a gap', () => {

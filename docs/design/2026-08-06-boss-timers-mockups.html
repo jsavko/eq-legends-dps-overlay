@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Boss timers — window mockups</title>
+<style>
+/*
+ * Mockups for moving the learned boss timers out of the alert stack and into their
+ * own window. Everything here is at 1:1 pixel scale in the shipping palette and
+ * type — this file is a mockup, not a component, so the CSS is deliberately flat
+ * and duplicated per variant rather than factored.
+ */
+:root {
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+  --slab:      #100d0a;
+  --edge:      #2e2620;
+  --ember:     #b9702a;
+  --ember-lit: #e0a53f;
+  --alarm:     #d5482f;
+  --alarm-lit: #f2825f;
+  --balm-lit:  #63c2b4;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 28px 32px 60px;
+  /* A murky dungeon-ish backdrop so the panels are judged the way they will be seen:
+     floating over the game, not on a design canvas. */
+  background:
+    radial-gradient(120% 90% at 30% 0%, #1d2422 0%, #0b0d0c 55%, #070808 100%);
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+h1 {
+  font-size: 15px; font-weight: 700; letter-spacing: 0.26em; text-transform: uppercase;
+  color: var(--ember-lit); margin: 0 0 4px;
+}
+.sub { color: var(--ink-dim); font-size: 12.5px; margin: 0 0 26px; max-width: 74ch; line-height: 1.5; }
+h2 {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--ink); margin: 34px 0 2px; padding-top: 18px; border-top: 1px solid #1c211f;
+}
+h2 .tag { color: var(--ember-lit); }
+.note { color: var(--ink-dim); font-size: 12px; margin: 0 0 16px; max-width: 78ch; line-height: 1.55; }
+.note b { color: var(--ink); font-weight: 600; }
+.row { display: flex; gap: 26px; align-items: flex-start; flex-wrap: wrap; }
+.cell { display: flex; flex-direction: column; gap: 7px; }
+.cap {
+  font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-faint); font-weight: 700;
+}
+
+/* ══════════════════════════════ shared panel chrome ══════════════════════════ */
+.panel {
+  width: 296px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--slab) 94%, #3a2a18) 0%, var(--slab) 40%, var(--slab) 100%);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: 0 2px 18px rgba(0,0,0,0.65), inset 0 1px 0 color-mix(in srgb, var(--ember) 26%, transparent);
+  font-size: 13px;
+  overflow: hidden;
+}
+.phead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 4px 8px 4px 9px;
+  border-bottom: 1px solid var(--edge);
+  background: color-mix(in srgb, var(--slab) 82%, #241a10);
+}
+.phead .title {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ember-lit);
+}
+.phead .who { font-size: 11px; color: var(--ink-dim); }
+
+/* ═══════════════════════════ A · buff-window slots ═══════════════════════════ */
+/*
+ * The row IS the bar — the overlay's central idea, reused. Slots are fixed for the
+ * fight: a fired timer re-arms in place, a retracted one dims, nothing reorders.
+ */
+.slot {
+  position: relative;
+  display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 9px;
+  border-bottom: 1px solid #191512;
+  overflow: hidden;
+}
+.slot:last-child { border-bottom: 0; }
+.slot .fill {
+  position: absolute; inset: 0 auto 0 0;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ember) 42%, transparent), color-mix(in srgb, var(--ember) 16%, transparent));
+  border-right: 1px solid color-mix(in srgb, var(--ember-lit) 55%, transparent);
+}
+.slot .due {
+  position: relative; z-index: 1;
+  min-width: 34px; text-align: right;
+  font-variant-numeric: tabular-nums; font-weight: 700; font-size: 14px;
+  color: var(--ember-lit);
+}
+.slot .names { position: relative; z-index: 1; display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.slot .spell { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slot .caster { font-size: 10.5px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Warm: last pull's rhythm, not yet confirmed by this one — the weaker claim, so it
+   drops the amber entirely rather than dressing like measured evidence. */
+.slot.warm .fill { background: linear-gradient(90deg, rgba(168,151,122,0.24), rgba(168,151,122,0.08)); border-right-color: rgba(168,151,122,0.5); }
+.slot.warm .due { color: var(--ink-dim); }
+
+/* Due now: the estimate says it lands this second. Hot, but still an estimate — no
+   alarm red, that colour belongs to the warning window and stated facts only. */
+.slot.due-now .fill { background: linear-gradient(90deg, color-mix(in srgb, var(--ember-lit) 55%, transparent), color-mix(in srgb, var(--ember) 22%, transparent)); }
+.slot.due-now .due { color: #ffd27a; }
+
+/* Fired: the real cast line landed and the warning window has it — the slot holds
+   its place and says so, instead of vanishing and shoving the rows below it up. */
+.slot.fired .fill { background: linear-gradient(90deg, color-mix(in srgb, var(--alarm) 38%, transparent), transparent); border-right-color: transparent; }
+.slot.fired .due { color: var(--alarm-lit); font-size: 9.5px; letter-spacing: 0.1em; }
+
+/* Lapsed: the pattern broke. The row holds — a slot that vanished and came back is the
+   blinking this design exists to kill — but it shows a dash, never an invented number. */
+.slot.empty .due { color: var(--ink-faint); }
+.slot.empty .spell { color: var(--ink-faint); font-weight: 400; }
+.slot.empty .caster { color: #4a4237; font-style: italic; }
+
+/* Idle: nothing paints at all. The dashed box here marks the space the panel WOULD
+   occupy — on screen there is no box, no frame and no rows, just the game. */
+.gone {
+  width: 296px; height: 82px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  border: 1px dashed #241d17; border-radius: 3px;
+  color: #4a4237; font-size: 11px; font-style: italic; text-align: center;
+}
+.gone .sub2 { color: #3b352c; font-size: 10px; font-style: normal; }
+.placeholder {
+  width: 296px; padding: 8px 12px; text-align: center;
+  background: rgba(16,13,10,0.88); border: 1px dashed var(--ink-faint); border-radius: 3px;
+}
+.placeholder .verb {
+  display: block; color: var(--ember-lit); font-weight: 700;
+  letter-spacing: 0.2em; text-transform: uppercase; font-size: 10px;
+}
+.placeholder .hint { color: var(--ink-dim); font-size: 10.5px; }
+
+/* ═════════════════════════ B · caster sections ══════════════════════════════ */
+.sect { border-bottom: 1px solid var(--edge); }
+.sect:last-child { border-bottom: 0; }
+.sect .shead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 3px 9px 3px;
+  background: color-mix(in srgb, var(--slab) 88%, #2a1f14);
+}
+.sect .shead .name { font-size: 11.5px; font-weight: 700; color: var(--ink); }
+.sect .shead .meta { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+.brow {
+  position: relative; display: flex; align-items: center; justify-content: space-between;
+  height: 24px; padding: 0 9px; overflow: hidden;
+}
+.brow .track { position: absolute; inset: 3px 9px; background: #17130f; border-radius: 2px; }
+.brow .fill2 { position: absolute; inset: 3px auto 3px 9px; background: color-mix(in srgb, var(--ember) 55%, transparent); border-radius: 2px; }
+.brow .lab { position: relative; z-index: 1; font-size: 12px; font-weight: 600; }
+.brow .val { position: relative; z-index: 1; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--ember-lit); }
+.brow.warm .fill2 { background: rgba(168,151,122,0.28); }
+.brow.warm .val { color: var(--ink-dim); }
+
+/* ═══════════════════════════ C · minimal ticker ═════════════════════════════ */
+.ticker { width: 250px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.tick {
+  position: relative; display: flex; align-items: center; justify-content: space-between;
+  height: 22px; padding: 0 8px; overflow: hidden;
+  background: rgba(16,13,10,0.92);
+  border: 1px solid var(--edge); border-radius: 2px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+}
+.tick .fill3 { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--ember) 34%, transparent); }
+.tick .lab { position: relative; z-index: 1; font-size: 11.5px; color: var(--ink); }
+.tick .val { position: relative; z-index: 1; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ember-lit); }
+.tick.lead { height: 30px; }
+.tick.lead .lab { font-size: 13.5px; font-weight: 600; }
+.tick.lead .val { font-size: 15px; }
+.tick.dim .val { color: var(--ink-dim); }
+.tick.dim .fill3 { background: rgba(168,151,122,0.18); }
+
+/* ══════════════════════ today: the alert stack, for contrast ════════════════ */
+.stackdemo { width: 330px; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.chip3 {
+  width: 100%; text-align: center; padding: 5px 12px 6px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--alarm) 14%, var(--slab)) 0%, var(--slab) 70%);
+  border: 1px solid color-mix(in srgb, var(--alarm) 55%, var(--edge)); border-radius: 3px;
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--alarm) 70%, transparent), inset 0 -2px 0 color-mix(in srgb, var(--alarm) 40%, transparent);
+}
+.chip3 .verb { display: block; color: var(--alarm-lit); font-weight: 700; letter-spacing: 0.34em; text-transform: uppercase; font-size: 9.5px; }
+.chip3 .spell { font-size: 19px; font-weight: 700; }
+.chip3 .caster { display: block; color: var(--ink-dim); font-size: 11px; }
+.echipd {
+  display: flex; gap: 8px; padding: 3px 12px; font-size: 12px;
+  background: var(--slab); border: 1px solid var(--edge); border-left: 3px solid var(--alarm); border-radius: 3px;
+}
+.echipd .tag { color: var(--alarm-lit); font-weight: 700; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; }
+.tchipd {
+  position: relative; display: flex; gap: 8px; padding: 3px 12px 5px; font-size: 11px; color: var(--ink-dim);
+  background: var(--slab); border: 1px solid var(--edge); border-radius: 3px; overflow: hidden;
+}
+.tchipd .due { color: var(--ember-lit); font-weight: 700; }
+.tchipd .spell { color: var(--ink); font-weight: 600; }
+.tchipd .drain { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--ember-lit); opacity: 0.8; }
+.ghost { opacity: 0.35; }
+.arrow { color: var(--alarm-lit); font-size: 11px; letter-spacing: 0.1em; }
+
+/* ══════════════════════════════ placement map ═══════════════════════════════ */
+.screen {
+  position: relative; width: 620px; height: 350px; border: 1px solid #26302c; border-radius: 3px;
+  background: linear-gradient(180deg, #141a18, #0a0d0c 60%, #0e100f);
+  overflow: hidden;
+}
+.screen .lbl { position: absolute; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
+.box { position: absolute; border: 1px dashed #4a4237; border-radius: 3px; color: var(--ink-faint);
+       font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; display: flex; align-items: center; justify-content: center; }
+.box.hot { border-color: var(--ember); color: var(--ember-lit); border-style: solid; background: rgba(185,112,42,0.09); }
+.box.alarm { border-color: var(--alarm); color: var(--alarm-lit); background: rgba(213,72,47,0.08); }
+</style>
+</head>
+<body>
+
+<h1>Boss timers — their own window</h1>
+<p class="sub">
+  Three ways to give the learned recast countdowns a home of their own, at 1:1 scale in the
+  shipping palette. All three assume the same underlying change: timers leave the alert
+  stack, get their own draggable window, their own placement and their own toggle.
+</p>
+
+<h2><span class="tag">Today</span> — why it doesn't work</h2>
+<p class="note">
+  Timers sit at the bottom of the alert window's single vertical flow. Every warning that
+  arrives or expires above them <b>moves them</b> (524 displacement events across the live
+  log), and a timer whose cast fires <b>vanishes</b> while its warning is up, then returns
+  (10,525 samples hidden that way; 72 re-arms within a minute; median chip life 14s, with
+  67 of 129 runs under 15 seconds). You cannot read a countdown that keeps moving and blinking.
+</p>
+<div class="row">
+  <div class="cell">
+    <span class="cap">t = 0 · two timers, calm</span>
+    <div class="stackdemo">
+      <div class="tchipd"><span class="due">~6s</span><span class="spell">Superior Healing</span><span>Hoptor Thaggelum</span><i class="drain" style="width:62%"></i></div>
+      <div class="tchipd"><span class="due">~14s</span><span class="spell">Immobilize</span><span>Master Yael</span><i class="drain" style="width:78%"></i></div>
+    </div>
+  </div>
+  <div class="cell">
+    <span class="cap">t = 3s · a warning lands — both rows jump down 64px</span>
+    <div class="stackdemo">
+      <div class="chip3"><span class="verb">Interrupt</span><span class="spell">Immobilize</span><span class="caster">Master Yael</span></div>
+      <div class="echipd"><span class="tag">Mezzed</span><span>Rhale</span></div>
+      <div class="tchipd"><span class="due">~3s</span><span class="spell">Superior Healing</span><span>Hoptor Thaggelum</span><i class="drain" style="width:32%"></i></div>
+      <div class="tchipd ghost"><span class="due">~0s</span><span class="spell">Immobilize</span><span>Master Yael</span><i class="drain" style="width:2%"></i></div>
+      <div class="arrow">↑ this row is gone — promoted into the banner above</div>
+    </div>
+  </div>
+</div>
+
+<h2><span class="tag">A</span> — Buff-window slots <span style="color:var(--ink-dim);font-weight:400;letter-spacing:0;text-transform:none;font-size:11px">(recommended)</span></h2>
+<p class="note">
+  A framed panel with <b>fixed slots</b>, closest to EQ's buff window. A slot is claimed by
+  a (boss, ability) pair the first time it arms and holds that row for the whole fight: when
+  the cast fires the slot says <b>CAST</b> and re-arms in place; when a rhythm retracts the
+  slot dims instead of collapsing. Nothing ever reorders, so a row you learned to glance at
+  stays where you learned it. The row <em>is</em> the bar, the same idea the meter is built on.
+  <b>When the fight ends the panel vanishes</b> — no empty frame, no placeholder rows; the
+  only time it shows empty is while unlocked, because a window with nothing in it cannot be
+  dragged.
+</p>
+<div class="row">
+  <div class="cell">
+    <span class="cap">Live — Nagafen, three learned rhythms</span>
+    <div class="panel">
+      <div class="phead"><span class="title">Boss timers</span><span class="who">Lord Nagafen</span></div>
+      <div class="slot"><i class="fill" style="width:23%"></i><span class="due">~3s</span><span class="names"><span class="spell">Lava Breath</span><span class="caster">Lord Nagafen · 13.0s ±0.8</span></span></div>
+      <div class="slot"><i class="fill" style="width:61%"></i><span class="due">~11s</span><span class="names"><span class="spell">Shadow Vortex</span><span class="caster">Lord Nagafen · 18.0s ±1.4</span></span></div>
+      <div class="slot warm"><i class="fill" style="width:84%"></i><span class="due">~16s</span><span class="names"><span class="spell">Superior Healing</span><span class="caster">Hoptor Thaggelum · from memory</span></span></div>
+    </div>
+  </div>
+  <div class="cell">
+    <span class="cap">The moment it fires — the slot holds</span>
+    <div class="panel">
+      <div class="phead"><span class="title">Boss timers</span><span class="who">Lord Nagafen</span></div>
+      <div class="slot fired"><i class="fill" style="width:100%"></i><span class="due">CAST</span><span class="names"><span class="spell">Lava Breath</span><span class="caster">Lord Nagafen · 13.0s ±0.8</span></span></div>
+      <div class="slot due-now"><i class="fill" style="width:6%"></i><span class="due">~1s</span><span class="names"><span class="spell">Shadow Vortex</span><span class="caster">Lord Nagafen · 18.0s ±1.4</span></span></div>
+      <div class="slot warm"><i class="fill" style="width:36%"></i><span class="due">~7s</span><span class="names"><span class="spell">Superior Healing</span><span class="caster">Hoptor Thaggelum · from memory</span></span></div>
+    </div>
+  </div>
+  <div class="cell">
+    <span class="cap">Lapsed mid-fight — the row still holds</span>
+    <div class="panel">
+      <div class="phead"><span class="title">Boss timers</span><span class="who">Lord Nagafen</span></div>
+      <div class="slot"><i class="fill" style="width:61%"></i><span class="due">~11s</span><span class="names"><span class="spell">Shadow Vortex</span><span class="caster">Lord Nagafen · 18.0s ±1.4</span></span></div>
+      <div class="slot empty"><span class="due">—</span><span class="names"><span class="spell">Lava Breath</span><span class="caster">late · pattern broke, no number claimed</span></span></div>
+    </div>
+  </div>
+  <div class="cell">
+    <span class="cap">Idle — the panel is gone</span>
+    <div class="gone">
+      <span>no fight, no armed rhythm — nothing paints</span>
+      <span class="sub2">the window is still there, and still click-through</span>
+    </div>
+    <span class="cap" style="margin-top:10px">Unlocked — the one time it shows empty</span>
+    <div class="placeholder">
+      <span class="verb">Boss timers</span>
+      <span class="hint">drag to place — timers appear here</span>
+    </div>
+  </div>
+</div>
+
+<h2><span class="tag">B</span> — Caster sections</h2>
+<p class="note">
+  Entity-first, like the boss window: each named mob gets a header and its abilities sit
+  beneath it as bars. Reads well with two bosses up at once and makes "who is this timer
+  for" unmissable — at the cost of a header row per caster, and the panel's height changing
+  as casters engage and die.
+</p>
+<div class="row">
+  <div class="cell">
+    <span class="cap">Two named mobs engaged</span>
+    <div class="panel">
+      <div class="phead"><span class="title">Boss timers</span><span class="who">2 casters</span></div>
+      <div class="sect">
+        <div class="shead"><span class="name">Lord Nagafen</span><span class="meta">learned here</span></div>
+        <div class="brow"><i class="track"></i><i class="fill2" style="width:23%"></i><span class="lab">Lava Breath</span><span class="val">~3s</span></div>
+        <div class="brow"><i class="track"></i><i class="fill2" style="width:61%"></i><span class="lab">Shadow Vortex</span><span class="val">~11s</span></div>
+      </div>
+      <div class="sect">
+        <div class="shead"><span class="name">Hoptor Thaggelum</span><span class="meta">from memory</span></div>
+        <div class="brow warm"><i class="track"></i><i class="fill2" style="width:84%"></i><span class="lab">Superior Healing</span><span class="val">~16s</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="cell">
+    <span class="cap">One mob — and the height it shrinks to</span>
+    <div class="panel">
+      <div class="phead"><span class="title">Boss timers</span><span class="who">1 caster</span></div>
+      <div class="sect">
+        <div class="shead"><span class="name">Quag Maelstrom</span><span class="meta">learned here</span></div>
+        <div class="brow"><i class="track"></i><i class="fill2" style="width:47%"></i><span class="lab">Mana Drain</span><span class="val">~9s</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2><span class="tag">C</span> — Minimal ticker</h2>
+<p class="note">
+  No frame, no header: just bars over the game, the nearest one enlarged as the lead.
+  Cheapest to build and the least screen it can possibly take — but it is invisible when
+  empty (nothing to drag), it drops the caster name at a glance, and being sorted by
+  what's next it reorders exactly as often as today's version does.
+</p>
+<div class="row">
+  <div class="cell">
+    <span class="cap">Live</span>
+    <div class="ticker">
+      <div class="tick lead"><i class="fill3" style="width:23%"></i><span class="lab">Lava Breath</span><span class="val">~3s</span></div>
+      <div class="tick"><i class="fill3" style="width:61%"></i><span class="lab">Shadow Vortex</span><span class="val">~11s</span></div>
+      <div class="tick dim"><i class="fill3" style="width:84%"></i><span class="lab">Superior Healing</span><span class="val">~16s</span></div>
+    </div>
+  </div>
+</div>
+
+<h2>Where it sits</h2>
+<p class="note">
+  The alert window owns top-centre because a banner has to cross your eyeline. A timer panel
+  is a <b>fixture you consult</b>, not a thing that must interrupt you — so it defaults beside
+  the meter, roughly where EQ players keep the buff window, and can be dragged anywhere.
+</p>
+<div class="screen">
+  <div class="box alarm" style="left:180px; top:10px; width:260px; height:64px;">Alerts — banners, top centre</div>
+  <div class="box hot" style="left:430px; top:96px; width:170px; height:112px;">Boss timers (new)</div>
+  <div class="box" style="left:430px; top:222px; width:170px; height:96px;">Meter</div>
+  <div class="lbl" style="left:16px; bottom:12px;">Game view</div>
+</div>
+
+</body>
+</html>

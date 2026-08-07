@@ -86,6 +86,7 @@
       <p class="hint no-top">
         A floating window, top-center of the screen — unlock the overlay to move it.
         Each of these is independent; the window opens for whichever are on.
+        Boss timers are no longer among them: they have a window of their own, below.
       </p>
       <div class="row checkbox">
         <input id="cast-alerts" type="checkbox" />
@@ -111,6 +112,18 @@
           <span class="unit">who is stunned, mezzed or charmed right now</span>
         </label>
       </div>
+      <p class="hint">
+        With all three off the window is closed entirely, so the in-game
+        <code>pet Name = Owner</code> command has nowhere to answer you — it still works,
+        it just cannot say so. <code>Control+Shift+A</code> mutes the lot for a pull
+        without losing these choices.
+      </p>
+
+      <h2>Boss timers</h2>
+      <p class="hint no-top">
+        A second floating window, separate from the alerts and placed separately — drag
+        it wherever you keep the buff window. Unlock the overlay to move it.
+      </p>
       <div class="row checkbox">
         <input id="cast-timers" type="checkbox" />
         <label for="cast-timers">Show spell timers for named bosses
@@ -118,10 +131,11 @@
         </label>
       </div>
       <p class="hint">
-        With all four off the window is closed entirely, so the in-game
-        <code>pet Name = Owner</code> command has nowhere to answer you — it still works,
-        it just cannot say so. <code>Control+Shift+A</code> mutes the lot for a pull
-        without losing these choices.
+        A boss ability keeps its row for the whole fight: when the spell fires the row
+        says <code>CAST</code> and re-arms in place, and when a rhythm stops holding up
+        it shows a dash rather than an invented number. Nothing reorders, so a row stays
+        where you learned to look for it. <code>Control+Shift+A</code> silences this
+        panel too.
       </p>
 
       <h2>Named pets</h2>

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>EQL Boss Timers</title>
+  <link rel="stylesheet" href="timers.css" />
+</head>
+<body data-locked="true">
+  <!-- The window is an invisible, generously-sized box; only this panel paints, and
+       only while a fight has armed something. It is TOP-anchored so a slot arriving
+       grows the panel downward and never moves the rows already on screen. -->
+  <div id="panel" hidden>
+    <div class="phead">
+      <span class="title">Boss timers</span>
+      <!-- Who the panel is about: the caster when there is only one, a count when
+           there are several. Fixed height either way — see timers.css. -->
+      <span class="who" id="who"></span>
+    </div>
+    <div id="slots"></div>
+  </div>
+
+  <!-- Only visible while unlocked. The panel vanishes between fights by design, and a
+       window with nothing in it cannot be dragged anywhere. -->
+  <div id="placeholder">
+    <span class="verb">Boss timers</span>
+    <span class="hint">drag to place — timers appear here</span>
+  </div>
+
+  <script type="module" src="timers.js"></script>
+</body>
+</html>

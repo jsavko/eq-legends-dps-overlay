@@ -7,15 +7,19 @@
  * content never changes for a given id (a re-cast refreshes the same id's clock in
  * the parser), so reuse costs nothing.
  *
- * Four independent categories share this window — interrupt warnings, summon banners,
- * crowd control and boss timers — each gated on its own config key. The snapshot always
- * carries all four (the parser knows nothing about settings); deciding what to draw is
- * this file's job, and main decides whether the window exists at all from the same keys.
+ * Three independent categories share this window — interrupt warnings, summon banners
+ * and crowd control — each gated on its own config key. The snapshot always carries all
+ * three (the parser knows nothing about settings); deciding what to draw is this file's
+ * job, and main decides whether the window exists at all from the same keys.
+ *
+ * The learned boss timers used to live here too, at the bottom of this same vertical
+ * flow, and that is exactly why they no longer do: every banner that arrived or expired
+ * shoved them down the screen, and a timer whose cast fired vanished into the banner
+ * above it. They have their own window now — see src/renderer/timers/.
  */
 
 const stack = document.getElementById('stack');
 const effectsList = document.getElementById('effects');
-const timersList = document.getElementById('timers');
 const noticesList = document.getElementById('notices');
 
 let cfg = null;
@@ -23,8 +27,6 @@ let cfg = null;
 const chips = new Map();
 /** @type {Map<string, HTMLElement>} member CC state chips by who|effect */
 const effectChips = new Map();
-/** @type {Map<string, {el: HTMLElement, due: HTMLElement, drain: HTMLElement}>} timer chips by caster|ability */
-const timerChips = new Map();
 /** @type {Map<number, HTMLElement>} mapping-command acknowledgements by notice id */
 const noticeChips = new Map();
 /** Ids present in the previous push — how a NEW tier-3 warning is told from an old one. */
@@ -50,10 +52,8 @@ async function init() {
     document.body.dataset.locked = String(locked);
   });
   window.api.onSnapshot((snapshot) => {
-    const warnings = snapshot.hostileCasts ?? [];
-    render(warnings);
+    render(snapshot.hostileCasts ?? []);
     renderEffects(snapshot.memberEffects ?? []);
-    renderTimers(snapshot.castTimers ?? [], warnings);
     renderNotices(snapshot.notices ?? []);
   });
 }
@@ -69,7 +69,6 @@ function applyConfig(config) {
   if (!on('castAlerts')) dropChips((el) => el.dataset.category !== 'summon');
   if (!on('summonAlerts')) dropChips((el) => el.dataset.category === 'summon');
   if (!on('ccAlerts')) clearChips(effectChips, effectsList);
-  if (!on('castTimers')) clearChips(timerChips, timersList);
 }
 
 /**
@@ -87,7 +86,7 @@ function on(key) {
  *
  * Every category is gated twice — here when its switch goes off, and at render time
  * when a snapshot arrives — so the teardown lives in one place rather than being
- * re-typed per list, where a fifth category could get it subtly wrong.
+ * re-typed per list, where the next category added could get it subtly wrong.
  */
 function clearChips(map, list) {
   if (!map.size) return;
@@ -248,72 +247,6 @@ function buildEffectChip(e) {
 
   li.append(tag, who);
   return li;
-}
-
-// ---------------------------------------------------------------------- timers
-
-/**
- * The learned-rhythm countdowns, below the warnings. A timer whose cast is already
- * LIVE as a warning hides — that is the promotion: the estimate steps aside the
- * moment the log states the fact. Chips are reused by caster|spell so the drain
- * bar's width transition carries smoothly across pushes.
- */
-function renderTimers(timers, warnings) {
-  if (!on('castTimers')) {
-    clearChips(timerChips, timersList);
-    return;
-  }
-
-  const live = new Set(warnings.map((w) => `${w.caster}|${w.ability}`));
-  const show = timers.filter((t) => !live.has(`${t.caster}|${t.ability}`));
-  const keys = new Set(show.map((t) => `${t.caster}|${t.ability}`));
-
-  for (const [k, chip] of timerChips) {
-    if (!keys.has(k)) {
-      chip.el.remove();
-      timerChips.delete(k);
-    }
-  }
-
-  show.forEach((t, index) => {
-    const k = `${t.caster}|${t.ability}`;
-    let chip = timerChips.get(k);
-    if (!chip) {
-      chip = buildTimerChip(t);
-      timerChips.set(k, chip);
-    }
-    if (t.warm) chip.el.dataset.warm = '';
-    else delete chip.el.dataset.warm;   // this fight's own gaps just took over
-
-    chip.due.textContent = `~${Math.ceil(t.dueMs / 1000)}s`;
-    chip.drain.style.width = `${Math.max(0, Math.min(100, (t.dueMs / t.intervalMs) * 100))}%`;
-
-    if (timersList.children[index] !== chip.el) {
-      timersList.insertBefore(chip.el, timersList.children[index] ?? null);
-    }
-  });
-}
-
-function buildTimerChip(t) {
-  const li = document.createElement('li');
-  li.className = 'tchip';
-
-  const due = document.createElement('span');
-  due.className = 'due';
-
-  const spell = document.createElement('span');
-  spell.className = 'spell';
-  spell.textContent = t.ability;
-
-  const caster = document.createElement('span');
-  caster.className = 'caster';
-  caster.textContent = t.caster;
-
-  const drain = document.createElement('i');
-  drain.className = 'drain';
-
-  li.append(due, spell, caster, drain);
-  return { el: li, due, drain };
 }
 
 // -------------------------------------------------------------------- notices
