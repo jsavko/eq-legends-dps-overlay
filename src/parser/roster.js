@@ -413,8 +413,15 @@ export class Roster {
       const owner = event.owner === 'You' ? this.selfName : event.owner;
       if (event.pet && owner) {
         const key = stripArticle(String(event.pet).trim());
-        this.petOwners.set(key, owner);
-        this.implicit.delete(key);
+        // A backtick pet needs no table: `Rhale`s warder` resolves to Rhale by string
+        // split before any lookup happens. Storing it anyway did no harm to the numbers
+        // but leaked into the saved mapping — the next in-game command persists this
+        // whole table — and so into the settings box, where a line the player neither
+        // wrote nor needs reads as something they are expected to maintain.
+        if (!key.includes('`')) {
+          this.petOwners.set(key, owner);
+          this.implicit.delete(key);
+        }
       }
       return;
     }

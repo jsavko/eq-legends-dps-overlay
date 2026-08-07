@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveEntity, looksLikePlayerName, stripArticle, isSelfToken } from '../src/parser/entities.js';
+import { resolveEntity, looksLikePlayerName, nearestName, stripArticle, isSelfToken } from '../src/parser/entities.js';
 
 test('normalizes every spelling of the logging character', () => {
   for (const token of ['You', 'YOU', 'you', 'Yourself']) {
@@ -53,4 +53,27 @@ test('isSelfToken', () => {
   assert.equal(isSelfToken('YOU'), true);
   assert.equal(isSelfToken('  you '), true);
   assert.equal(isSelfToken('Rhale'), false);
+});
+
+const GROUP = ['Rhale', 'Kadomony', 'Khanvikt', 'Emalina', 'Venun'];
+
+test('nearestName catches the slips that produce a phantom player', () => {
+  // The one from the live log, and its neighbours: a swapped letter, a dropped one,
+  // an extra one, and the wrong case.
+  assert.equal(nearestName('Kodomony', GROUP), 'Kadomony');
+  assert.equal(nearestName('Kadomny', GROUP), 'Kadomony');
+  assert.equal(nearestName('Kadomonyy', GROUP), 'Kadomony');
+  assert.equal(nearestName('kadomony', GROUP), 'Kadomony');
+  assert.equal(nearestName('Khanvict', GROUP), 'Khanvikt');
+});
+
+test('nearestName stays quiet unless the answer is obvious', () => {
+  // Far from everyone: a real player who simply has not acted yet must not be
+  // "corrected" into somebody else.
+  assert.equal(nearestName('Zarann', GROUP), null);
+  // Short names are all within two edits of each other, so no suggestion is honest.
+  assert.equal(nearestName('Gan', ['Gann', 'Garn', 'Gbak']), null);
+  // A tie is a coin flip, and offering one invites accepting the wrong half.
+  assert.equal(nearestName('Garn', ['Gaern', 'Gairn']), null);
+  assert.equal(nearestName('Kadomony', []), null);
 });

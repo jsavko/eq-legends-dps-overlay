@@ -77,3 +77,66 @@ export function looksLikePlayerName(name) {
   if (trimmed.includes('`')) return false;
   return /^[A-Z][a-z]+$/.test(trimmed);
 }
+
+/** Edit distance, capped: anything past `max` is reported as `max + 1` and stops early. */
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  // Two rolling rows rather than the full matrix — these are EQ names, but the shape
+  // is the same either way and this keeps the allocation to nothing.
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost);
+      if (row[j] < best) best = row[j];
+    }
+    if (best > max) return max + 1;   // every path through this row is already too long
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+/**
+ * The one name in `candidates` that `typed` was probably meant to be, or null.
+ *
+ * Exists because a mistyped name in the pet-mapping command is invisible: map a pet to
+ * "Kodomony" when the player is "Kadomony" and the overlay dutifully builds a second,
+ * phantom row — one letter of difference, two rows where there is one person. The log
+ * cannot catch that, because a name it has never seen is exactly what a not-yet-active
+ * group member also looks like. Comparing against who is actually here can.
+ *
+ * Case is ignored on the way in and the candidate's own spelling is what comes back:
+ * EQ capitalizes every name, so a lowercase `kadomony` is a typing slip and nothing else.
+ *
+ * Deliberately returns null when two candidates tie at the same distance. A suggestion
+ * is only worth making when it is obvious — offering a coin flip would invite the player
+ * to accept the wrong one, which is the very failure this is here to prevent.
+ */
+export function nearestName(typed, candidates, { maxDistance = 2 } = {}) {
+  const needle = String(typed).trim().toLowerCase();
+  // Short names are all within two edits of each other, so a suggestion there is noise.
+  if (needle.length < 4) return null;
+
+  let best = null;
+  let bestDistance = maxDistance + 1;
+  let tied = false;
+
+  for (const candidate of candidates) {
+    const other = String(candidate).trim();
+    if (!other || other.toLowerCase() === needle) return other;   // exact but for case
+
+    const d = editDistance(needle, other.toLowerCase(), maxDistance);
+    if (d > maxDistance) continue;
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = other;
+      tied = false;
+    } else if (d === bestDistance) {
+      tied = true;
+    }
+  }
+
+  return tied ? null : best;
+}

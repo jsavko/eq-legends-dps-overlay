@@ -1432,8 +1432,55 @@ test('the mapping command works on every self chat form and acknowledges', () =>
     const p = makeParser();
     p.feed(`${D(10, 6, 0)} ${line}`);
     assert.equal(p.roster.ownerOf('Kibektik'), 'Khanvikt', line);
-    assert.equal(p.snapshot().notices[0].text, 'Kibektik = Khanvikt');
+    // Khanvikt has not acted in this test's log, and the acknowledgement says so
+    // rather than implying the overlay recognised him.
+    assert.equal(p.snapshot().notices[0].text, 'Kibektik = Khanvikt (not seen yet)');
   }
+});
+
+test('a one-letter slip in the owner is refused with the name that was meant', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 5, 0)} Kadomony has joined the group.`);
+  p.feed(`${D(10, 6, 0)} You tell your party, 'pets Jaber = Kodomony'`);
+
+  // Straight from the live log: Kodomony appeared exactly twice in 79 MB, both times
+  // as this command. Accepting it grew a phantom row next to the real Kadomony.
+  assert.equal(p.roster.ownerOf('Jaber'), null);
+  assert.equal(p.snapshot().notices.at(-1).text, 'No Kodomony here — did you mean Kadomony?');
+
+  p.feed(`${D(10, 6, 5)} You tell your party, 'pet Jaber = Kadomony'`);
+  assert.equal(p.roster.ownerOf('Jaber'), 'Kadomony');
+  assert.equal(p.snapshot().notices.at(-1).text, 'Jaber = Kadomony');
+});
+
+test('capitalization is fixed rather than refused', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 5, 0)} Kadomony has joined the group.`);
+  p.feed(`${D(10, 6, 0)} You say, 'pet Jaber = kadomony'`);
+  // EQ capitalizes every name, so lowercase is a typing slip and not another person.
+  assert.equal(p.roster.ownerOf('Jaber'), 'Kadomony');
+  assert.equal(p.snapshot().notices.at(-1).text, 'Jaber = Kadomony');
+});
+
+test('an owner unlike anyone here is honoured, since they may not have acted yet', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 5, 0)} Kadomony has joined the group.`);
+  p.feed(`${D(10, 6, 0)} You say, 'pet Jaber = Zarann'`);
+  assert.equal(p.roster.ownerOf('Jaber'), 'Zarann');
+  assert.equal(p.snapshot().notices.at(-1).text, 'Jaber = Zarann (not seen yet)');
+});
+
+test('the backtick pet the Master line teaches is never written to the saved mapping', () => {
+  const saved = [];
+  const p = makeParser({ onPetOwnersChanged: (m) => saved.push(m) });
+  p.feed(`${D(10, 6, 0)} Rhale\`s warder told you, 'Attacking a froglok shin knight Master.'`);
+  p.feed(`${D(10, 6, 1)} You say, 'pet Kibektik = Khanvikt'`);
+
+  // It resolves by string split long before any table is consulted, so storing it only
+  // put a line in the player's settings box that they never wrote and cannot need.
+  assert.deepEqual(saved.at(-1), { Kibektik: 'Khanvikt' });
+  p.feed(`${D(10, 6, 2)} Rhale\`s warder crushes a froglok shin knight for 40 points of damage.`);
+  assert.equal(p.snapshot().rows[0].name, 'Rhale');
 });
 
 test('a third party cannot reconfigure the overlay by typing the magic words', () => {
@@ -1445,10 +1492,50 @@ test('a third party cannot reconfigure the overlay by typing the magic words', (
   assert.equal(p.snapshot().notices.length, 0);
 });
 
-test('malformed commands neither throw nor write anything', () => {
+test('the mapping command forgives the ways a person actually types it', () => {
+  // Every one of these used to fall through to the chat rule and write nothing at all.
+  // The plural is the one that got reported: the setting is called "Named pets", so
+  // "pets Jonarn = Khanvikt" is the natural thing to type.
+  for (const payload of [
+    'pets Kibektik = Khanvikt',
+    'Pet Kibektik = Khanvikt',
+    'Pets Kibektik = Khanvikt',
+    'pet  Kibektik = Khanvikt',
+    'pet Kibektik = Khanvikt ',
+  ]) {
+    const p = makeParser();
+    p.feed(`${D(10, 6, 0)} You tell your party, '${payload}'`);
+    assert.equal(p.roster.ownerOf('Kibektik'), 'Khanvikt', payload);
+  }
+
   const p = makeParser();
-  for (const payload of ['pet Kibektik =', 'pet = Khanvikt', 'pet needs heals', 'pet 1 = 2']) {
+  p.feed(`${D(10, 6, 0)} You say, 'pet Kibektik = Khanvikt'`);
+  p.feed(`${D(10, 6, 1)} You say, 'pets ?'`);
+  assert.equal(p.snapshot().notices.at(-1).text, 'Pets: Kibektik = Khanvikt');
+});
+
+test('a malformed command writes nothing but says so', () => {
+  for (const payload of ['pet Kibektik =', 'pet = Khanvikt', 'pet 1 = 2', 'pet kibektik = 4']) {
+    const p = makeParser();
     p.feed(`${D(10, 6, 0)} You say, '${payload}'`);
+    assert.equal(p.roster.petOwners.size, 0, payload);
+    // Silence was the actual bug: nothing changed on screen and nothing said why, so
+    // a typo was indistinguishable from a broken feature.
+    assert.equal(p.snapshot().notices.at(-1)?.text, 'Pet command: pet <Pet> = <Owner>', payload);
+  }
+});
+
+test('talking about pets is not a command and stays silent', () => {
+  const p = makeParser();
+  // Straight from the live log. None of it carries an equals sign, which is exactly
+  // what keeps the "I could not read that" answer off ordinary conversation.
+  for (const payload of [
+    'pet needs heals',
+    "pet heals don't trigger divine invo which i think is dumb lol",
+    'pet weapon - jk lol',
+    'pets are expensive',
+  ]) {
+    p.feed(`${D(10, 6, 0)} You tell your raid, '${payload}'`);
   }
   assert.equal(p.roster.petOwners.size, 0);
   assert.equal(p.snapshot().notices.length, 0);

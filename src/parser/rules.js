@@ -134,6 +134,24 @@ const SELF_CHANNEL =
   'You (?:say|tell your party|tell your raid|say to your guild|tell [A-Za-z]+\\d*:\\d+)';
 
 /**
+ * The command keyword, spelled the several ways a person actually types it.
+ *
+ * The command is typed blind — the log is the only place it lands, and a near miss
+ * writes nothing and says nothing, so the player is left staring at an unchanged
+ * overlay with no idea whether the overlay disagreed or never heard them. That is
+ * precisely what happened in the live log: `pets Jonarn = Khanvikt` was typed into
+ * party chat and silently ignored because the rule only accepted the singular. The
+ * plural is the natural way to say it (the setting is called "Named pets"), so it is
+ * the rule that was wrong. Capitalization gets the same treatment for the same reason.
+ *
+ * Loosening the keyword costs nothing in safety: what keeps ordinary chatter out is
+ * the anchor to the ENTIRE quoted message plus letters-only names, neither of which
+ * moves here. "pets are expensive" still cannot match — it has no `=` and its words
+ * have spaces.
+ */
+const PET_CMD = '[Pp]ets?';
+
+/**
  * @typedef {Object} LogEvent
  * @property {string} kind         event discriminator
  * @property {string} [attacker]   raw attacker name
@@ -203,23 +221,48 @@ export const RULES = [
     // tied to one chat command. Must precede the chat rules, which would swallow it —
     // the same placement precedent as pet-reports-to-master and summon-say.
     id: 'pet-command-list',
-    re: new RegExp('^' + SELF_CHANNEL + ", 'pet \\?'$"),
+    re: new RegExp('^' + SELF_CHANNEL + ", '" + PET_CMD + " *\\? *'$"),
     make: () => ({ kind: 'pet-command', action: 'list' }),
   },
   {
     // (confirmed forms) "You tell your party, 'pet Kibektik = Khanvikt'"
     //                   "You say, 'pet Kibektik = none'"
+    //                   "You tell your party, 'pets Jonarn = Khanvikt'"
     //
     // Anchored to the ENTIRE quoted message, not a substring, so chatter that merely
     // contains the words is ignored — "pet needs heals" cannot match. No `eqlo` prefix:
     // the anchor plus the self form is what provides safety, and a prefix would only
     // make the command harder to type. Names are letters only, which is what EQ allows,
     // so a malformed command falls through to the chat rule and writes nothing.
+    //
+    // Whitespace is forgiving on every seam a typist can get wrong — a doubled space
+    // after the keyword, a stray trailing space before the closing quote — because none
+    // of it changes what was meant and all of it used to mean silence.
     id: 'pet-command-set',
-    re: new RegExp('^' + SELF_CHANNEL + ", 'pet ([A-Za-z]{2,32}) *= *([A-Za-z]{2,32})'$"),
+    re: new RegExp(
+      '^' + SELF_CHANNEL + ", '" + PET_CMD + " +([A-Za-z]{2,32}) *= *([A-Za-z]{2,32}) *'$"
+    ),
     make: (m) => (/^none$/i.test(m[2])
       ? { kind: 'pet-command', action: 'clear', pet: m[1] }
       : { kind: 'pet-command', action: 'set', pet: m[1], owner: m[2] }),
+  },
+  {
+    // Last of the three, so a well-formed command never reaches it: whatever lands here
+    // opened with the keyword, contains an `=`, and still failed to parse.
+    //
+    // Its whole job is to break the silence. The command is typed into the game with no
+    // completion, no echo and no error, so before this rule the only difference between
+    // "the overlay disagreed" and "the overlay never heard you" was an overlay that did
+    // not change — and a player who reasonably concludes the feature is broken. Now a
+    // near miss says so and reprints the syntax.
+    //
+    // The `=` is what keeps this off ordinary conversation: talking ABOUT pets is common
+    // ("pet weapon - jk lol", "pet heals don't trigger divine invo"), and none of it
+    // carries an equals sign. The self-channel anchor still applies, so at worst the
+    // player sees one stray toast about something they themselves typed.
+    id: 'pet-command-malformed',
+    re: new RegExp('^' + SELF_CHANNEL + ", '" + PET_CMD + "\\b[^']*=[^']*'$"),
+    make: () => ({ kind: 'pet-command', action: 'malformed' }),
   },
 
   // ---------------------------------------------------------------- chat next

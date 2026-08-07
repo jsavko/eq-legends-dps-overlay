@@ -11,7 +11,7 @@
 
 import { parseTimestamp } from './timestamp.js';
 import { matchRule, spellStem } from './rules.js';
-import { resolveEntity, looksLikePlayerName, stripArticle } from './entities.js';
+import { resolveEntity, looksLikePlayerName, nearestName, stripArticle } from './entities.js';
 import { Roster, parseLogFilename } from './roster.js';
 import { Encounter, DEFAULTS } from './encounter.js';
 import { classify, UNKNOWN_GROUP } from './spellwatch.js';
@@ -724,8 +724,16 @@ export class LogParser {
       return;
     }
 
+    // Say so rather than doing nothing. There is no echo on this channel, so silence
+    // is indistinguishable from the feature being broken — which is exactly how it was
+    // reported after `pets Jonarn = Khanvikt` fell through on the plural. Note this only
+    // ever answers something that already looked like an attempt at the command: the
+    // rule required the keyword AND an equals sign to get here, so ordinary talk about
+    // pets still passes through as chat and says nothing.
+    if (event.action === 'malformed') return this.notePetSyntax(event.ts);
+
     const pet = stripArticle(String(event.pet ?? '').trim());
-    if (!looksLikePlayerName(pet)) return;   // malformed: acknowledge nothing, write nothing
+    if (!looksLikePlayerName(pet)) return this.notePetSyntax(event.ts);
 
     if (event.action === 'clear') {
       const had = this.roster.petOwners.delete(pet) ||
@@ -739,15 +747,70 @@ export class LogParser {
       return;
     }
 
-    const owner = String(event.owner ?? '').trim();
-    if (!looksLikePlayerName(owner) || owner === pet) return;
+    const typed = String(event.owner ?? '').trim();
+    if (!/^[A-Za-z]{2,32}$/.test(typed) || typed.toLowerCase() === pet.toLowerCase()) {
+      return this.notePetSyntax(event.ts);
+    }
+
+    // The owner is the half a typo actually damages. Get the pet's name wrong and the
+    // mapping just lies there matching nothing; get the OWNER wrong and the pet's damage
+    // is dutifully folded into a person who does not exist, so the overlay grows a
+    // phantom row beside the real one. That is what `pets Jaber = Kodomony` did — one
+    // letter away from Kadomony, typed twice, acknowledged both times as a success.
+    const owner = this.matchFriendly(typed);
+    if (!owner) {
+      const near = nearestName(typed, this.friendlyNames());
+      // Refuse rather than auto-correct. A near miss is nearly always a typo, but
+      // "nearly" is not the standard this overlay holds itself to anywhere else, and
+      // retyping one line costs less than silently scoring a pet onto the wrong player.
+      if (near) return this.noteNotice(`No ${typed} here — did you mean ${near}?`, event.ts);
+      if (!looksLikePlayerName(typed)) return this.notePetSyntax(event.ts);
+    }
+
+    const name = owner ?? typed;
     this.roster.notPets.delete(pet);
     this.roster.learnedPetOwners.delete(pet);
-    this.roster.petOwners.set(pet, owner);
+    this.roster.petOwners.set(pet, name);
     this.roster.implicit.delete(pet);
-    this.noteNotice(`${pet} = ${owner}`, event.ts);
+    // A name nobody here answers to is honoured — the owner may simply not have acted
+    // yet — but never silently: said plainly, it is a typo the player can still catch.
+    this.noteNotice(owner ? `${pet} = ${name}` : `${pet} = ${name} (not seen yet)`, event.ts);
     this.emitPetOwners();
     this.revision++;
+  }
+
+  /**
+   * The names of everyone currently fighting alongside us, pets excluded.
+   *
+   * Used only to sanity-check a name the player typed, never to attribute damage, so it
+   * pools every notion of "one of us" the roster holds rather than picking the strictest.
+   * Anything already owned by somebody is dropped: a pet is not a candidate to own a pet.
+   */
+  friendlyNames() {
+    const out = new Set([this.selfName, ...this.roster.members(false), ...this.roster.knownPlayers]);
+    for (const name of out) {
+      if (this.roster.ownerOf(name)) out.delete(name);
+    }
+    return [...out];
+  }
+
+  /** @returns {string|null} the friendly this typed name IS, fixing capitalization only */
+  matchFriendly(typed) {
+    if (this.roster.hasPlayerProof(typed) || this.roster.includes(typed, false)) return typed;
+    const lower = typed.toLowerCase();
+    return this.friendlyNames().find((n) => n.toLowerCase() === lower) ?? null;
+  }
+
+  /**
+   * Reprint the syntax after a command we heard but could not read.
+   *
+   * Deliberately the same line for every kind of near miss rather than a diagnosis per
+   * failure: the player does not need to know WHICH of the two names offended the name
+   * rules, only what a correct line looks like, and one sentence they can copy is worth
+   * more than a precise complaint they then have to translate.
+   */
+  notePetSyntax(ts) {
+    this.noteNotice('Pet command: pet <Pet> = <Owner>', ts);
   }
 
   /**
