@@ -14,7 +14,7 @@ import { matchRule, spellStem } from './rules.js';
 import { resolveEntity, looksLikePlayerName, stripArticle } from './entities.js';
 import { Roster, parseLogFilename } from './roster.js';
 import { Encounter, DEFAULTS } from './encounter.js';
-import { classify } from './spellwatch.js';
+import { classify, UNKNOWN_GROUP } from './spellwatch.js';
 import { RhythmTracker } from './rhythm.js';
 
 /** Row name used when damage cannot be attributed to anyone (see attributeNonMelee). */
@@ -569,6 +569,13 @@ export class LogParser {
         this.rhythms.noteLanded(attacker.display, event.ability, event.ts);
       }
 
+      // The spell landed, so the cast it was warning about is over. Spells only: a
+      // melee swing carries the ability "Hit", which keys no warning and must never
+      // be allowed to clear one.
+      if (event.source === 'spell') {
+        this.resolveHostileCast(attacker.display, event.ability);
+      }
+
       // An NPC hitting us means a fight is on — and the incoming side is scored too:
       // the victim's row records who hit them and with what, which is the entire
       // "what is killing me" view. addDamageTaken also keeps the encounter clock
@@ -951,6 +958,11 @@ export class LogParser {
       ability: event.ability,
       category: cls?.category ?? null,
       tier: cls?.tier ?? 0,
+      // Which of the player's six switches decides whether this draws. An unlisted
+      // cast lands in the "unrecognized" group rather than in no group at all — a
+      // warning with nothing to gate it on would be ungovernable by settings, and the
+      // parser must not be the thing deciding what the player wants to see.
+      group: cls?.group ?? UNKNOWN_GROUP,
       ts: event.ts,
     });
     this.revision++;
@@ -999,6 +1011,10 @@ export class LogParser {
       ability: null,
       category: 'summon',
       tier: 3,
+      // Summons keep their own switch (`summonAlerts`) rather than joining the six:
+      // they announce a fact that already happened in a banner shape of their own,
+      // and they had a switch before the groups existed.
+      group: 'summon',
       victim,
       ts: event.ts,
       ttlMs: SUMMON_TTL_MS,
@@ -1053,8 +1069,44 @@ export class LogParser {
     const target = this.resolve(event.target);
     if (!this.isFriendly(target.name)) return;
     if (this.isFriendly(attacker.name)) return;
+
+    // A resist is a resolution too — the volley fired and we shrugged it off, so the
+    // warning has nothing left to warn about. Above the named-caster guard below,
+    // which exists only to keep the rhythm tracker from learning generic trash.
+    this.resolveHostileCast(attacker.display, event.ability);
+
     if (stripArticle(event.attacker) !== String(event.attacker).trim()) return;
     this.rhythms.noteLanded(attacker.display, event.ability, event.ts);
+  }
+
+  /**
+   * A cast RESOLVED — its spell landed or was resisted — so its warning is spent.
+   *
+   * The third resolution alongside the interrupt confirmation and the caster's death,
+   * and the one that does most of the work: measured over the live log, 3,857 warnings
+   * had their spell resolve while the chip was still up, a median of one second in,
+   * and every one of them then sat out the rest of a six-second TTL. That made 75% of
+   * their screen time a cast that had already happened — which is precisely how a
+   * warning window teaches the player to stop reading it. After this, a chip on screen
+   * means the cast is still in flight and can still be stopped.
+   *
+   * Only the named spell clears, unlike the interrupt path which clears every warning
+   * from that caster: an interrupt line cannot say WHICH same-named mob was stopped,
+   * but a damage line names the spell that landed, so there is no ambiguity to be
+   * generous about.
+   *
+   * NPC heals print no landing line at all — the log never says a mob healed itself
+   * except for the spells that do it visibly — so this never shortens a heal banner.
+   * That is correct rather than an oversight: an uninterrupted heal has no observable
+   * end, and the TTL is the only honest way to retire it.
+   */
+  resolveHostileCast(casterDisplay, ability) {
+    if (!ability) return;
+    const before = this.hostileCasts.length;
+    this.hostileCasts = this.hostileCasts.filter(
+      (c) => c.caster !== casterDisplay || c.ability !== ability || c.category === 'summon',
+    );
+    if (this.hostileCasts.length !== before) this.revision++;
   }
 
   /** Clear warnings from a caster who is now dead (a corpse finishes no casts). */
@@ -1396,6 +1448,7 @@ export class LogParser {
         ability: c.ability,
         category: c.category,
         tier: c.tier,
+        group: c.group ?? UNKNOWN_GROUP,
         victim: c.victim ?? null,
         remainingMs: Math.min(ttl, Math.max(0, ttl - (now - c.ts))),
       };

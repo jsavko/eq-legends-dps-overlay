@@ -21,6 +21,7 @@ import { LogParser } from '../parser/index.js';
 import { Tailer, listLogs } from './tailer.js';
 import {
   ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, alertsEnabled, timersEnabled,
+  ALERT_PRESETS, warnKeyFor, presetOf,
 } from './config.js';
 import { EncounterStore, RECORD_VERSION, storeKey } from './history.js';
 import { RhythmStore } from './rhythms.js';
@@ -420,6 +421,21 @@ function createTray() {
   });
 }
 
+/** The presets and the six groups, in menu order, with the wording the tray shows. */
+const WARN_PRESET_LABELS = [
+  ['essential', 'Essential — heals and hard crowd control'],
+  ['balanced', 'Balanced — and roots, snares, stuns'],
+  ['everything', 'Everything the log names'],
+];
+const WARN_GROUP_LABELS = [
+  ['heals', 'Heals & gates'],
+  ['control', 'Mez, charm & fear'],
+  ['bigHits', 'Big hits'],
+  ['locks', 'Roots, snares & stuns'],
+  ['routine', 'Routine nukes & lifetaps'],
+  ['unknown', 'Unrecognized casts'],
+];
+
 /**
  * One tray checkbox for one boolean config key.
  *
@@ -492,6 +508,27 @@ function refreshTrayMenu() {
         },
         { type: 'separator' },
         alertToggle('Interrupt warnings', 'castAlerts'),
+        {
+          // Which casts warn, one level down: the presets are the every-pull control
+          // ("quieten this down"), the six groups underneath are the ones you set once.
+          // Both live here rather than only in settings because the moment you want
+          // them is mid-raid, with the game fullscreen in front of you.
+          label: 'Warn about',
+          enabled: config.get('castAlerts') !== false,
+          submenu: [
+            ...WARN_PRESET_LABELS.map(([name, label]) => ({
+              label,
+              // Checkbox rather than radio: "Custom" is a state the player lands in by
+              // ticking a group below, not an option they pick, and a radio group would
+              // have to invent a row for it or silently light nothing.
+              type: 'checkbox',
+              checked: presetOf(config.all) === name,
+              click: () => setAlertOption({ ...ALERT_PRESETS[name] }),
+            })),
+            { type: 'separator' },
+            ...WARN_GROUP_LABELS.map(([group, label]) => alertToggle(label, warnKeyFor(group))),
+          ],
+        },
         alertToggle('Summon announcements', 'summonAlerts'),
         alertToggle('Crowd control on the group', 'ccAlerts'),
         {

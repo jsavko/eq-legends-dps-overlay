@@ -52,6 +52,28 @@ export const DEFAULTS = {
    */
   /** Interrupt/cast warnings for enemy casts. NOT the window: see alertsEnabled(). */
   castAlerts: true,
+
+  /**
+   * WHICH enemy casts warn — the six group switches under `castAlerts`.
+   *
+   * These exist because the severity ladder the warnings already had sorts by DANGER,
+   * and the player needs to sort by VALUE. Measured over a 149-hour session: roots and
+   * snares raise 9/hour and there is usually nothing to do about one, while mez, charm
+   * and fear together raise less than 1/hour and are the warnings you drop everything
+   * for. A tier floor cannot express "heals yes, roots no"; these can.
+   *
+   * The values below ARE the Balanced preset — `presetOf(DEFAULTS)` must return
+   * 'balanced', and a test pins that so the default and the preset cannot drift apart.
+   * The two loud groups start off: at 64 warnings an hour the old behaviour had taught
+   * the player to stop looking at the window, which is the one failure a warning
+   * surface cannot survive.
+   */
+  warnHeals: true,
+  warnControl: true,
+  warnBigHits: true,
+  warnLocks: true,
+  warnRoutine: false,
+  warnUnknown: false,
   /** "Summoned <name>" banners — a fact that already happened, not a call to act. */
   summonAlerts: true,
   /** Crowd control sitting on the group right now: stunned / mezzed / charmed chips. */
@@ -126,6 +148,82 @@ export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
 export const TIMER_KEYS = ['castTimers', 'alertsMuted'];
 
 /**
+ * The six warning groups a cast can land in, in the order they read in the settings
+ * form and the tray. These are the `group` values `spellwatch.js` stamps on a warning,
+ * plus 'unknown' for the casts it does not recognize.
+ */
+export const WARN_GROUPS = ['heals', 'control', 'bigHits', 'locks', 'routine', 'unknown'];
+
+/**
+ * The config key that gates a group — by CONVENTION rather than by a lookup table.
+ *
+ * The alerts renderer needs this same mapping and cannot import this module (it reaches
+ * for `fs`), so the choice was between duplicating a six-row table over there and
+ * duplicating a one-line rule. A rule cannot drift halfway: either both sides agree or
+ * nothing resolves at all, which a single render makes obvious. `tests/config.test.js`
+ * pins the convention against DEFAULTS, so a group added without its key fails loudly.
+ */
+export const warnKeyFor = (group) => `warn${group[0].toUpperCase()}${group.slice(1)}`;
+
+/** Every group-switch key, for the callers that only need to know what to watch. */
+export const WARN_KEYS = WARN_GROUPS.map(warnKeyFor);
+
+/**
+ * The three presets, as the complete set of six booleans each one writes.
+ *
+ * Complete rather than partial on purpose: a preset that only listed what it turns ON
+ * would leave whatever the player had switched on before still on, so clicking
+ * "Essential" after "Everything" would silently do nothing much. Every preset states
+ * all six, so selecting one always lands on exactly the state it names.
+ */
+export const ALERT_PRESETS = {
+  essential: {
+    warnHeals: true, warnControl: true, warnBigHits: true,
+    warnLocks: false, warnRoutine: false, warnUnknown: false,
+  },
+  balanced: {
+    warnHeals: true, warnControl: true, warnBigHits: true,
+    warnLocks: true, warnRoutine: false, warnUnknown: false,
+  },
+  everything: {
+    warnHeals: true, warnControl: true, warnBigHits: true,
+    warnLocks: true, warnRoutine: true, warnUnknown: true,
+  },
+};
+
+/**
+ * Is one group switched on?
+ *
+ * A missing key reads as its DEFAULT, and that is a deliberate departure from the rule
+ * the other alert switches follow (`alertsEnabled` treats absent as ON). That rule
+ * exists to protect a choice the player MADE — a config predating a category must not
+ * silently swallow the alerts that category draws. Nobody ever chose these six, and the
+ * behaviour "absent means on" would preserve here is exactly the 64-an-hour flood being
+ * fixed. `ConfigStore.load()` merges DEFAULTS, so in practice this only governs a
+ * renderer talking to a newer main process, where quiet is also the safer answer.
+ */
+export function warnGroupOn(cfg, key) {
+  return (cfg?.[key] ?? DEFAULTS[key]) !== false;
+}
+
+/**
+ * Which preset the current switches amount to, or null for "Custom".
+ *
+ * DERIVED, never stored — the six booleans are the only truth. Storing the preset
+ * alongside them would create two things that can disagree, and the one that would be
+ * wrong is the one on screen: tick a box in settings and a stored preset would still
+ * claim "Balanced". The same reasoning that makes alertsEnabled() derived rather than
+ * owned by any single switch.
+ */
+export function presetOf(cfg) {
+  if (!cfg) return null;
+  for (const [name, preset] of Object.entries(ALERT_PRESETS)) {
+    if (WARN_KEYS.every((key) => warnGroupOn(cfg, key) === preset[key])) return name;
+  }
+  return null;
+}
+
+/**
  * Should the alert window exist at all?
  *
  * Four independent switches collapse to one OS window, and getting that wrong either
@@ -152,6 +250,18 @@ export function timersEnabled(cfg) {
   if (!cfg || cfg.alertsMuted) return false;
   return cfg.castTimers !== false;
 }
+
+/**
+ * The six warning groups get NO migration, deliberately.
+ *
+ * An existing config simply gains them from DEFAULTS on the next load() and therefore
+ * lands on Balanced — quieter than what it had. The migrateAlerts() precedent below
+ * does not apply: that one exists because a stored key CHANGED MEANING underneath the
+ * player, so honouring it literally would have done something they never asked for.
+ * Nothing changes meaning here. There is no old key whose intent has to be carried
+ * forward, only a new default that is the entire point of the change — a config that
+ * kept the old firehose would be preserving the bug.
+ */
 
 export class ConfigStore {
   /** @param {string} dir directory to hold config.json (Electron's userData) */

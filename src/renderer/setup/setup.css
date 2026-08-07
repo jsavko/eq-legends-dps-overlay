@@ -72,6 +72,25 @@ h2:not(:first-child) { margin-top: 22px; }
    rather than only discovered when it greys out. */
 .row.checkbox.indent { margin-left: 22px; }
 .row.checkbox input:disabled + label { color: var(--muted); }
+/* A whole indented BLOCK of sub-settings, rather than a single indented row. Same
+   dependency signal as above; the rule is separate because the block is not a .row. */
+.indent:not(.row) { margin-left: 22px; }
+
+/* The three presets. Buttons rather than radios because selecting one is an action —
+   it writes all six boxes below — and because "Custom" is a state the player lands in
+   by ticking a box, never something they choose: a radio for it would invite a click
+   that could not mean anything. It shows only when the boxes match no preset. */
+.row.preset { align-items: center; gap: 6px; margin-bottom: 12px; }
+.preset-label { color: var(--muted); font-size: 12px; margin-right: 2px; }
+.preset-btn { padding: 4px 12px; font-size: 13px; border-radius: 999px; }
+.preset-btn[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b1220;
+  font-weight: 600;
+}
+.preset-custom { color: var(--muted); font-size: 12px; font-style: italic; }
+#warn-groups[data-disabled] { opacity: 0.5; pointer-events: none; }
 
 input[type="text"], input[type="number"] {
   flex: 1;

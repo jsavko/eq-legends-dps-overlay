@@ -100,6 +100,59 @@
         <input id="cast-alert-sound" type="checkbox" />
         <label for="cast-alert-sound">Play a sound for interrupt-now warnings</label>
       </div>
+
+      <!-- Which casts warn. Indented under the same parent as the sound, and disabled
+           with it, because every switch below is meaningless while warnings are off. -->
+      <div class="indent" id="warn-groups">
+        <div class="row preset">
+          <span class="preset-label">Show</span>
+          <button type="button" class="preset-btn" data-preset="essential">Essential</button>
+          <button type="button" class="preset-btn" data-preset="balanced">Balanced</button>
+          <button type="button" class="preset-btn" data-preset="everything">Everything</button>
+          <span class="preset-custom" hidden>Custom</span>
+        </div>
+        <div class="row checkbox">
+          <input id="warn-heals" type="checkbox" />
+          <label for="warn-heals">Heals &amp; gates
+            <span class="unit">interrupt it or the kill resets · ~7/hr</span>
+          </label>
+        </div>
+        <div class="row checkbox">
+          <input id="warn-control" type="checkbox" />
+          <label for="warn-control">Mez, charm &amp; fear
+            <span class="unit">the group loses control of itself · under 1/hr</span>
+          </label>
+        </div>
+        <div class="row checkbox">
+          <input id="warn-bigHits" type="checkbox" />
+          <label for="warn-bigHits">Big hits
+            <span class="unit">Harm Touch and the like — survivable, worth bracing for · ~2/hr</span>
+          </label>
+        </div>
+        <div class="row checkbox">
+          <input id="warn-locks" type="checkbox" />
+          <label for="warn-locks">Roots, snares &amp; stuns
+            <span class="unit">you are stuck, not dying · ~11/hr</span>
+          </label>
+        </div>
+        <div class="row checkbox">
+          <input id="warn-routine" type="checkbox" />
+          <label for="warn-routine">Routine nukes &amp; lifetaps
+            <span class="unit">named damage with nothing to do about it · ~12/hr</span>
+          </label>
+        </div>
+        <div class="row checkbox">
+          <input id="warn-unknown" type="checkbox" />
+          <label for="warn-unknown">Unrecognized casts
+            <span class="unit">every other spell the log names — noisy, but it is how a new mob's tricks get found · ~33/hr</span>
+          </label>
+        </div>
+        <p class="hint">
+          Rates are measured over a 150-hour session in current content, not predicted —
+          your own will differ with the zone. Mobs buffing themselves never warn at any
+          setting: they were measured doing nothing to anybody.
+        </p>
+      </div>
       <div class="row checkbox">
         <input id="summon-alerts" type="checkbox" />
         <label for="summon-alerts">Announce summons

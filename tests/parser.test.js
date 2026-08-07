@@ -848,6 +848,85 @@ test('an unlisted spell still warns — unknown is not invisible', () => {
   assert.equal(c.ability, 'Utter Doom');
   assert.equal(c.category, null);
   assert.equal(c.tier, 0);
+  assert.equal(c.group, 'unknown', 'it still needs a switch to answer to');
+});
+
+// -------------------------------------------------- warnings clear when they resolve
+
+test('a spell landing clears the warning it was raised for', () => {
+  // The chip is a claim that a cast is still in flight. Measured over the live log,
+  // 3,857 warnings had their spell land while still on screen, a median of one second
+  // in, then sat out the rest of a six-second TTL — 75% of their screen time spent on
+  // a cast that was already over.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Lightning Bolt.`);
+  assert.equal(p.snapshot(T(18, 48, 20)).hostileCasts.length, 1);
+  p.feed(`${D(18, 48, 21)} A cyclops hit YOU for 90 points of magic damage by Lightning Bolt.`);
+  assert.equal(p.snapshot(T(18, 48, 21)).hostileCasts.length, 0);
+});
+
+test('a resist resolves a warning too — the volley fired and we shrugged it off', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Lightning Bolt.`);
+  p.feed(`${D(18, 48, 21)} You resist a cyclops's Lightning Bolt!`);
+  assert.equal(p.snapshot(T(18, 48, 21)).hostileCasts.length, 0);
+});
+
+test('a landing clears only its own spell, not every warning from that caster', () => {
+  // Unlike the interrupt path, which cannot tell WHICH same-named mob was stopped and
+  // so is deliberately generous. A damage line names the spell, so there is nothing to
+  // be generous about.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Lightning Bolt.`);
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Superior Healing.`);
+  p.feed(`${D(18, 48, 21)} A cyclops hit YOU for 90 points of magic damage by Lightning Bolt.`);
+
+  const casts = p.snapshot(T(18, 48, 21)).hostileCasts;
+  assert.equal(casts.length, 1);
+  assert.equal(casts[0].ability, 'Superior Healing', 'the heal is still in flight');
+});
+
+test('a melee swing clears nothing — its ability is "Hit", which keys no warning', () => {
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Superior Healing.`);
+  p.feed(`${D(18, 48, 21)} A cyclops hits YOU for 45 points of damage.`);
+  assert.equal(p.snapshot(T(18, 48, 21)).hostileCasts.length, 1);
+});
+
+// ------------------------------------------------------------- the self-buff line
+
+test('a mob buffing itself raises no warning at any setting', () => {
+  // Tier -1: identified as not worth a chip, as distinct from tier 0's "not identified
+  // at all". Measured over the live log, self-buffs were 2,608 of the 5,260 casts that
+  // had no category — more than half the noise, and none of it actionable.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Shield of Thistles.`);
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Spirit of Wolf.`);
+  const casts = p.snapshot(T(18, 48, 20)).hostileCasts;
+  assert.equal(casts.length, 2, 'the parser still records them — the renderer drops them');
+  assert.deepEqual(casts.map((c) => c.tier), [-1, -1]);
+  assert.deepEqual(casts.map((c) => c.group), ['buff', 'buff']);
+});
+
+test('a suppressed buff cast still anchors the rhythm clock', () => {
+  // A warning nobody sees is still a real cast, and the boss-timer prediction is built
+  // from cast times. Silencing the chip must not silence the clock.
+  const p = makeParser();
+  // Named casters only feed the tracker, and a single-token name has to be proven
+  // hostile before anything it does counts — same setup as the engaged-mob test above.
+  p.feed(`${D(18, 48, 19)} Targeted (NPC): Zevrex`);
+  p.feed(`${D(18, 48, 19)} You crush Zevrex for 40 points of damage.`);
+  // Damage between the casts because rhythm entries are per-FIGHT, and casts alone do
+  // not hold an encounter open — letting it time out mid-sequence would reset the very
+  // thing being asserted.
+  p.feed(`${D(18, 48, 20)} Zevrex begins casting Quickness.`);
+  p.feed(`${D(18, 48, 26)} You crush Zevrex for 40 points of damage.`);
+  p.feed(`${D(18, 48, 32)} Zevrex begins casting Quickness.`);
+  p.feed(`${D(18, 48, 38)} You crush Zevrex for 40 points of damage.`);
+  p.feed(`${D(18, 48, 44)} Zevrex begins casting Quickness.`);
+  const entry = p.rhythms.entries.get('Zevrex|Quickness');
+  assert.ok(entry, 'the tracker must have seen the casts the warning stack refused to draw');
+  assert.equal(entry.gaps.length, 2, 'two gaps from three casts');
 });
 
 test('the anonymous classic cast line still warns when the caster is hostile', () => {

@@ -12,6 +12,13 @@
  * three (the parser knows nothing about settings); deciding what to draw is this file's
  * job, and main decides whether the window exists at all from the same keys.
  *
+ * Interrupt warnings are gated twice over: the `castAlerts` master, and then one of six
+ * GROUP switches naming what the cast would make the player do — heals, hard crowd
+ * control, big hits, locks, routine damage, unrecognized. Tier and group answer
+ * different questions and must not be conflated: the TIER a warning carries decides how
+ * loud it draws (banner, warn line, calm line) and the GROUP decides whether it draws at
+ * all. That split is why none of this needed a single CSS change.
+ *
  * The learned boss timers used to live here too, at the bottom of this same vertical
  * flow, and that is exactly why they no longer do: every banner that arrived or expired
  * shoved them down the screen, and a timer whose cast fired vanished into the banner
@@ -42,6 +49,23 @@ const EFFECT_VERB = { stun: 'Stunned', mez: 'Mezzed', charm: 'Charmed' };
 /** Entries fade for the last moments of their window; matches the CSS transition. */
 const FADE_MS = 700;
 
+/**
+ * Defaults for the six warning-group switches, mirroring `DEFAULTS` in main/config.js.
+ *
+ * Duplicated because this file cannot import that module — it reaches for `fs`. The
+ * values matter only when a key is absent, which in practice means a renderer talking
+ * to a newer main process; quiet is the safer answer there, and it is also what the
+ * shipped default says.
+ */
+const WARN_DEFAULTS = {
+  warnHeals: true,
+  warnControl: true,
+  warnBigHits: true,
+  warnLocks: true,
+  warnRoutine: false,
+  warnUnknown: false,
+};
+
 init();
 
 async function init() {
@@ -66,8 +90,13 @@ function applyConfig(config) {
   // waiting for the next snapshot: the push loop skips ticks when nothing has changed,
   // so between fights "next snapshot" can be minutes away — long enough for the player
   // to watch the thing they just turned off sit there.
-  if (!on('castAlerts')) dropChips((el) => el.dataset.category !== 'summon');
-  if (!on('summonAlerts')) dropChips((el) => el.dataset.category === 'summon');
+  // Chips carry the group they were built from so a switch going off can pick its own
+  // back out of the shared stack without needing the snapshot that created them.
+  dropChips((el) => !shows({
+    category: el.dataset.category === 'summon' ? 'summon' : null,
+    group: el.dataset.group,
+    tier: Number(el.dataset.tier),
+  }));
   if (!on('ccAlerts')) clearChips(effectChips, effectsList);
 }
 
@@ -79,6 +108,37 @@ function applyConfig(config) {
  */
 function on(key) {
   return !cfg || cfg[key] !== false;
+}
+
+/**
+ * Should a warning in this group draw?
+ *
+ * Separate from `on()` because the group switches read a missing key as its DEFAULT
+ * rather than as ON. That is the documented departure: `on()`'s rule protects choices
+ * the player made, and nobody chose these — treating an absent key as ON would restore
+ * the 64-an-hour flood the groups exist to end. See `warnGroupOn` in main/config.js.
+ *
+ * The group→key mapping is a naming convention rather than a table (heals → warnHeals),
+ * so the two halves of it cannot drift apart by a row.
+ */
+function groupOn(group) {
+  const key = `warn${group[0].toUpperCase()}${group.slice(1)}`;
+  return (cfg?.[key] ?? WARN_DEFAULTS[key]) !== false;
+}
+
+/**
+ * Does this warning draw at all?
+ *
+ * Three gates, in the order they were added: summons answer to their own switch, the
+ * self-buff line never draws at any setting (the parser marks it tier -1 — identified
+ * as not worth a chip, as distinct from merely unidentified), and everything else
+ * answers to its group switch under the `castAlerts` master.
+ */
+function shows(w) {
+  if (w.category === 'summon') return on('summonAlerts');
+  if (!on('castAlerts')) return false;
+  if (w.tier < 0) return false;
+  return groupOn(w.group ?? 'unknown');
 }
 
 /**
@@ -107,7 +167,7 @@ function render(warnings) {
   // Interrupt warnings and summon banners are two categories in ONE stack: they share
   // the ordering rule, and splitting them into separate lists would let a tier-2 summon
   // sit above a tier-3 interrupt call. So they are filtered here, not partitioned.
-  const shown = warnings.filter((w) => on(w.category === 'summon' ? 'summonAlerts' : 'castAlerts'));
+  const shown = warnings.filter(shows);
 
   // Highest severity on top; within a tier, oldest first so lines don't reorder
   // under the player's eyes as new casts of the same weight arrive.
@@ -156,6 +216,7 @@ function buildChip(w) {
   // Which switch owns this chip: the stack mixes two categories, and a live toggle has
   // to be able to pick its own chips back out of it.
   li.dataset.category = w.category === 'summon' ? 'summon' : 'warning';
+  li.dataset.group = w.group ?? 'unknown';
 
   const verb = document.createElement('span');
   verb.className = 'verb';
