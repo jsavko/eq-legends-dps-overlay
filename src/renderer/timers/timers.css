@@ -22,11 +22,6 @@
   --ember:     #b9702a;
   --ember-lit: #e0a53f;
 
-  /* Alarm red belongs to stated facts. It appears here only on CAST — the moment the
-     log confirms the spell — and never on a countdown, which is always an estimate. */
-  --alarm:     #d5482f;
-  --alarm-lit: #f2825f;
-
   --scale: 1;
 }
 
@@ -98,9 +93,9 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
 /* -------------------------------------------------------------------- the slots */
 
 /*
- * One slot, one (caster, ability) pair, for the whole fight. The height is fixed and
- * identical in every state — armed, warm, due, CAST, lapsed — because the
- * entire point of this window is that the row you learned to glance at stays put.
+ * One slot, one countdown, for as long as it lives. The height is fixed and identical in
+ * every state — armed, due now, ending, lapsed — because the entire point of this window
+ * is that the row you learned to glance at stays put.
  */
 .slot {
   position: relative;
@@ -114,7 +109,7 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
 }
 .slot:last-child { border-bottom: 0; }
 
-/* The row IS the bar. It drains right-to-left as the estimate runs down. */
+/* The row IS the bar. It drains right-to-left as the countdown runs down. */
 .slot .fill {
   position: absolute;
   inset: 0 auto 0 0;
@@ -161,40 +156,40 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
   text-overflow: ellipsis;
 }
 
-/* Warm: last pull's rhythm, unconfirmed by this one — the weaker claim, so it drops
-   the amber entirely rather than dressing like measured evidence. */
-.slot[data-warm] .fill {
-  background: linear-gradient(90deg, rgba(168, 151, 122, 0.24), rgba(168, 151, 122, 0.08));
-  border-right-color: rgba(168, 151, 122, 0.5);
-}
-.slot[data-warm] .due { color: var(--ink-dim); }
-
-/* Due now: the estimate says it lands this second. Hot, but still an estimate — no
-   alarm red, that colour belongs to the alert window and to stated facts only. */
+/* Due now: the countdown says it lands this second. Hot, and still no alarm red — that
+   colour belongs to the alert window and to facts the log has stated outright. */
 .slot[data-due-now] .fill {
   background: linear-gradient(90deg, color-mix(in srgb, var(--ember-lit) 55%, transparent), color-mix(in srgb, var(--ember) 22%, transparent));
 }
 .slot[data-due-now] .due { color: #ffd27a; }
 
-/* CAST: the real line landed and the alert window has it. The slot holds its place
-   and says so, instead of vanishing and shoving every row below it upward — that
-   disappearing act is the single behaviour this whole window was built to delete. */
-.slot[data-state="cast"] .fill {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--alarm) 38%, transparent), transparent);
-  border-right-color: transparent;
-}
-.slot[data-state="cast"] .due {
-  color: var(--alarm-lit);
-  font-size: 0.73em;
-  letter-spacing: 0.1em;
-}
-
-/* Lapsed: the prediction is gone, the row is not. It shows a dash and never a number —
-   a retracted estimate has nothing honest left to count. (There is no 'ended' state to
-   style: a slain caster's rows leave the panel outright.) */
+/* Lapsed: the countdown is spent, the row is not — it lingers a moment rather than
+   blinking out, which would read as a glitch instead of as a timer finishing. It shows a
+   dash and never a number, since there is no time left to count. (There is no 'ended'
+   state to style: a slain caster's rows leave the panel outright, which each shipped
+   trigger arranges for itself with a death early-ender.) */
 .slot[data-state="lapsed"] .due { color: var(--ink-faint); }
 .slot[data-state="lapsed"] .spell { color: var(--ink-faint); font-weight: 400; }
 .slot[data-state="lapsed"] .caster { color: #4a4237; font-style: italic; }
+
+/* ------------------------------------------------------- the author's own warning */
+
+/*
+ * A pack may nominate an "ending soon" window with wording of its own. Their phrase
+ * replaces the sub-line, so the emphasis goes on the whole row rather than on something
+ * we would have had to invent.
+ *
+ * There is no longer a rail marking a row as coming from a pack. There used to be, back
+ * when the other kind of row was a live estimate of this app's own and the two needed
+ * telling apart at a glance. Every row here comes from a pack now — including the bosses
+ * we ship timers for — so a mark on all of them would distinguish nothing, and each
+ * row's sub-line names its pack outright.
+ */
+.slot[data-ending] .due { color: #ffd27a; }
+.slot[data-ending] .caster { color: var(--ink); }
+.slot[data-ending] .fill {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ember-lit) 45%, transparent), color-mix(in srgb, var(--ember) 18%, transparent));
+}
 
 /* ----------------------------------------------- unlocked drag placeholder */
 

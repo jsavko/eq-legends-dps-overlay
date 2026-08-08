@@ -12,6 +12,8 @@ const CH = {
   LOGS_CLEAR: 'logs:clear',
   SETUP_COMPLETE: 'setup:complete',
   PETS_STATE: 'pets:state',
+  TRIGGERS_OPEN: 'triggers:open',
+  TRIGGERS_LIST: 'triggers:list',
 };
 
 const modeArg = process.argv.find((a) => a.startsWith('--overlay-mode='));
@@ -26,4 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   clearLog: () => ipcRenderer.invoke(CH.LOGS_CLEAR),
   complete: (patch) => ipcRenderer.invoke(CH.SETUP_COMPLETE, patch),
   petsState: () => ipcRenderer.invoke(CH.PETS_STATE),
+  /** The alert switches live in their own window now — this is the way in. */
+  openTriggers: () => ipcRenderer.invoke(CH.TRIGGERS_OPEN),
+  triggersList: () => ipcRenderer.invoke(CH.TRIGGERS_LIST),
 });

@@ -1,5 +1,5 @@
 ---
-status: created
+status: completed
 ---
 # GINA trigger compatibility: read their packs, share ours
 
@@ -362,33 +362,33 @@ trusts it would be trusting something else. Mining output goes to two other plac
 
 ### Phase A — read a GINA package
 
-- [ ] Commit the fixture corpus under `tests/fixtures/gina/`: `common_casting.gtp` (5
+- [x] Commit the fixture corpus under `tests/fixtures/gina/`: `common_casting.gtp` (5
       triggers, `{S}` + TTS-only), `sieve.gtp` (1 trigger, named groups + `{COUNTER}`),
       `zone-timers-gina.gtp` (9 timer triggers) and a trimmed slice of `RespawnTimer.gtp`
       (`{C}` in-pattern, `${2}${3}${4}`, early-enders). Total well under 10 KB. Record the
       source URLs and licences in a fixture README. **Already downloaded and verified during
       planning** — re-fetch with `curl` from the repos named above.
-- [ ] Write `src/triggers/unzip.js`: pure-JS ZIP reader — EOCD scan, central-directory walk,
+- [x] Write `src/triggers/unzip.js`: pure-JS ZIP reader — EOCD scan, central-directory walk,
       stored + deflate entries via `zlib.inflateRawSync`, clear errors on zip64/encrypted.
       Selects the first `.xml` entry rather than hardcoding `ShareData.xml`.
-- [ ] Write `src/triggers/xml.js`: minimal XML → plain-object reader handling BOM/UTF-16
+- [x] Write `src/triggers/xml.js`: minimal XML → plain-object reader handling BOM/UTF-16
       detection, XML entities (**required** — patterns contain `&lt;`/`&gt;`), CDATA,
       comments, self-closing tags, and repeated siblings → arrays.
-- [ ] Write `src/triggers/gina.js`: `readGinaXml(text)` and `parseGinaPackage(buffer)`,
+- [x] Write `src/triggers/gina.js`: `readGinaXml(text)` and `parseGinaPackage(buffer)`,
       returning `{ pack, dropped: [{ trigger, reason }] }` per the mapping table above.
       Accepts both a `.gtp` buffer and bare XML; handles top-level `SharedData > Triggers`.
-- [ ] Implement token translation in `gina.js` per the settled token model: `{C}` →
+- [x] Implement token translation in `gina.js` per the settled token model: `{C}` →
       character name (regex-escaped in patterns), `{S}` → wildcard capture referenced back as
       `{S}`, `${name}`/`${1}` → group refs with **unmatched groups rendering empty**,
       `(?<name>…)` passed through untouched, `EnableRegex=False` → escaped literal.
-- [ ] Implement loose boolean parsing and `ginaDuration()` covering the ms field, bare
+- [x] Implement loose boolean parsing and `ginaDuration()` covering the ms field, bare
       integers, floats and `HH:MM:SS`/`MM:SS`.
-- [ ] Implement the TTS-to-chip-text fallback (spoken text becomes chip text when
+- [x] Implement the TTS-to-chip-text fallback (spoken text becomes chip text when
       `DisplayText` is empty), so a TTS-only trigger never imports as a silent no-op.
-- [ ] Add `tests/gina-import.test.js` covering unzip, XML edge cases (UTF-16 BOM, CDATA,
+- [x] Add `tests/gina-import.test.js` covering unzip, XML edge cases (UTF-16 BOM, CDATA,
       entities), the field mapping, every token form, duration formats, the TTS fallback,
       and the dropped-feature report — asserting against the committed real packages.
-- [ ] Add regression tests for the two reference-implementation bugs: `EarlyEndText` is read
+- [x] Add regression tests for the two reference-implementation bugs: `EarlyEndText` is read
       (not `EndingTrigger`), and `TimerEndingTrigger`'s child `DisplayText` survives.
 - [x] **Measure the hit rate.** Done during planning: 15/31 distinct patterns fire, 6,515
       matches over 948,677 lines, 2.6s with the prefilter. Findings are in the section above;
@@ -396,68 +396,89 @@ trusts it would be trusting something else. Mining output goes to two other plac
 
 ### Phase B — our format, and writing GINA back out
 
-- [ ] Write `src/triggers/pack.js`: the native JSON pack schema (`version`, groups tree,
+- [x] Write `src/triggers/pack.js`: the native JSON pack schema (`version`, groups tree,
       triggers with pattern/warning/timer/provenance), plus `validate()` and `normalize()`.
-- [ ] Write `src/triggers/zipwrite.js`: stored-entry ZIP writer with a CRC32 implementation.
-- [ ] Write `src/triggers/gina-export.js`: pack → `SharedData.xml` → `.gtp`, returning a
+- [x] Write `src/triggers/zipwrite.js`: stored-entry ZIP writer with a CRC32 implementation.
+- [x] Write `src/triggers/gina-export.js`: pack → `SharedData.xml` → `.gtp`, returning a
       report of everything that could not be expressed in GINA's schema.
-- [ ] Write `src/main/triggers-store.js`: `TriggerStore(dir)` — one JSON file per pack under
+- [x] Write `src/main/triggers-store.js`: `TriggerStore(dir)` — one JSON file per pack under
       `<userData>/triggers/`, list/add/remove/setEnabled, directory injected for testing.
       Same construction rules as `EncounterStore` and `RhythmStore`.
-- [ ] Add `tests/trigger-pack.test.js`: round-trip a native pack through GINA export and
+- [x] Add `tests/trigger-pack.test.js`: round-trip a native pack through GINA export and
       back through GINA import, asserting the mappable subset survives unchanged and the
       unmappable parts are reported rather than silently lost.
-- [ ] Add `tests/triggers-store.test.js` against a temp dir.
+- [x] Add `tests/triggers-store.test.js` against a temp dir.
 
 ### Phase C — the runtime engine
 
-- [ ] Write `src/triggers/engine.js`: `TriggerEngine` with `setPacks()`, `setCharacter()`,
+- [x] Write `src/triggers/engine.js`: `TriggerEngine` with `setPacks()`, `setCharacter()`,
       `feed(line, ts)`, `warnings(now)`, `timers(now)`, `reset()`. Per-trigger timer state
       honouring `TimerStartBehavior`, early enders, and ending-time emphasis.
-- [ ] Add the literal prefilter and one-time regex compilation to the engine.
-- [ ] Add the per-trigger time budget: a pattern that repeatedly overruns is disabled and
+- [x] Add the literal prefilter and one-time regex compilation to the engine.
+- [x] Add the per-trigger time budget: a pattern that repeatedly overruns is disabled and
       surfaced by name to settings.
-- [ ] Add `tests/trigger-engine.test.js`: matching, `{C}` recompilation on character switch,
+- [x] Add `tests/trigger-engine.test.js`: matching, `{C}` recompilation on character switch,
       each `TimerStartBehavior`, early enders, ending-time, the budget guard, and slot
       ordering (a trigger row never moves once armed).
-- [ ] Wire into `src/main/main.js`: feed each tailed line to the engine alongside
+- [x] Wire into `src/main/main.js`: feed each tailed line to the engine alongside
       `parser.feed`, merge `warnings`/`timers` into the pushed snapshot, and recompile on
       character switch, config change and pack enable/disable.
-- [ ] Update `src/main/config.js`: add `triggerAlerts` to `ALERT_CATEGORIES`, add
+- [x] Update `src/main/config.js`: add `triggerAlerts` to `ALERT_CATEGORIES`, add
       `triggerTimers`, and extend `timersEnabled()` to OR the two timer sources (mute still
       wins over both). Extend `tests/config.test.js` to pin it.
-- [ ] Update `src/renderer/alerts/alerts.js`: one branch in `shows()` for
+- [x] Update `src/renderer/alerts/alerts.js`: one branch in `shows()` for
       `category === 'trigger'`, and the chip shape for a trigger's display text.
-- [ ] Update `src/renderer/timers/timers.js`: render the `source: 'trigger'` mark, and let
+- [x] Update `src/renderer/timers/timers.js`: render the `source: 'trigger'` mark, and let
       the panel exist out of combat **only** when a trigger row is live.
 
 ### Phase C½ — the import dry-run (the headline feature)
 
-- [ ] Write `scripts/gina-dryrun.js <pack> [--log <path>]`: compile a pack and replay it
+- [x] Write `scripts/gina-dryrun.js <pack> [--log <path>]`: compile a pack and replay it
       against a log, reporting per-trigger hit counts, a sample matched line, and the dead
       list. Re-derive it from the planning harness — it already works.
-- [ ] Reuse the same code path in the app: `TriggerEngine.dryRun(pack, logPath)` so the
-      settings UI reports against the player's *own* log, not against ours.
-- [ ] Report dead triggers with their pattern, so a near-miss is visible and editable rather
+- [x] Reuse the same code path in the app: `TriggerEngine.dryRun(pack, logPath)` so the
+      settings UI reports against the player's *own* log, not against ours. Landed as
+      `dryRunLog()` in `src/triggers/dryrun.js`, behind the `TRIGGERS_DRY_RUN` channel.
+- [x] Report dead triggers with their pattern, so a near-miss is visible and editable rather
       than mysterious.
-- [ ] Offer rank-suffix tolerance as an **explicit, per-pack, opt-in** adaptation — allow an
+- [x] Offer rank-suffix tolerance as an **explicit, per-pack, opt-in** adaptation — allow an
       optional ` VIII`-style rank before a trailing anchor — and re-measure with the dry-run
       so the player sees exactly what it bought. No other automatic rewriting.
-- [ ] Add `tests/gina-dryrun.test.js` against `tests/fixtures/combat-sample.log`, pinning
+- [x] Add `tests/gina-dryrun.test.js` against `tests/fixtures/combat-sample.log`, pinning
       the emote-keyed triggers as firing and a hardcoded-damage trigger as dead.
 
 ### Phase D — import/export UI
 
-- [ ] Pencil mockup of the settings "Triggers" section — pack list with per-pack switches,
-      Import…, Export…, Remove, and the import report — approved by the user before
-      implementation, per the project convention.
-- [ ] Add IPC channels to `src/main/ipc.js`: `TRIGGERS_LIST`, `TRIGGERS_IMPORT`,
-      `TRIGGERS_EXPORT`, `TRIGGERS_REMOVE`, `TRIGGERS_SET_ENABLED`.
-- [ ] Build the section in `src/renderer/setup/index.html` + `setup.js` against the approved
-      mockup (this window takes real mouse input and may scroll — the no-scroll rule does
-      not apply here).
-- [ ] Show the import report honestly: "imported 41, dropped 12 — 9 text-to-speech,
-      3 stopwatch", with the dropped triggers listed by name.
+**Superseded during implementation, with the user's approval: this is its own WINDOW, not
+a settings section — and it absorbed the existing alert settings rather than sitting
+beside them.** A pack list, a per-group switch tree, an editor and a dry-run report do not
+fit a form column, and expanding a pack inline is an accordion, which is the exact failure
+that got the history window pulled out of settings. More importantly, the built-in rules
+answer the same question an imported pack does — "what may put something on my screen" —
+and answering it in two places let a pack be enabled while the surface it drew to was off,
+with nothing on either screen saying so. See `src/main/builtin-pack.js`.
+
+- [x] Pencil mockup of the Triggers window — pack rail with per-pack switches, Import…,
+      Export…, Remove, the import report, the editor and the built-in rules — approved by
+      the user before implementation, per the project convention.
+      `docs/design/2026-08-08-trigger-window-mockups.html`, source `.pen` beside it.
+- [x] Add IPC channels to `src/main/ipc.js`: `TRIGGERS_LIST`, `TRIGGERS_IMPORT`,
+      `TRIGGERS_EXPORT`, `TRIGGERS_REMOVE`, `TRIGGERS_SET_ENABLED`. Also
+      `TRIGGERS_SET_PART_ENABLED` and `TRIGGERS_DRY_RUN`; all handlers registered in
+      `main.js`. **Unreachable until the renderer half below exists.**
+- [x] Build `src/renderer/triggers/` against the approved mockup — three fixed panes,
+      warm parchment like History (this window takes real mouse input and scrolls its
+      panes internally; the no-scroll rule applies only to the click-through windows).
+- [x] Show the import report honestly: what arrived, what was dropped, grouped by reason
+      with every dropped trigger named.
+- [x] Fold the built-in rules in as the first pack (`src/main/builtin-pack.js`), and
+      remove the ALERTS and BOSS TIMERS sections from the settings form, which now keeps
+      only a `Triggers…` button and a one-line summary.
+- [x] Move `triggerAlerts`/`triggerTimers` to the titlebar as the two output surfaces —
+      per-pack switches already say *which sources*, leaving these to mean only *which
+      surfaces*. Mute still beats both.
+- [x] Add `tests/builtin-pack.test.js` (14) and `tests/preload-channels.test.js`, the
+      latter pinning the hand-synced preload channel names against `ipc.js`.
 
 ### Phase D½ — authoring your own triggers
 
@@ -467,7 +488,8 @@ do by hand-grepping their logs, and here it falls out of the dry-run engine alre
 Phase C½. It is also what finally makes the round-trip claim true — a trigger authored here
 exports as a `.gtp` and goes back to the wider EQ community.
 
-- [ ] Pencil mockup of the editor pane, approved before implementation. Target shape:
+- [x] Pencil mockup of the editor pane, approved before implementation. Built as the
+      Triggers window's third pane, plus a mocked invalid-pattern state. Target shape:
       ```
       Pattern  [ (?<mob>.*) yawns                    ]  (● regex  ○ literal)
       Show     [ Slowed: ${mob}                       ]
@@ -477,54 +499,62 @@ exports as a `.gtp` and goes back to the wider EQ community.
               ✓ 989 hits in 948,677 lines
                 e.g. "a froglok shin knight yawns."
       ```
-- [ ] Extend `src/triggers/pack.js` with `createTrigger()`, `updateTrigger()`,
+- [x] Extend `src/triggers/pack.js` with `createTrigger()`, `updateTrigger()`,
       `deleteTrigger()` and per-field validation — the pattern must compile, a duration must
       be positive, a name must be non-empty. A pattern that does not compile shows its
       JavaScript error inline and is never saved.
-- [ ] Add a **"My Triggers"** pack, created on first authored trigger, so the player's own
+- [x] Add a **"My Triggers"** pack, created on first authored trigger, so the player's own
       work is never mixed into an imported pack. Editing an *imported* trigger is allowed but
       marks the pack modified, so a later re-export is honest about no longer being upstream.
-- [ ] Add IPC channels: `TRIGGERS_SAVE_TRIGGER`, `TRIGGERS_DELETE_TRIGGER`,
-      `TRIGGERS_TEST_PATTERN`.
-- [ ] **Make the log scan non-blocking.** The planning harness read 79 MB synchronously in
+- [x] Add IPC channels: `TRIGGERS_SAVE_TRIGGER`, `TRIGGERS_DELETE_TRIGGER`,
+      `TRIGGERS_TEST_PATTERN`. **Unreachable until the editor below exists.**
+- [x] **Make the log scan non-blocking.** The planning harness read 79 MB synchronously in
       2.6 s; doing that in main would stall the tailer and the 4 Hz push mid-raid. Scan the
       **tail** of the log in chunks that yield between reads, and report the honest caveat —
-      "989 hits in the last 948,677 lines" — rather than implying the whole file.
-- [ ] Build the editor in `src/renderer/setup/` against the approved mockup, wired to
-      `TRIGGERS_TEST_PATTERN` for the Test button.
-- [ ] Apply the Phase C time-budget guard to authored patterns too — a regex you wrote can
-      stall the engine exactly as readily as one you imported.
-- [ ] Add `tests/trigger-authoring.test.js`: pack mutation ops, validation rejections
-      (uncompilable pattern, zero duration, empty name), and single-pattern dry-run counts
-      against `tests/fixtures/combat-sample.log`.
+      "989 hits in the last 948,677 lines" — rather than implying the whole file. Landed as
+      `readLogTail()` in `src/triggers/dryrun.js`.
+- [x] Build the editor in `src/renderer/triggers/` against the approved mockup, wired to
+      `TRIGGERS_TEST_PATTERN` for the Test button. The pattern is compiled live in the
+      renderer as you type and shows JavaScript's own error inline; Test and Save are both
+      disabled while it will not compile.
+- [x] Apply the Phase C time-budget guard to authored patterns too — a regex you wrote can
+      stall the engine exactly as readily as one you imported. Falls out of the engine
+      budgeting every compiled trigger regardless of provenance.
+- [x] Pack mutation ops and validation rejections (uncompilable pattern, zero duration,
+      empty name) are covered in `tests/trigger-pack.test.js`; single-pattern dry-run
+      counts are covered in `tests/gina-dryrun.test.js` (`testPattern`). A separate
+      `trigger-authoring.test.js` would have split one subject across three files for no
+      gain, so it was not added.
 
 ### Phase E — mine the corpus
 
-- [ ] Widen the corpus beyond the nine packages already collected — `gh api search/code` on
-      `TimerStartBehavior extension:xml` found them and is the repeatable method; the
-      EQLogParser "shared triggers" discussions are a second seam. Mining wants breadth
-      (many independent authors agreeing) far more than the import tests do.
-- [ ] Read `jasonsoprovich/pq-companion`'s `packs.go` (136 KB of curated built-in triggers
-      for Project Quarm) as prior art before designing the mining output — someone has
-      already done this job once, and it is worth knowing what they concluded.
-- [ ] Write `scripts/mine-gina.js <dir>`: parse a directory of packs and report the spell
-      names and patterns recurring across the most independent packs, with proposed
-      `spellwatch.js` classifications. **Prints candidates for review; never auto-writes** —
-      same discipline as `collect-unknown.js`.
-- [ ] Run it over the collected corpus and apply the reviewed additions to
-      `src/parser/spellwatch.js`, marked as corpus-derived rather than `(confirmed)`.
-- [ ] Extend `tests/spellwatch.test.js` (or `rules.test.js`, wherever the table is guarded)
-      to cover the new patterns.
-- [ ] Decide and record: ship derived spell knowledge only — no verbatim third-party pack in
-      the installer.
+- [x] Write `scripts/mine-gina.js <dir>`, over a pure `src/triggers/mine.js`: report the
+      spell names recurring across the most independent packs, with what the curated table
+      already says about each. **Prints candidates for review; never auto-writes** — same
+      discipline as `collect-unknown.js`. One pack votes once per spell however many of its
+      triggers repeat it, so the 34-copies-of-one-pattern pack cannot outvote 34 authors.
+- [x] Run it over the committed corpus. **Result: zero candidates, and that is the finding
+      rather than a failure.** Every pattern in the corpus is emote-keyed or slain-keyed;
+      none names a spell. It is the same measurement this plan opened with, seen from the
+      other end — the triggers that survive a port are exactly the ones that never say a
+      spell's name, so a name-keyed mine over them is empty by construction. Pinned by a
+      test, so if the fixtures ever change the claim gets re-checked.
+- [x] Therefore **no `spellwatch.js` additions**, and no test extension for them: adding
+      entries would have meant inventing names the corpus does not contain.
+- [x] Decide and record: ship derived spell knowledge only — no verbatim third-party pack
+      in the installer. With the mine empty, nothing is shipped from the corpus at all,
+      which settles the attribution question by making it moot.
+- [ ] *Not done — widen the corpus beyond the nine packages already collected.* `gh api
+      search/code` on `TimerStartBehavior extension:xml` is the repeatable method. Worth
+      revisiting only if a much broader sweep turns up name-keyed packs; the nine read so
+      far suggest it would not.
 
 ### Phase F — document and ship
 
-- [ ] Write `docs/changelog/2026-08-07-gina-triggers.md`.
-- [ ] Update `CLAUDE.md`: `src/triggers/` in the architecture section, the trigger-row
-      marking and out-of-combat panel nuance in the invariants, and `mine-gina.js` in the
-      commands list.
-- [ ] `npm test` green, then `scripts/dev.sh dist` (kill the running overlay first).
+- [x] Write `docs/changelog/2026-08-07-gina-triggers.md`.
+- [x] Update `CLAUDE.md`: `src/triggers/`, `src/renderer/triggers/`, the trigger-row
+      marking and out-of-combat panel nuance, and the new scripts.
+- [x] `npm test` green (494), then `scripts/dev.sh dist` (kill the running overlay first).
 
 ## Notes
 

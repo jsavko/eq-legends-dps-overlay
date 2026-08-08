@@ -93,7 +93,7 @@ function applyConfig(config) {
   // Chips carry the group they were built from so a switch going off can pick its own
   // back out of the shared stack without needing the snapshot that created them.
   dropChips((el) => !shows({
-    category: el.dataset.category === 'summon' ? 'summon' : null,
+    category: el.dataset.category === 'warning' ? null : el.dataset.category,
     group: el.dataset.group,
     tier: Number(el.dataset.tier),
   }));
@@ -129,13 +129,22 @@ function groupOn(group) {
 /**
  * Does this warning draw at all?
  *
- * Three gates, in the order they were added: summons answer to their own switch, the
- * self-buff line never draws at any setting (the parser marks it tier -1 — identified
- * as not worth a chip, as distinct from merely unidentified), and everything else
- * answers to its group switch under the `castAlerts` master.
+ * Four gates, in the order they were added: summons answer to their own switch, trigger
+ * chips answer to theirs, the self-buff line never draws at any setting (the parser
+ * marks it tier -1 — identified as not worth a chip, as distinct from merely
+ * unidentified), and everything else answers to its group switch under the `castAlerts`
+ * master.
+ *
+ * A trigger chip deliberately does NOT pass through the six warning groups. Those sort
+ * casts by what this app decided the player would do about them, and a trigger is
+ * something the player already decided is worth seeing — putting their own choice behind
+ * our taxonomy would let a group switch silence a pack they had just imported. Which
+ * PACK a chip came from is the switch that belongs to it, and that is resolved in the
+ * engine, so `shows()` gains one branch and no more.
  */
 function shows(w) {
   if (w.category === 'summon') return on('summonAlerts');
+  if (w.category === 'trigger') return on('triggerAlerts');
   if (!on('castAlerts')) return false;
   if (w.tier < 0) return false;
   return groupOn(w.group ?? 'unknown');
@@ -213,9 +222,9 @@ function buildChip(w) {
   const li = document.createElement('li');
   li.className = 'chip';
   li.dataset.tier = String(w.tier);
-  // Which switch owns this chip: the stack mixes two categories, and a live toggle has
-  // to be able to pick its own chips back out of it.
-  li.dataset.category = w.category === 'summon' ? 'summon' : 'warning';
+  // Which switch owns this chip: the stack mixes three categories, and a live toggle
+  // has to be able to pick its own chips back out of it.
+  li.dataset.category = w.category === 'summon' || w.category === 'trigger' ? w.category : 'warning';
   li.dataset.group = w.group ?? 'unknown';
 
   const verb = document.createElement('span');
@@ -235,6 +244,16 @@ function buildChip(w) {
     verb.textContent = 'Summoned';
     spell.textContent = w.victim;
     caster.textContent = w.caster ?? '';
+  } else if (w.category === 'trigger') {
+    // A trigger chip is the player's OWN words, already rendered by the engine, so it
+    // takes the big slot whole rather than being split into a verb and a spell name we
+    // would have to invent. The sub-line names the pack — the honest answer to "why is
+    // this on my screen", and the thing they would go and switch off.
+    // The verb stays empty, and the existing `.verb:empty { display: none }` rule
+    // collapses it — the same way a tier-0 chip already has no category word.
+    verb.textContent = '';
+    spell.textContent = w.text;
+    caster.textContent = w.pack ?? '';
   } else {
     verb.textContent = VERB[w.tier] ?? w.category ?? '';
     if (w.ability) {

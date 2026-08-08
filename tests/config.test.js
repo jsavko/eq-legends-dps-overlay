@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled, timersEnabled,
-  ALERT_PRESETS, WARN_GROUPS, WARN_KEYS, warnKeyFor, warnGroupOn, presetOf,
+  ALERT_CATEGORIES, ALERT_PRESETS, TIMER_KEYS, WARN_GROUPS, WARN_KEYS,
+  warnKeyFor, warnGroupOn, presetOf,
 } from '../src/main/config.js';
 import { GROUPS, UNKNOWN_GROUP } from '../src/parser/spellwatch.js';
 
@@ -93,10 +94,15 @@ test('parserOptions converts seconds to the milliseconds the parser wants', () =
 // --------------------------------------------------------------- alert switches
 
 /** A config with every alert category off, to switch one back on per case. */
-const NO_ALERTS = { castAlerts: false, summonAlerts: false, ccAlerts: false, castTimers: false };
+const NO_ALERTS = {
+  castAlerts: false, summonAlerts: false, ccAlerts: false, triggerAlerts: false,
+  triggerTimers: false,
+};
 
 test('any single alert category keeps the alert window alive', () => {
-  for (const key of ['castAlerts', 'summonAlerts', 'ccAlerts']) {
+  // Driven off ALERT_CATEGORIES rather than a list typed here, so a category added
+  // without being wired into the predicate fails loudly instead of going untested.
+  for (const key of ALERT_CATEGORIES) {
     assert.equal(
       alertsEnabled({ ...NO_ALERTS, [key]: true }), true,
       `${key} alone must be enough to justify the window`
@@ -104,11 +110,16 @@ test('any single alert category keeps the alert window alive', () => {
   }
 });
 
+test('every alert category has a default, and NO_ALERTS covers all of them', () => {
+  for (const key of ALERT_CATEGORIES) assert.equal(typeof DEFAULTS[key], 'boolean', key);
+  for (const key of ALERT_CATEGORIES) assert.equal(key in NO_ALERTS, true, key);
+});
+
 test('the timers are no longer an alert category — they have their own window', () => {
   // The alert window must not exist for a surface it no longer draws: an otherwise
   // silent player with only the timers on would get an empty renderer process.
-  assert.equal(alertsEnabled({ ...NO_ALERTS, castTimers: true }), false);
-  assert.equal(timersEnabled({ ...NO_ALERTS, castTimers: true }), true);
+  assert.equal(alertsEnabled({ ...NO_ALERTS, triggerTimers: true }), false);
+  assert.equal(timersEnabled({ ...NO_ALERTS, triggerTimers: true }), true);
 });
 
 test('the alert window is gone once the last category is off', () => {
@@ -126,18 +137,23 @@ test('mute beats the categories without erasing them', () => {
 
 test('a config predating a category treats it as on rather than dropping its alerts', () => {
   assert.equal(alertsEnabled({ castAlerts: false, summonAlerts: false }), true, 'ccAlerts is missing, so on');
-  assert.equal(timersEnabled({}), true, 'a missing castTimers reads as its default');
+  assert.equal(timersEnabled({}), true, 'a missing triggerTimers reads as its default');
 });
 
-test('the timers window follows its own switch, and loses to mute', () => {
+test('the timers window follows one switch, and loses to mute', () => {
+  // One switch, not two. The second covered the countdowns this app learned by watching
+  // a boss, and nothing learns any more — every row in that panel comes from a pack now,
+  // including the one we ship. See TIMER_KEYS and migrateTimers.
+  assert.deepEqual(TIMER_KEYS, ['triggerTimers', 'alertsMuted']);
+  assert.equal('castTimers' in DEFAULTS, false, 'the learned-timer key is gone');
   assert.equal(timersEnabled(DEFAULTS), true, 'a fresh install shows timers');
-  assert.equal(timersEnabled({ ...DEFAULTS, castTimers: false }), false);
+  assert.equal(timersEnabled({ ...DEFAULTS, triggerTimers: false }), false);
 
   // Mute is "shut up for this pull", and a panel that survived it would be the one
   // surface ignoring the hotkey — while the preference underneath stays untouched.
   const muted = { ...DEFAULTS, alertsMuted: true };
   assert.equal(timersEnabled(muted), false);
-  assert.equal(muted.castTimers, true);
+  assert.equal(muted.triggerTimers, true);
   assert.equal(timersEnabled({ ...muted, alertsMuted: false }), true);
 });
 
@@ -161,7 +177,12 @@ test('an old "alerts off" config keeps meaning no alerts at all', () => {
   store.load();
   assert.equal(store.get('summonAlerts'), false);
   assert.equal(store.get('ccAlerts'), false);
-  assert.equal(store.get('castTimers'), false, 'an inert stored timer flag must not spring to life');
+  assert.equal('castTimers' in store.all, false, 'the retired key does not survive a load');
+  // The trigger keys are absent from a config this old, so without the migration they
+  // would arrive from DEFAULTS switched ON and hand a chip stack to a player who had
+  // silence for months.
+  assert.equal(store.get('triggerAlerts'), false);
+  assert.equal(store.get('triggerTimers'), false);
   assert.equal(alertsEnabled(store.all), false);
   assert.equal(timersEnabled(store.all), false, 'and no timer window springs up either');
 });
@@ -176,8 +197,30 @@ test('a config already carrying the new keys is left exactly as written', () => 
   const store = new ConfigStore(dir);
   store.load();
   assert.equal(store.get('summonAlerts'), true, 'the migration must not fire a second time');
-  assert.equal(store.get('castTimers'), true);
+  assert.equal(store.get('triggerTimers'), true, 'a stored castTimers: true still means timers');
   assert.equal(alertsEnabled(store.all), true);
+});
+
+test('a config from when the timers had two switches keeps its countdowns', () => {
+  // They asked for countdowns, and there is now exactly one place countdowns come from —
+  // one that covers the bosses the learned column used to. Either key being on keeps the
+  // panel on; only a config that had switched both off gets silence.
+  for (const [stored, expected] of [
+    [{ castTimers: true, triggerTimers: false }, true],
+    [{ castTimers: false, triggerTimers: true }, true],
+    [{ castTimers: true, triggerTimers: true }, true],
+    [{ castTimers: false, triggerTimers: false }, false],
+  ]) {
+    const dir = tmpdir();
+    // summonAlerts present, so the older alerts migration cannot also fire and confuse
+    // which rule produced the answer.
+    fs.writeFileSync(path.join(dir, 'config.json'),
+      JSON.stringify({ summonAlerts: true, ...stored }));
+    const store = new ConfigStore(dir);
+    store.load();
+    assert.equal(store.get('triggerTimers'), expected, JSON.stringify(stored));
+    assert.equal('castTimers' in store.all, false, 'and the retired key is not carried forward');
+  }
 });
 
 test('a config with alerts on is untouched by the migration', () => {
@@ -188,7 +231,7 @@ test('a config with alerts on is untouched by the migration', () => {
   store.load();
   assert.equal(store.get('summonAlerts'), DEFAULTS.summonAlerts);
   assert.equal(store.get('ccAlerts'), DEFAULTS.ccAlerts);
-  assert.equal(store.get('castTimers'), DEFAULTS.castTimers);
+  assert.equal(store.get('triggerTimers'), DEFAULTS.triggerTimers);
 });
 
 test('the mute hotkey has a default binding that clashes with nothing else', () => {

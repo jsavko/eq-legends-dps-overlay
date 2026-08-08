@@ -44,6 +44,58 @@ export const CHANNELS = {
    */
   PETS_STATE: 'pets:state',
 
+  /**
+   * Trigger packs, for the settings window.
+   *
+   * `TRIGGERS_IMPORT` opens a file dialog and returns the import REPORT — what arrived,
+   * what was dropped and by name — rather than a bare ok/failed. That report is the
+   * headline of the feature: a GINA pack is a stranger's work written for a different
+   * server, and the only honest thing to show is exactly what crossed over.
+   */
+  TRIGGERS_LIST: 'triggers:list',
+  /** One pack in full — the groups and triggers the list only counts. Fetched per pack
+   *  rather than bundled into the list, because a rail of ten packs needs ten names and
+   *  the body of exactly one. */
+  TRIGGERS_GET: 'triggers:get',
+  TRIGGERS_IMPORT: 'triggers:import',
+  TRIGGERS_EXPORT: 'triggers:export',
+  TRIGGERS_REMOVE: 'triggers:remove',
+  TRIGGERS_SET_ENABLED: 'triggers:set-enabled',
+  /** One group or one trigger inside a pack — how a pack that ships EnableByDefault=False
+   *  gets switched on a group at a time, which is how its author meant it to be used. */
+  TRIGGERS_SET_PART_ENABLED: 'triggers:set-part-enabled',
+  /**
+   * Make a new, empty pack.
+   *
+   * Its own channel rather than a side effect of `saveTrigger`, which is how "My
+   * Triggers" comes into being — conjured on the first save and invisible in the rail
+   * until it holds something. That is fine for the one pack the app can name in advance
+   * and wrong for every other: a player organising their own triggers into a pack per
+   * boss needs the pack to exist before it has contents, and "save a trigger somewhere
+   * else to create the thing you wanted to save it in" is not an order anyone would
+   * guess. Creating and filling are two intents, so they are two channels.
+   */
+  TRIGGERS_CREATE_PACK: 'triggers:create-pack',
+  /** Authoring: save, delete, and test a pattern against the player's own log. */
+  TRIGGERS_SAVE_TRIGGER: 'triggers:save-trigger',
+  TRIGGERS_DELETE_TRIGGER: 'triggers:delete-trigger',
+  TRIGGERS_TEST_PATTERN: 'triggers:test-pattern',
+  /** Replay a whole pack against the player's log and report what actually fires. */
+  TRIGGERS_DRY_RUN: 'triggers:dry-run',
+  /**
+   * The rules this app ships with, switched from the same window as imported packs.
+   *
+   * These write ordinary config keys — `castAlerts`, the six `warn*`, `summonAlerts`,
+   * `ccAlerts` — rather than anything pack-shaped; `builtin-pack.js` owns the
+   * translation. They get their own channels instead of riding CONFIG_SET so the
+   * renderer names a ROW, not a config key: a window that could set arbitrary keys by
+   * name is a wider door than this one needs.
+   */
+  TRIGGERS_SET_BUILTIN: 'triggers:set-builtin',
+  TRIGGERS_SET_PRESET: 'triggers:set-preset',
+  /** Open the Triggers window — the settings form's entry point to it. */
+  TRIGGERS_OPEN: 'triggers:open',
+
   // renderer -> main (fire and forget)
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',
   /**

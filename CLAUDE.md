@@ -46,6 +46,9 @@ node scripts/replay.js <log> --print                       # parse a log, print 
 node scripts/replay.js <log> --write <file> --speed 5      # re-emit a log in wall-clock order; point the overlay at it and it looks live
 node scripts/collect-unknown.js <log>                      # report lines no rule matched (writes unknown-lines.txt)
 node scripts/backfill-history.js <log> --dir <dir>         # replay a log into the encounter history store (dedup-safe, --dry-run supported)
+node scripts/gina-dryrun.js <pack.gtp> --log <log>         # replay a GINA pack against a log: per-trigger hit counts, a sample line, and the dead list
+node scripts/mine-rhythms.js <log> [--write <pack.json>]   # measure boss recast intervals offline and print them as candidate triggers; writes nothing without --write
+node scripts/mine-gina.js <dir> [--min 2]                  # spell names recurring across independent GINA packs; prints candidates, never writes
 ```
 
 A live session's log for empirical checks:
@@ -60,13 +63,15 @@ A second, slower flow branches off at encounter close: parser `onEncounterEnd` �
 JSONL history store → History window. `docs/architecture.md` walks the whole pipeline
 with the actual event kinds and record shapes.
 
-**Four windows float over or beside the game**, each with its own bounds key and none
+**Five windows float over or beside the game**, each with its own bounds key and none
 deriving its placement from another's: the **meter** (`bounds`), the **alerts** banner
 stack (`alertsBounds`, top-centre — a warning must cross your eyeline), the **boss
 timers** panel (`timersBounds`, wherever you keep the buff window — a countdown is a
-fixture you consult), and the **History** browser (`historyBounds`). The same snapshot
-is pushed to the first three. What they share is the *gesture*, not the position: one
-`applyLock` unlock makes the whole HUD draggable, and Ctrl+Shift+H hides it together.
+fixture you consult), the **History** browser (`historyBounds`), and the **Triggers**
+manager (`triggersBounds`). The same snapshot is pushed to the first three. What those
+three share is the *gesture*, not the position: one `applyLock` unlock makes the whole
+HUD draggable, and Ctrl+Shift+H hides it together. History and Triggers are not part of
+the HUD — they take real mouse input, scroll their panes, and are opened between pulls.
 
 **`src/parser/` is pure Node — no Electron imports anywhere.** That is why the whole
 scoring pipeline is unit-testable in WSL and replayable offline. Keep it that way.
@@ -107,18 +112,47 @@ failures toast rather than propagate; a full disk must not take the live overlay
 (`updateMode` is pure and unit-tested); `electron-updater` is imported dynamically so
 that logic stays testable in WSL, where importing it would reach for Electron and throw.
 
+**`src/triggers/` is a SIBLING of the parser, not part of it** — pure Node, same
+construction rules, fed the same lines by `main.js` and merged into the snapshot
+afterwards. It reads GINA trigger packages (`.gtp` — a ZIP of `SharedData.xml`), runs
+them against the log, and emits warning chips and countdown rows in the shapes the
+alerts and timers renderers already consume. The separation is the whole design: a pack
+downloaded from a guild Discord contains arbitrary regex, and letting it near `rules.js`
+would mean a stranger's pattern could shadow a combat rule or stall the tailer and take
+the meter down with it. Here a bad pack costs triggers and nothing else. `engine.js`
+compiles once, prefilters with `String.includes` before running a regex, and disables a
+pattern that repeatedly overruns its time budget. `dryrun.js` replays a pack against the
+player's *own* log and reports what actually fires — because the alternative, rewriting a
+stranger's regex at import to make it match, is guessing. No new dependency: `.gtp` is
+read via built-in `zlib` behind a hand-rolled ZIP reader and written as stored entries.
+
+This is also where **the app's own boss timers** live now. `seed-pack.js` is a shipped
+native pack — sixteen countdowns measured off a real server by `mine-rhythms.js` and
+reviewed by hand — installed into the store on first run and thereafter an ordinary pack:
+switchable, editable, exportable, and never overwritten once the player has edited it
+(`pack.shipped` marks what has an upstream; `pack.edited` marks what has diverged from
+it). It replaced a live estimator, `src/parser/rhythm.js`, which computed the same
+medians at 4 Hz and showed the intermediate guesses; see
+`docs/changelog/2026-08-08-real-triggers-not-learned-rhythms.md` for why that went and why
+nobody should rebuild it.
+
 **`src/renderer/overlay/`** — the overlay view. Holds no parser state, only the last
 snapshot. Rows are reused, not rebuilt (bar transitions survive pushes). `breakdown.js`
 is pure (column arithmetic, unit-tested).
 
-**`src/renderer/timers/`** — the boss-timer panel: learned recast countdowns in fixed
-slots, shaped after EQ's buff window. A (caster, ability) pair claims a slot the first
-time it arms and **holds that row for the whole fight** — through the cast (the row says
-`CAST` instead of vanishing), through a retraction (a dash, never an invented number),
-through the caster dying. Slot lifetime lives in `rhythm.js` (`state`, `since`), not
-here, so the honesty rules stay unit-testable; this renderer only paints. Between
-fights the panel is *gone* — not an empty frame — except while unlocked, where the drag
-placeholder shows because an empty window cannot be positioned.
+**`src/renderer/timers/`** — the boss-timer panel: countdown rows in fixed slots, shaped
+after EQ's buff window. Every row comes from a trigger pack — there is exactly one source
+now, and the shipped boss timers are just the first pack in it. Slot lifetime lives in
+`engine.js` (`since`, `state`, the spent linger), not here, so the honesty rules stay
+unit-testable; this renderer only paints. A slot is claimed on the first match and never
+re-sorted by what is due next; a re-match restarts it *in place* rather than adding a
+second row. Numbers carry no `~`: the tilde meant "estimate" and there are no estimates
+left here — an authored duration is exact, and "exact" and "right for your server" are
+different claims, which is what the pack's own description is for. Between fights the
+panel is *gone* — not an empty frame — except while unlocked, where the drag placeholder
+shows because an empty window cannot be positioned. It is not tied to an encounter at
+all: pack timers are frequently out-of-combat by nature (respawns, spell durations), so
+the panel exists whenever any row does.
 
 **`src/renderer/history/`** — the History window: three fixed panes (fight list rail →
 fight stats → members + full breakdown). Every click swaps content *inside* a pane;
@@ -127,8 +161,26 @@ window's reason to exist (its predecessor, an accordion tab in settings, was rem
 for reflowing on every click). `organize.js` is the pure half (boss heuristic, filters,
 day grouping, formatters), unit-tested in WSL like `breakdown.js`.
 
+**`src/renderer/triggers/`** — the Triggers window (tray → Triggers…): three fixed panes
+on History's model, and the single place that answers *what may put something on my
+screen*. The rail is **sources** — the built-in rules first, then imported and authored
+packs, each with its own switch; the titlebar is **surfaces** (`triggerAlerts` /
+`triggerTimers`, the two global outputs, with mute beating both); the detail pane is the
+one row selected. The **built-in rules are folded in as the first pack** by
+`src/main/builtin-pack.js`, a pure shim that describes `castAlerts`, the six `warn*` keys,
+`summonAlerts` and `ccAlerts` in pack shape and translates a row's switch back to the key
+that has always backed it — the stored config is unchanged. Every one of those rows draws
+chips; the boss timers used to be a row here too, and left when they became a real pack.
+That is why
+the settings form no longer has ALERTS or BOSS TIMERS sections: answering the same
+question in two places let a pack be enabled while its surface was off, with neither
+screen saying so.
+
 **`src/renderer/setup/`** — first-run setup and the settings form. Cool slate palette;
-the overlay, alerts, timers and history windows share the warm parchment palette instead.
+the overlay, alerts, timers, history and triggers windows share the warm parchment palette
+instead. It owns *how the overlay behaves* — log file, appearance, pets, hotkeys — and
+deliberately no longer writes any alert or timer key, since a Save here would otherwise
+clobber whatever the Triggers window had just set.
 
 ## Invariants that are easy to break
 
@@ -147,12 +199,15 @@ the overlay, alerts, timers and history windows share the warm parchment palette
 - **A boss-timer row never moves.** That window exists because the timers used to sit
   at the bottom of the alert stack, where a measured session displaced them 524 times
   and hid them behind their own cast warning 10,525 times. So: slots come from the
-  parser in first-armed order and are *never* re-sorted by what is due next; a slot is
-  held through every state it can reach — armed, warm, due, CAST, lapsed — and every
-  one of them renders at the same fixed row height. Sorting the panel by `dueMs` would
-  reintroduce the exact bug it replaced. The **one** exception is death: a slain
-  caster's rows leave immediately, because a countdown for a corpse is not information
-  and on the common single-boss pull the panel simply empties rather than shifting.
+  engine in first-armed order and are *never* re-sorted by what is due next; a slot is
+  held through every state it can reach — armed, due now, ending, lapsed — and every
+  one of them renders at the same fixed row height. A second match on a trigger already
+  running restarts its slot in place rather than opening a row beside it. Sorting the
+  panel by `dueMs` would reintroduce the exact bug it replaced. The **one** exception is
+  death: a slain caster's rows leave immediately, because a countdown for a corpse is not
+  information and on the common single-boss pull the panel simply empties rather than
+  shifting — arranged now by each shipped trigger naming its own caster's death line as
+  an early ender, so the rule lives in a pack a player can read.
 - **The history window never reflows.** Selecting a fight, member, metric or filter
   swaps content inside a fixed pane; panes must sit on the same pixel for every fight.
   (Example of the failure class: a deaths line that rendered only on death-fights pushed

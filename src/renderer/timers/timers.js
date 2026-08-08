@@ -1,17 +1,19 @@
 /**
- * The boss-timer panel. Holds no parser state — just the castTimers array from the
+ * The boss-timer panel. Holds no engine state — just the `triggerTimers` array from the
  * last snapshot, painted into fixed slots.
  *
- * The parser owns slot LIFETIME (see rhythm.js): it hands over every pair that has
- * armed this fight, in first-armed order, with a state saying what the row may claim.
- * This file's whole job is to make sure a row, once drawn, does not move: elements are
- * reused by caster|ability, order comes from the parser and is never re-sorted, and a
- * state change swaps text and colour inside a slot of unchanging height.
+ * There used to be two kinds of row here and there is now one. The second kind was the
+ * learned rhythm: a countdown this app computed live from watching a boss recast
+ * something, hedged with a `~`, a spread, a "warm" state for a prior learned last week
+ * and a retraction path for when reality stopped matching. It is gone, and the bosses it
+ * covered ship as a trigger pack instead — so every row on this panel now comes from a
+ * pattern and a duration somebody wrote down, which the player can open, read and
+ * correct. See src/triggers/seed-pack.js.
  *
- * The one thing decided here rather than in the parser is CAST — whether the alert
- * window is showing this exact cast right now. That is a fact about the OTHER window's
- * contents, not about the rhythm, and it is why the slot no longer disappears at the
- * moment its spell fires: it says so and re-arms in place.
+ * What survives unchanged is the rule this window exists for: a row, once drawn, does not
+ * move. Elements are reused by key, the order comes from the engine and is never
+ * re-sorted by what is due next, and a state change swaps text and colour inside a slot
+ * of unchanging height.
  */
 
 const panel = document.getElementById('panel');
@@ -19,11 +21,8 @@ const who = document.getElementById('who');
 const slotList = document.getElementById('slots');
 
 let cfg = null;
-/** @type {Map<string, {el, due, spell, caster, fill}>} slot elements by caster|ability */
+/** @type {Map<string, {el, due, spell, caster, fill}>} slot elements by key */
 const slots = new Map();
-
-/** Below this the estimate is saying "now" — hot, but still an estimate. */
-const DUE_NOW_MS = 1500;
 
 init();
 
@@ -35,9 +34,30 @@ async function init() {
     document.body.dataset.locked = String(locked);
   });
   window.api.onSnapshot((snapshot) => {
-    render(snapshot.castTimers ?? [], snapshot.hostileCasts ?? []);
+    render(rows(snapshot));
   });
 }
+
+/**
+ * The rows to paint, already in first-armed order.
+ *
+ * The engine sorts on `since` and holds a slot for as long as it lives, so there is
+ * nothing to merge and nothing to re-sort. Gated here rather than in main so flipping the
+ * switch takes effect on the next push without the window being torn down and rebuilt.
+ */
+function rows(snapshot) {
+  if (cfg?.triggerTimers === false) return [];
+  return snapshot.triggerTimers ?? [];
+}
+
+/**
+ * What keys a slot.
+ *
+ * The engine issues an explicit key per slot, because two packs may name a countdown the
+ * same thing and one row would otherwise silently overwrite the other's element. The
+ * fallback covers a snapshot from a main process that predates it.
+ */
+const slotKey = (t) => t.key ?? `${t.caster}|${t.ability}`;
 
 function applyConfig(config) {
   cfg = config;
@@ -48,7 +68,7 @@ function applyConfig(config) {
   // so between fights "next snapshot" can be minutes away — long enough for the player
   // to watch the thing they just turned off sit there. Main closes this window on the
   // same key, but the order of the two messages is not ours to assume.
-  if (cfg?.castTimers === false) clear();
+  if (cfg?.triggerTimers === false) clear();
 }
 
 /** Empty the panel and take it off the screen entirely. */
@@ -60,22 +80,20 @@ function clear() {
   panel.hidden = true;
 }
 
-function render(timers, warnings) {
-  // Idle means gone: no fight and no armed rhythm paints NOTHING — not an empty
-  // frame, not placeholder rows. The window stays alive and click-through, so getting
-  // it back costs no gesture; there is simply nothing on screen between fights.
+function render(timers) {
+  // Idle means gone: nothing armed paints NOTHING — not an empty frame, not placeholder
+  // rows. The window stays alive and click-through, so getting it back costs no gesture;
+  // there is simply nothing on screen between fights.
   if (!timers.length) {
     clear();
     return;
   }
   panel.hidden = false;
 
-  // Which of these estimates the log has just turned into a fact.
-  const live = new Set(warnings.map((w) => `${w.caster}|${w.ability}`));
-  const keys = new Set(timers.map((t) => `${t.caster}|${t.ability}`));
+  const keys = new Set(timers.map(slotKey));
 
-  // The parser holds a slot for the whole fight, so this only fires when a fight ends
-  // and another begins between two pushes — never mid-fight, which is the point.
+  // The engine holds a slot until it has finished and lingered, so this only fires when a
+  // countdown is genuinely over — never underneath a live one, which is the point.
   for (const [k, slot] of slots) {
     if (!keys.has(k)) {
       slot.el.remove();
@@ -84,24 +102,25 @@ function render(timers, warnings) {
   }
 
   timers.forEach((t, index) => {
-    const k = `${t.caster}|${t.ability}`;
+    const k = slotKey(t);
     let slot = slots.get(k);
     if (!slot) {
       slot = buildSlot(t);
       slots.set(k, slot);
     }
-    paint(slot, t, live.has(k));
+    paint(slot, t);
 
-    // Insert-or-move to the parser's order; appendChild on an attached node is a move.
+    // Insert-or-move to the engine's order; appendChild on an attached node is a move.
     if (slotList.children[index] !== slot.el) {
       slotList.insertBefore(slot.el, slotList.children[index] ?? null);
     }
   });
 
-  // One caster is the overwhelmingly common case and the name is worth showing; more
-  // than one and the names would not fit, so the header counts them instead.
-  const casters = new Set(timers.map((t) => t.caster));
-  const heading = casters.size === 1 ? [...casters][0] : `${casters.size} casters`;
+  // Each row's own sub-line already names the pack it came from, so with one pack on
+  // screen — the overwhelmingly common case — the header would only repeat it. It counts
+  // instead, and only once there is something to count.
+  const packs = new Set(timers.map((t) => t.caster));
+  const heading = packs.size > 1 ? `${packs.size} packs` : '';
   if (who.textContent !== heading) who.textContent = heading;
 }
 
@@ -133,49 +152,46 @@ function buildSlot(t) {
 /**
  * Paint one slot for the state it is in.
  *
- * `cast` is a renderer state layered over the parser's: the underlying rhythm is still
- * armed and still counting, we are simply saying so out loud for the moment the log
- * confirms it. Everything else comes straight from the parser, including the refusal
- * to show a number for a prediction that has lapsed.
+ * No tilde anywhere. The tilde meant "estimate", and there are no estimates left on this
+ * panel: an authored duration is exact, and it is marked rather than hedged — "exact" and
+ * "correct for this server" are different claims and only the first is the pack's to
+ * make. See the trigger-row rail in timers.css.
  */
-function paint(slot, t, casting) {
-  const state = casting ? 'cast' : t.state;
+function paint(slot, t) {
   const armed = t.state === 'armed';
 
-  slot.el.dataset.state = state;
-  if (t.warm) slot.el.dataset.warm = '';
-  else delete slot.el.dataset.warm;   // this fight's own gaps just took over
-  if (armed && !casting && t.dueMs <= DUE_NOW_MS) slot.el.dataset.dueNow = '';
+  slot.el.dataset.state = t.state;
+  if (armed && t.dueMs <= DUE_NOW_MS) slot.el.dataset.dueNow = '';
   else delete slot.el.dataset.dueNow;
+  // The author's own "ending soon" window, if they set one.
+  if (t.ending) slot.el.dataset.ending = '';
+  else delete slot.el.dataset.ending;
 
-  const due = state === 'cast' ? 'CAST' : armed ? `~${Math.ceil(t.dueMs / 1000)}s` : '—';
+  const due = armed ? `${Math.ceil(t.dueMs / 1000)}s` : '—';
   if (slot.due.textContent !== due) slot.due.textContent = due;
 
-  const caster = `${t.caster} · ${detail(t, state === 'cast')}`;
+  const note = detail(t);
+  const caster = note ? `${t.caster} · ${note}` : t.caster;
   if (slot.caster.textContent !== caster) slot.caster.textContent = caster;
 
-  // Full while the cast is live, draining while it is armed, empty once the prediction
-  // is gone — a bar for a lapsed row would be a claim the log stopped supporting.
-  const fraction = state === 'cast' ? 1 : armed && t.intervalMs ? t.dueMs / t.intervalMs : 0;
+  // Draining while it is armed, empty once it is spent — a bar for a finished row would
+  // be a claim about time that has already gone.
+  const fraction = armed && t.intervalMs ? t.dueMs / t.intervalMs : 0;
   slot.fill.style.width = `${Math.max(0, Math.min(100, fraction * 100))}%`;
 }
 
+/** Below this the countdown is saying "now". */
+const DUE_NOW_MS = 1500;
+
 /**
- * What the sub-line says about the evidence behind this row.
+ * What the sub-line adds, beyond the pack the row came from.
  *
- * A live cast outranks whatever the prediction was doing: a row reading "CAST" beside
- * "late · pattern broke" says two things at once and one of them is stale news. The
- * spell IS being cast; the retracted prediction is what the log just superseded.
+ * Usually nothing, and that is the honest answer: the pack name already says why the row
+ * is on screen. A trigger row has no spread to quote and never "broke a pattern" — it
+ * either ran out, or was ended early by a line its author nominated.
  */
-function detail(t, casting) {
-  // There is no 'slain' wording any more: a dead caster's rows leave the panel the
-  // moment it dies rather than lingering as a dimmed corpse row.
-  if (!casting && t.state === 'lapsed') return 'late · pattern broke';
-  // A warm row deliberately shows no interval: it is running on a rhythm learned in an
-  // earlier fight, and printing "13.0s ±0.8" would dress last week's number up as this
-  // pull's measurement.
-  if (t.warm) return 'from memory';
-  if (t.intervalMs) return `${(t.intervalMs / 1000).toFixed(1)}s ±${(t.spreadMs / 1000).toFixed(1)}`;
-  // Casting with no rhythm left to quote — say the fact and claim nothing else.
-  return 'casting now';
+function detail(t) {
+  if (t.state === 'lapsed') return 'done';
+  if (t.ending && t.endingText) return t.endingText;
+  return null;
 }

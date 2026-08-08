@@ -82,114 +82,22 @@
         <label for="auto-switch">Follow character switches automatically</label>
       </div>
 
-      <h2>Alerts</h2>
+      <!-- The alert and boss-timer switches used to live here. They moved to the
+           Triggers window, where the rules this app ships with sit alongside imported
+           packs and your own: "what may put something on my screen" is one question,
+           and answering it in two places let a pack be on while the surface it drew to
+           was off, with nothing on either screen saying so. -->
+      <h2>Triggers</h2>
       <p class="hint no-top">
-        A floating window, top-center of the screen — unlock the overlay to move it.
-        Each of these is independent; the window opens for whichever are on.
-        Boss timers are no longer among them: they have a window of their own, below.
+        Everything that can warn you — the rules this app ships with, GINA packages you
+        import, and triggers you write yourself — lives in one window, with a switch for
+        each. <code>Control+Shift+A</code> still mutes the lot for a pull without losing
+        any of those choices.
       </p>
-      <div class="row checkbox">
-        <input id="cast-alerts" type="checkbox" />
-        <label for="cast-alerts">Warn about enemy casts
-          <span class="unit">interrupt calls for what the boss is casting right now</span>
-        </label>
+      <div class="row">
+        <button id="open-triggers" class="secondary">Triggers…</button>
+        <span id="triggers-summary" class="unit"></span>
       </div>
-      <!-- Indented under the checkbox it belongs to: a cue for a warning that isn't
-           being drawn is a beep with no explanation on screen. -->
-      <div class="row checkbox indent">
-        <input id="cast-alert-sound" type="checkbox" />
-        <label for="cast-alert-sound">Play a sound for interrupt-now warnings</label>
-      </div>
-
-      <!-- Which casts warn. Indented under the same parent as the sound, and disabled
-           with it, because every switch below is meaningless while warnings are off. -->
-      <div class="indent" id="warn-groups">
-        <div class="row preset">
-          <span class="preset-label">Show</span>
-          <button type="button" class="preset-btn" data-preset="essential">Essential</button>
-          <button type="button" class="preset-btn" data-preset="balanced">Balanced</button>
-          <button type="button" class="preset-btn" data-preset="everything">Everything</button>
-          <span class="preset-custom" hidden>Custom</span>
-        </div>
-        <div class="row checkbox">
-          <input id="warn-heals" type="checkbox" />
-          <label for="warn-heals">Heals &amp; gates
-            <span class="unit">interrupt it or the kill resets · ~7/hr</span>
-          </label>
-        </div>
-        <div class="row checkbox">
-          <input id="warn-control" type="checkbox" />
-          <label for="warn-control">Mez, charm &amp; fear
-            <span class="unit">the group loses control of itself · under 1/hr</span>
-          </label>
-        </div>
-        <div class="row checkbox">
-          <input id="warn-bigHits" type="checkbox" />
-          <label for="warn-bigHits">Big hits
-            <span class="unit">Harm Touch and the like — survivable, worth bracing for · ~2/hr</span>
-          </label>
-        </div>
-        <div class="row checkbox">
-          <input id="warn-locks" type="checkbox" />
-          <label for="warn-locks">Roots, snares &amp; stuns
-            <span class="unit">you are stuck, not dying · ~11/hr</span>
-          </label>
-        </div>
-        <div class="row checkbox">
-          <input id="warn-routine" type="checkbox" />
-          <label for="warn-routine">Routine nukes &amp; lifetaps
-            <span class="unit">named damage with nothing to do about it · ~12/hr</span>
-          </label>
-        </div>
-        <div class="row checkbox">
-          <input id="warn-unknown" type="checkbox" />
-          <label for="warn-unknown">Unrecognized casts
-            <span class="unit">every other spell the log names — noisy, but it is how a new mob's tricks get found · ~33/hr</span>
-          </label>
-        </div>
-        <p class="hint">
-          Rates are measured over a 150-hour session in current content, not predicted —
-          your own will differ with the zone. Mobs buffing themselves never warn at any
-          setting: they were measured doing nothing to anybody.
-        </p>
-      </div>
-      <div class="row checkbox">
-        <input id="summon-alerts" type="checkbox" />
-        <label for="summon-alerts">Announce summons
-          <span class="unit">who the boss just yanked to it — a fact that already happened, not a call to act</span>
-        </label>
-      </div>
-      <div class="row checkbox">
-        <input id="cc-alerts" type="checkbox" />
-        <label for="cc-alerts">Show crowd control on the group
-          <span class="unit">who is stunned, mezzed or charmed right now</span>
-        </label>
-      </div>
-      <p class="hint">
-        With all three off the window is closed entirely, so the in-game
-        <code>pet Name = Owner</code> command has nowhere to answer you — it still works,
-        it just cannot say so. <code>Control+Shift+A</code> mutes the lot for a pull
-        without losing these choices.
-      </p>
-
-      <h2>Boss timers</h2>
-      <p class="hint no-top">
-        A second floating window, separate from the alerts and placed separately — drag
-        it wherever you keep the buff window. Unlock the overlay to move it.
-      </p>
-      <div class="row checkbox">
-        <input id="cast-timers" type="checkbox" />
-        <label for="cast-timers">Show spell timers for named bosses
-          <span class="unit">countdowns learned from each boss's own recast rhythm — estimates, always marked "~"</span>
-        </label>
-      </div>
-      <p class="hint">
-        A boss ability keeps its row for the whole fight: when the spell fires the row
-        says <code>CAST</code> and re-arms in place, and when a rhythm stops holding up
-        it shows a dash rather than an invented number. Nothing reorders, so a row stays
-        where you learned to look for it. <code>Control+Shift+A</code> silences this
-        panel too.
-      </p>
 
       <h2>Named pets</h2>
       <p class="hint no-top">

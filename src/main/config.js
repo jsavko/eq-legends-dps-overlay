@@ -79,15 +79,31 @@ export const DEFAULTS = {
   /** Crowd control sitting on the group right now: stunned / mezzed / charmed chips. */
   ccAlerts: true,
   /**
-   * Learned recast countdowns for named bosses.
+   * Chips raised by imported or authored trigger packs.
    *
-   * Deliberately NOT one of the alert categories: the timers have their own window
-   * (see timersEnabled), because a countdown is a fixture you consult and a banner is
-   * an interruption — they want opposite places on the screen, and sharing one window
-   * meant every banner that arrived shoved the countdowns down the screen. The key
-   * keeps its name so configs written before the split still say what they meant.
+   * Its own category rather than a branch of `castAlerts`, because it answers a
+   * different question: the others are things this app decided are worth saying, and
+   * this is everything the PLAYER decided is. A switch that could only silence both
+   * together would make importing a pack a bet on the rest of the alerts too.
+   *
+   * On by default and costs nothing until a pack exists — with no packs imported the
+   * engine produces no chips at all, so behaviour is bit-for-bit what it was before.
    */
-  castTimers: true,
+  triggerAlerts: true,
+  /**
+   * Countdown rows, in a window of their own.
+   *
+   * Deliberately NOT one of the alert categories: a countdown is a fixture you consult
+   * and a banner is an interruption — they want opposite places on the screen, and
+   * sharing one window meant every banner that arrived shoved the countdowns down it.
+   *
+   * There used to be a second key beside this one, `castTimers`, for the countdowns this
+   * app LEARNED by watching a boss recast something. Nothing learns any more: the
+   * estimator is gone and the timers it produced ship as a trigger pack like any other,
+   * so one switch now covers every row the panel can draw. `migrateTimers` carries a
+   * config written under the old scheme forward.
+   */
+  triggerTimers: true,
   /** Short cue on a NEW tier-3 warning. Off by default — sound is opt-in, always. */
   castAlertSound: false,
   /**
@@ -128,6 +144,8 @@ export const DEFAULTS = {
   bounds: null,
   /** History window position and size; null until the user moves or resizes it. */
   historyBounds: null,
+  /** Triggers window position and size; null until the user moves or resizes it. */
+  triggersBounds: null,
 
   hotkeys: {
     toggleLock: 'Control+Shift+L',
@@ -139,13 +157,13 @@ export const DEFAULTS = {
 };
 
 /** The category switches, in the order they read in the settings form and the tray. */
-export const ALERT_CATEGORIES = ['castAlerts', 'summonAlerts', 'ccAlerts'];
+export const ALERT_CATEGORIES = ['castAlerts', 'summonAlerts', 'ccAlerts', 'triggerAlerts'];
 
 /** Every key that can change whether the alert window should exist. */
 export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
 
 /** Every key that can change whether the boss-timer window should exist. */
-export const TIMER_KEYS = ['castTimers', 'alertsMuted'];
+export const TIMER_KEYS = ['triggerTimers', 'alertsMuted'];
 
 /**
  * The six warning groups a cast can land in, in the order they read in the settings
@@ -242,13 +260,17 @@ export function alertsEnabled(cfg) {
 /**
  * Should the boss-timer window exist at all?
  *
- * One switch, not a set — the timers are a single surface with a single job, which is
- * exactly why they stopped being an alert category. Mute still wins: "shut up for this
- * pull" that left one panel talking would be the one surface ignoring the hotkey.
+ * One switch again. It was briefly two — one for the countdowns this app learned and one
+ * for the countdowns a pack states outright — which was an honest distinction while both
+ * existed. Only the second kind exists now, including for the bosses this app ships
+ * timers for, so a second switch would name a source with nothing behind it.
+ *
+ * Mute still wins: "shut up for this pull" that left this panel talking would be the one
+ * surface ignoring the hotkey.
  */
 export function timersEnabled(cfg) {
   if (!cfg || cfg.alertsMuted) return false;
-  return cfg.castTimers !== false;
+  return cfg.triggerTimers !== false;
 }
 
 /**
@@ -274,7 +296,7 @@ export class ConfigStore {
   load() {
     try {
       const raw = fs.readFileSync(this.file, 'utf8');
-      this.data = merge(DEFAULTS, migrateAlerts(JSON.parse(raw)));
+      this.data = merge(DEFAULTS, migrateTimers(migrateAlerts(JSON.parse(raw))));
     } catch {
       // Missing or corrupt config is not an error — the defaults are the answer, and
       // a corrupt file gets overwritten on the next save rather than blocking startup.
@@ -335,11 +357,48 @@ export class ConfigStore {
  * draw in it never showed a countdown. Honouring it now would spring one on a player who
  * has had silence for months. A stored `castAlerts: true` needs nothing — it already
  * means what it says.
+ *
+ * The two trigger keys are switched off here for exactly that reason, one step further
+ * on: they are absent from such a config entirely, so they would arrive from DEFAULTS
+ * switched ON, and a player who said "no alerts" would get a chip stack and a countdown
+ * panel the first time they imported a pack. Taking the same silence forward is the only
+ * reading of their choice that does not contradict it. Both are one click away in
+ * settings, and the import screen says so when it sees them off.
  */
 function migrateAlerts(raw) {
   if (!raw || typeof raw !== 'object') return raw;
   if (raw.castAlerts !== false || 'summonAlerts' in raw) return raw;
-  return { ...raw, summonAlerts: false, ccAlerts: false, castTimers: false };
+  return {
+    ...raw,
+    summonAlerts: false,
+    ccAlerts: false,
+    castTimers: false,
+    triggerAlerts: false,
+    triggerTimers: false,
+  };
+}
+
+/**
+ * One-shot upgrade for configs written while the timer panel had two switches.
+ *
+ * `castTimers` was the countdowns this app learned by watching a boss; `triggerTimers`
+ * was the ones a pack stated outright. There is one source now, so there is one switch,
+ * and the question is what a config holding both should mean.
+ *
+ * Either one being ON keeps the panel on. The player asked for countdowns; there is now
+ * exactly one place countdowns come from, and it includes the bosses the learned column
+ * used to cover — so honouring a `castTimers: true` by leaving `triggerTimers` off would
+ * take away the very rows that choice was about. Only a config that had switched BOTH
+ * off gets silence, which is the only reading under which neither key is contradicted.
+ *
+ * Unlike `migrateAlerts` this needs no tell to keep it from firing twice: `castTimers` is
+ * no longer in DEFAULTS, so it survives only in a file written by an older version, and
+ * the rule is idempotent besides — running it over its own output changes nothing.
+ */
+function migrateTimers(raw) {
+  if (!raw || typeof raw !== 'object' || !('castTimers' in raw)) return raw;
+  const { castTimers, ...rest } = raw;
+  return { ...rest, triggerTimers: castTimers !== false || raw.triggerTimers !== false };
 }
 
 /**

@@ -34,6 +34,7 @@ async function init() {
   await loadDirectory(state.config.logDir);
   if (state.selected) await validate(state.selected);
   await renderPets();
+  await renderTriggerSummary();
   refreshSaveButton();
 }
 
@@ -97,14 +98,6 @@ function fillForm(cfg) {
   $('grace').value = cfg.postKillGraceSec;
   $('group-only').checked = cfg.groupOnly;
   $('auto-switch').checked = cfg.autoSwitchCharacter;
-  $('cast-alerts').checked = cfg.castAlerts;
-  $('cast-alert-sound').checked = cfg.castAlertSound;
-  $('summon-alerts').checked = cfg.summonAlerts;
-  $('cc-alerts').checked = cfg.ccAlerts;
-  $('cast-timers').checked = cfg.castTimers;
-  for (const group of WARN_GROUPS) {
-    $(`warn-${group}`).checked = warnGroupOn(cfg, group);
-  }
   $('pet-owners').value = formatPetOwners(cfg.petOwners);
   $('hk-lock').value = cfg.hotkeys.toggleLock;
   $('hk-show').value = cfg.hotkeys.toggleVisible;
@@ -112,8 +105,28 @@ function fillForm(cfg) {
   $('hk-metric').value = cfg.hotkeys.toggleMetric;
   $('hk-alerts').value = cfg.hotkeys.toggleAlerts ?? '';
   syncOutputs();
-  syncAlertSound();
-  syncPreset();
+}
+
+/**
+ * The one line this form still says about warnings.
+ *
+ * Everything that decides them moved to the Triggers window; what stays here is a
+ * pointer and a count, so the form does not simply go silent about a feature it used to
+ * own. Failure is silent by design — the count is a courtesy, and a settings screen must
+ * still open when the trigger store cannot be read.
+ */
+async function renderTriggerSummary() {
+  const el = $('triggers-summary');
+  if (!el) return;
+  try {
+    const list = await window.api.triggersList();
+    const packs = list.packs?.length ?? 0;
+    const builtinOn = list.builtin?.stats?.on ?? 0;
+    const builtinAll = list.builtin?.stats?.rules ?? 0;
+    el.textContent = `${builtinOn} of ${builtinAll} built-in rules on · ${packs} imported pack(s)`;
+  } catch {
+    el.textContent = '';
+  }
 }
 
 function syncOutputs() {
@@ -121,73 +134,11 @@ function syncOutputs() {
   $('scale-out').textContent = `${Number($('scale').value).toFixed(2)}×`;
 }
 
-/**
- * The six warning groups, and the presets that write them.
- *
- * Mirrors `WARN_GROUPS` / `ALERT_PRESETS` in main/config.js, which this window cannot
- * import (that module reaches for `fs`). The checkbox ids follow the same convention
- * the renderer's group lookup does — group `bigHits` is `#warn-bigHits` and config key
- * `warnBigHits` — so all three sides are one rule rather than three lists.
- */
-const WARN_GROUPS = ['heals', 'control', 'bigHits', 'locks', 'routine', 'unknown'];
-const WARN_DEFAULTS = {
-  heals: true, control: true, bigHits: true, locks: true, routine: false, unknown: false,
-};
-const PRESETS = {
-  essential: { heals: true, control: true, bigHits: true, locks: false, routine: false, unknown: false },
-  balanced: { heals: true, control: true, bigHits: true, locks: true, routine: false, unknown: false },
-  everything: { heals: true, control: true, bigHits: true, locks: true, routine: true, unknown: true },
-};
-
-const warnKeyFor = (group) => `warn${group[0].toUpperCase()}${group.slice(1)}`;
-
-/** A missing key reads as its default, matching `warnGroupOn` in main/config.js. */
-function warnGroupOn(cfg, group) {
-  return (cfg?.[warnKeyFor(group)] ?? WARN_DEFAULTS[group]) !== false;
-}
-
-/** The cue only plays for drawn interrupt warnings, so it follows their checkbox. */
-function syncAlertSound() {
-  $('cast-alert-sound').disabled = !$('cast-alerts').checked;
-  // Every group switch is meaningless while warnings are off, and a live-looking
-  // checkbox that changes nothing is worse than a greyed-out one.
-  $('warn-groups').toggleAttribute('data-disabled', !$('cast-alerts').checked);
-}
-
-/**
- * Light whichever preset the six boxes currently amount to, or show "Custom".
- *
- * Derived on every change rather than remembered, for the same reason `presetOf` in
- * main/config.js is derived: a stored preset and the boxes under it can disagree, and
- * the one that would be wrong is the label the player is reading.
- */
-function syncPreset() {
-  const state = Object.fromEntries(WARN_GROUPS.map((g) => [g, $(`warn-${g}`).checked]));
-  const match = Object.keys(PRESETS).find(
-    (name) => WARN_GROUPS.every((g) => PRESETS[name][g] === state[g]),
-  );
-  for (const btn of document.querySelectorAll('.preset-btn')) {
-    btn.setAttribute('aria-pressed', String(btn.dataset.preset === match));
-  }
-  document.querySelector('.preset-custom').hidden = Boolean(match);
-}
-
-/** Selecting a preset writes all six boxes — see ALERT_PRESETS for why all six. */
-function applyPreset(name) {
-  for (const group of WARN_GROUPS) $(`warn-${group}`).checked = PRESETS[name][group];
-  syncPreset();
-}
-
 function wireEvents() {
   $('opacity').addEventListener('input', syncOutputs);
   $('scale').addEventListener('input', syncOutputs);
-  $('cast-alerts').addEventListener('change', syncAlertSound);
-  for (const group of WARN_GROUPS) {
-    $(`warn-${group}`).addEventListener('change', syncPreset);
-  }
-  for (const btn of document.querySelectorAll('.preset-btn')) {
-    btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
-  }
+
+  $('open-triggers').addEventListener('click', () => window.api.openTriggers());
 
   $('browse-dir').addEventListener('click', async () => {
     const r = await window.api.pick('directory');
@@ -338,14 +289,9 @@ async function save() {
     postKillGraceSec: Number($('grace').value),
     groupOnly: $('group-only').checked,
     autoSwitchCharacter: $('auto-switch').checked,
-    castAlerts: $('cast-alerts').checked,
-    castAlertSound: $('cast-alert-sound').checked,
-    summonAlerts: $('summon-alerts').checked,
-    ccAlerts: $('cc-alerts').checked,
-    castTimers: $('cast-timers').checked,
-    ...Object.fromEntries(
-      WARN_GROUPS.map((group) => [warnKeyFor(group), $(`warn-${group}`).checked]),
-    ),
+    // The alert and timer switches are deliberately absent: they belong to the Triggers
+    // window now, and a form that still wrote them would clobber whatever was set there
+    // the next time somebody pressed Save on an unrelated setting.
     petOwners: parsePetOwners($('pet-owners').value),
     hotkeys: {
       toggleLock: $('hk-lock').value.trim(),

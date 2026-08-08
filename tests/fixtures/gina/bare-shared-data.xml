@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- a bare SharedData.xml, as circulated unzipped alongside .gtp packages -->
+<SharedData>
+  <Triggers>
+    <Trigger>
+      <Name>Top-level trigger</Name>
+      <TriggerText><![CDATA[^(?<mob>.*) yawns\.$]]></TriggerText>
+      <EnableRegex>true</EnableRegex>
+      <UseText>1</UseText>
+      <DisplayText>Slowed: ${mob}</DisplayText>
+      <TimerType>Timer</TimerType>
+      <TimerName>Slow on ${mob}</TimerName>
+      <TimerDuration>01:30</TimerDuration>
+      <TimerStartBehavior>RestartTimer</TimerStartBehavior>
+      <TimerEarlyEnders>
+        <EarlyEnder>
+          <EarlyEndText>${mob} is no longer slowed.</EarlyEndText>
+          <EnableRegex>False</EnableRegex>
+        </EarlyEnder>
+      </TimerEarlyEnders>
+    </Trigger>
+  </Triggers>
+</SharedData>

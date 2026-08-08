@@ -545,9 +545,11 @@ export const RULES = [
   {
     // (confirmed) "You resist a zol ghoul knight's Ghoul Root!"
     //
-    // Resists matter to the rhythm tracker: for an innate breath AE the resist line
-    // can be the ONLY proof a cycle fired — everyone resisting a volley would
-    // otherwise read as a skipped beat and retract the timer.
+    // A resist is proof the spell FIRED, which for an innate breath AE can be the only
+    // proof there is: the volley prints no cast line, and a group that shrugs it off
+    // leaves no damage line either. That is why the shipped boss timers for Lava Breath
+    // and Frost Breath match this line as well as the damage (see mine-rhythms.js), and
+    // why the parser counts it as a cast resolving.
     id: 'resist-self',
     re: /^You resist (.+?)'s (.+?)!$/,
     make: (m) => ({ kind: 'resist', target: 'You', attacker: m[1], ability: m[2] }),
@@ -794,6 +796,29 @@ export const RULES = [
     make: (m) => ({ kind: 'logging', file: m[1], on: m[2] === 'ON' }),
   },
 ];
+
+/**
+ * One rule's pattern, as a string, by id.
+ *
+ * The Triggers window shows what a built-in rule actually matches instead of a sentence
+ * about it, and this is the door it reads through. A door rather than the table itself,
+ * for two reasons: the ORDER of `RULES` is load-bearing and nothing outside this file
+ * should be in a position to depend on it, and a `RegExp` handed out carries a mutable
+ * `lastIndex` that a careless consumer could leave mid-string in the parser's own copy.
+ *
+ * Reading the live source is the whole point. A pattern quoted by hand somewhere else is
+ * one that goes stale the first time this one is corrected, and the failure shows up as a
+ * screen quietly telling the player something untrue.
+ *
+ * @param {string} id
+ * @returns {string|null} null for an id no rule answers to
+ */
+export function ruleSource(id) {
+  return RULES.find((rule) => rule.id === id)?.re.source ?? null;
+}
+
+/** Every id `ruleSource` answers for, so a caller can be checked against reality. */
+export const RULE_IDS = Object.freeze(RULES.map((rule) => rule.id).filter(Boolean));
 
 /**
  * "frenzies on" -> "Frenzy", "crushes" -> "Crush", "crush" -> "Crush".

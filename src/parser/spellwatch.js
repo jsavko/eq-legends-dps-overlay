@@ -171,6 +171,27 @@ const TABLE = [
   },
 ];
 
+/**
+ * The table, as data a display layer can read.
+ *
+ * The Triggers window shows a built-in rule's real patterns rather than a paraphrase of
+ * them, and this is what it reads. Frozen copies, and the `RegExp` objects themselves are
+ * deliberately NOT handed out: a regex carries mutable `lastIndex`, and a consumer that
+ * ran one with `/g` would leave the parser's own copy mid-string. The source string is
+ * what the window wants anyway.
+ *
+ * Derived from `TABLE` rather than typed out beside it, which is the whole point — a
+ * pattern quoted by hand in another file is a pattern that drifts the first time this one
+ * is corrected, and the drift shows up as a screen that lies rather than as a test that
+ * fails.
+ */
+export const SPELL_PATTERNS = Object.freeze(TABLE.map((entry) => Object.freeze({
+  category: entry.category,
+  tier: entry.tier,
+  group: entry.group,
+  source: entry.re.source,
+})));
+
 /** The visibility group an unlisted cast falls into — the "unrecognized casts" switch. */
 export const UNKNOWN_GROUP = 'unknown';
 

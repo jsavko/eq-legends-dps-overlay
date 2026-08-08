@@ -1,0 +1,515 @@
+/*
+ * The Triggers window wears the OVERLAY's warm palette, like History and for the same
+ * reason: it is a reading surface about combat, not another form. The settings window
+ * keeps its cool slate, and the split now means something — slate is "how the overlay
+ * behaves", parchment is "what happens during a fight".
+ *
+ * Two fixed panes: rail (sources) and list. Editing and explaining happen in dialogs,
+ * because a form docked as a narrow third column is a form nobody can read — the first
+ * version of this window squeezed a pattern field, a token row and a test result into
+ * 380px and it looked exactly as bad as that sounds.
+ *
+ * Panes scroll internally, which is fine in a normal window: only the click-through
+ * windows (overlay, alerts, timers) may never scroll.
+ */
+
+:root {
+  --bg:        #100d0a;
+  --panel:     #17130f;
+  --panel-2:   #221b14;
+  --sunk:      #0d0a07;
+  --line:      #2e2620;
+
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+  --ink-ghost: #544c3e;
+
+  --ember:     #b9702a;
+  --gold:      #e0a53f;
+  --balm:      #63c2b4;
+  --bad:       #e5766b;
+}
+
+* { box-sizing: border-box; }
+
+/*
+ * `hidden` must win over every author display rule below.
+ *
+ * This is not defensive tidiness — it is the bug that made the first version of this
+ * window unusable. `[hidden]` gets its `display: none` from the UA stylesheet, and ANY
+ * author rule that sets `display` beats it. Rules like `#presets { display: flex }` and
+ * `.field { display: grid }` therefore un-hid every element they touched, so the editor,
+ * the import report and the built-in explanation all rendered at once, stacked on top of
+ * one another. Anything toggled with `hidden` needs this line to exist.
+ */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 290px minmax(0, 1fr);
+  grid-template-areas:
+    "titlebar titlebar"
+    "rail     contents";
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow: hidden;
+  user-select: none;
+}
+
+.mono, code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.muted { color: var(--ink-dim); }
+.small { font-size: 11px; }
+.faint { color: var(--ink-ghost); }
+.spacer { flex: 1; }
+code {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+.kicker {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  color: var(--ink-faint);
+}
+.kicker.ember { color: var(--ember); }
+.kicker.balm { color: var(--balm); }
+
+/* ---------------------------------------------------------------- titlebar */
+
+#titlebar {
+  grid-area: titlebar;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+#titlebar h1 { margin: 0; font-size: 16px; font-weight: 600; }
+#summary { font-size: 12px; color: var(--ink-faint); }
+
+#surfaces {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #1b1610;
+}
+.surfaces-label { font-size: 10px; color: var(--ink-ghost); }
+.surface {
+  padding: 2px 9px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.surface[aria-pressed="true"] { background: var(--ember); color: #160f08; font-weight: 600; }
+#surfaces[data-muted] { opacity: 0.5; }
+
+/* ---------------------------------------------------------------- buttons */
+
+button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--ember); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.primary {
+  background: var(--ember);
+  border-color: var(--ember);
+  color: #160f08;
+  font-weight: 600;
+}
+button.danger { color: var(--bad); }
+button.danger:hover:not(:disabled) { border-color: var(--bad); }
+
+/* ---------------------------------------------------------------- rail */
+
+#rail {
+  grid-area: rail;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+.rail-head {
+  margin: 0;
+  padding: 12px 16px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+}
+#packs { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; }
+#packs li {
+  display: grid;
+  gap: 5px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+#packs li:hover { background: #1b1610; }
+#packs li[aria-selected="true"] { background: #241a10; border-left-color: var(--gold); }
+.pack-row { display: flex; align-items: center; gap: 8px; }
+.pack-name { font-size: 14px; font-weight: 600; color: var(--ink-dim); }
+#packs li[aria-selected="true"] .pack-name { color: var(--ink); }
+.pack-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-faint); }
+
+.sw {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 15px;
+  padding: 2px;
+  border-radius: 999px;
+  border: none;
+  background: #312720;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  cursor: pointer;
+}
+.sw[aria-pressed="true"] { background: var(--ember); justify-content: flex-end; }
+.sw i { display: block; width: 11px; height: 11px; border-radius: 50%; background: var(--ink-faint); }
+.sw[aria-pressed="true"] i { background: #160f08; }
+
+.tag { padding: 1px 6px; border: 1px solid var(--line); border-radius: 3px; font-size: 10px; color: var(--ink-faint); }
+.tag.builtin { border-color: var(--ember); color: var(--ember); }
+.tag.edited, .tag.draft { border-color: var(--gold); color: var(--gold); }
+
+#rail-foot { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); }
+#rail-foot button { padding: 6px 11px; font-size: 12px; }
+
+/* ---------------------------------------------------------------- contents */
+
+#contents {
+  grid-area: contents;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  min-height: 0;
+  min-width: 0;
+}
+#contents-head { display: grid; gap: 4px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+.head-row { display: flex; align-items: center; gap: 10px; }
+#contents h2 { margin: 0; font-size: 16px; font-weight: 600; }
+#pack-note:empty { display: none; }
+
+#presets {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 20px;
+  background: #1b1610;
+  border-bottom: 1px solid var(--line);
+}
+.preset-label { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: var(--ink-faint); }
+.preset { padding: 4px 13px; border-radius: 999px; font-size: 12px; color: var(--ink-dim); }
+.preset[aria-pressed="true"] {
+  background: var(--ember);
+  border-color: var(--ember);
+  color: #160f08;
+  font-weight: 600;
+}
+
+#measured {
+  display: grid;
+  gap: 6px;
+  padding: 10px 20px;
+  background: #1b1610;
+  border-bottom: 1px solid var(--line);
+}
+.measured-row { display: flex; align-items: center; gap: 8px; }
+#measured-text { font-size: 12px; font-weight: 600; }
+.inline-check { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-dim); cursor: pointer; }
+input[type="checkbox"] { accent-color: var(--ember); margin: 0; }
+
+#rows { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; }
+#rows li.section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+}
+#rows li.section .rule { flex: 1; height: 1px; background: var(--line); }
+
+#rows li.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+#rows li.row:hover { background: #1b1610; }
+/* A child row sits under its parent. Indent, not nesting: an expandable tree needs a
+   disclosure control, and a disclosure control is an accordion by another name. */
+#rows li.row.child { padding-left: 44px; }
+/* Inert = its parent is switched off. Greyed rather than hidden, so the dependency is
+   visible instead of only discovered when the row silently stops mattering. */
+#rows li.row.inert { opacity: 0.45; }
+
+.row-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.row-name { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.row-sub, .row-pattern { font-size: 11px; color: var(--ink-faint); }
+.row-pattern {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+li.dead .row-name { color: var(--ink-faint); }
+li.dead .row-pattern { color: var(--ink-ghost); }
+
+.hits {
+  flex: 0 0 auto;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--balm);
+}
+.hits.dead { color: var(--bad); font-weight: 400; }
+.row-go { flex: 0 0 auto; font-size: 11px; color: var(--ink-ghost); }
+#rows li.row:hover .row-go { color: var(--gold); }
+
+.box {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink-faint);
+  border-radius: 3px;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.box[aria-pressed="true"] { background: var(--ember); border-color: var(--ember); }
+/* The tick, drawn rather than shipped: an inline SVG would need `img-src` and a glyph
+   would depend on a font the system may not have. Two borders on a rotated box — the
+   crossed-gradient version this replaces rendered as a bracket, not a check. */
+.box[aria-pressed="true"]::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  margin-top: -2px;
+  border: solid #160f08;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.hint-block { padding: 16px 20px; display: grid; gap: 6px; max-width: 760px; }
+
+/* ---------------------------------------------------------------- dialogs */
+
+dialog {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  width: min(760px, 92vw);
+  max-height: 92vh;
+  /* The dialog itself must NOT scroll: it and .dialog-form both capped at 88vh, so both
+     overflowed and the page grew two nested scrollbars side by side. Only .dialog-body
+     scrolls — the head and foot stay put, which is the whole point of the three-row grid. */
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+dialog::backdrop { background: rgba(8, 6, 4, 0.62); }
+.dialog-form {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  max-height: 92vh;
+  min-height: 0;
+}
+.dialog-head { display: grid; gap: 5px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.dialog-head h3 { margin: 0; font-size: 19px; font-weight: 600; }
+.dialog-body {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  padding: 18px 20px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+}
+.block { display: grid; gap: 6px; }
+.block p:not(.kicker) { margin: 0; font-size: 12px; color: var(--ink-dim); }
+
+.samples {
+  list-style: none;
+  margin: 0;
+  padding: 11px 12px;
+  display: grid;
+  gap: 5px;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.samples:empty { display: none; }
+.samples li {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  color: var(--ink-faint);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.callout {
+  display: grid;
+  gap: 7px;
+  padding: 12px 13px;
+  background: #1b1610;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.callout-title { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-dim); }
+.callout p { margin: 0; }
+
+/*
+ * A pattern offered as something to take away, rather than as something to read.
+ *
+ * Gold, where `.samples` is faint: the samples are evidence and this is the thing the
+ * button beside it copies. It WRAPS instead of ellipsizing — a recipe with a whole warning
+ * group's spell alternation inlined runs to several hundred characters, and a pattern you
+ * cannot see the end of is not one you can decide to take.
+ */
+.recipe {
+  margin: 0;
+  padding: 11px 12px;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--gold);
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Selectable, unlike the rest of this window: the whole point is to take it with you,
+     and the Start button is the convenience rather than the only route. */
+  user-select: text;
+}
+.pointlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pointlist li {
+  position: relative;
+  padding-left: 14px;
+  font-size: 11px;
+  color: var(--ink-faint);
+  line-height: 1.5;
+}
+.pointlist li::before { content: "·"; position: absolute; left: 3px; color: var(--ember); font-weight: 700; }
+
+/* ---------------------------------------------------------------- form */
+
+.field { display: grid; gap: 6px; }
+.field-head { display: flex; align-items: center; gap: 8px; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+input[type="text"], input[type="number"], select {
+  width: 100%;
+  min-width: 0;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+input.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+input::placeholder { color: var(--ink-ghost); }
+input[type="number"] { width: 90px; flex: 0 0 auto; text-align: right; }
+select { width: auto; flex: 0 0 auto; }
+input:focus, select:focus { outline: none; border-color: var(--gold); }
+input[aria-invalid="true"] { border-color: var(--bad); background: #160d0b; }
+
+.error { margin: 0; font-size: 11px; color: var(--bad); line-height: 1.45; }
+.errors { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.errors li { font-size: 12px; color: var(--bad); }
+
+.tokens { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.token {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+
+.seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg-btn { border: none; border-radius: 0; padding: 4px 12px; font-size: 11px; background: transparent; color: var(--ink-faint); }
+.seg-btn[aria-pressed="true"] { background: var(--ember); color: #160f08; font-weight: 600; }
+
+.test {
+  display: grid;
+  gap: 9px;
+  padding: 13px 14px;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.test[data-state="ok"] { border-color: var(--balm); }
+.test[data-state="none"] { border-color: var(--gold); }
+#e-test-result { margin: 0; }
+#e-test-result[data-state="ok"] { color: var(--balm); font-weight: 600; font-size: 14px; }
+#e-test-result[data-state="none"] { color: var(--gold); font-weight: 600; font-size: 14px; }
+
+/* ---------------------------------------------------------------- report */
+
+.report-file { display: grid; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.report-file:last-child { border-bottom: none; }
+.report-row { display: flex; align-items: baseline; gap: 8px; }
+.report-name { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; font-weight: 600; }
+.report-ok { font-size: 12px; font-weight: 600; color: var(--balm); }
+.report-drop { font-size: 12px; font-weight: 600; color: var(--gold); }
+.report-bad { font-size: 12px; font-weight: 600; color: var(--bad); }
+.drop-block {
+  display: grid;
+  gap: 9px;
+  padding: 12px 13px;
+  background: #1b1610;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.drop-reason { font-size: 12px; font-weight: 600; color: var(--gold); }
+.drop-names { font-size: 11px; color: var(--ink-faint); line-height: 1.5; }
+.measure-headline { display: flex; align-items: baseline; gap: 8px; }
+.measure-big { font-size: 36px; font-weight: 700; color: var(--balm); line-height: 1; }
+.measure-of { font-size: 15px; color: var(--ink-dim); }
+.measure-bar { height: 8px; border-radius: 999px; background: #2a211a; overflow: hidden; }
+.measure-bar i { display: block; height: 8px; background: var(--balm); }

@@ -24,7 +24,15 @@ import {
   ALERT_PRESETS, warnKeyFor, presetOf,
 } from './config.js';
 import { EncounterStore, RECORD_VERSION, storeKey } from './history.js';
-import { RhythmStore } from './rhythms.js';
+import { TriggerStore } from './triggers-store.js';
+import { builtinPack, builtinPatch, builtinPresetPatch } from './builtin-pack.js';
+import { TriggerEngine } from '../triggers/engine.js';
+import { parseGinaPackage } from '../triggers/gina.js';
+import { exportGinaPackage } from '../triggers/gina-export.js';
+import { createTrigger, updateTrigger, deleteTrigger, packStats } from '../triggers/pack.js';
+import { installSeedPack } from '../triggers/seed-pack.js';
+import { patternTemplate } from '../triggers/tokens.js';
+import { dryRunLog, readLogTail, testPattern } from '../triggers/dryrun.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
 import { clampHeight, clampWidth, placeWindow } from './layout.js';
 import { startUpdater, updateMode } from './updater.js';
@@ -39,6 +47,7 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {BrowserWindow|null} */ let overlayWindow = null;
 /** @type {BrowserWindow|null} */ let setupWindow = null;
 /** @type {BrowserWindow|null} */ let historyWindow = null;
+/** @type {BrowserWindow|null} */ let triggersWindow = null;
 /** @type {BrowserWindow|null} */ let alertsWindow = null;
 /** @type {BrowserWindow|null} */ let timersWindow = null;
 /** @type {LogParser|null} */    let parser = null;
@@ -46,14 +55,24 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {ConfigStore|null} */  let config = null;
 /** @type {Tray|null} */         let tray = null;
 /** @type {EncounterStore|null} */ let history = null;
-/** @type {RhythmStore|null} */   let rhythmStore = null;
+/** @type {TriggerStore|null} */  let triggerStore = null;
+/**
+ * The trigger runtime — a SIBLING of the parser, fed the same lines.
+ *
+ * It lives beside `parser` rather than inside it so a regex out of a stranger's pack can
+ * never reach the code that decides who did the damage: a bad pack costs the triggers in
+ * that pack, and the meter and the history carry on. See src/triggers/engine.js.
+ */
+/** @type {TriggerEngine|null} */ let triggers = null;
 
 let pushTimer = null;
 let stopUpdater = null;
 let lastRevision = -1;
+let lastTriggerRevision = -1;
 let overlayVisible = true;
 let saveBoundsTimer = null;
 let saveHistoryBoundsTimer = null;
+let saveTriggersBoundsTimer = null;
 let saveAlertsBoundsTimer = null;
 let saveTimersBoundsTimer = null;
 let hoverTimer = null;
@@ -92,7 +111,10 @@ async function main() {
   config = new ConfigStore(app.getPath('userData'));
   config.load();
   history = new EncounterStore(path.join(app.getPath('userData'), 'history'));
-  rhythmStore = new RhythmStore(path.join(app.getPath('userData'), 'rhythms'), loadBaselineRhythms());
+  triggerStore = new TriggerStore(path.join(app.getPath('userData'), 'triggers'));
+  installSeedTimers();
+  triggers = new TriggerEngine();
+  reloadTriggerPacks();
 
   registerIpc();
   createTray();
@@ -143,26 +165,37 @@ async function startTailing(logPath) {
     logFilename: path.basename(logPath),
     ...config.parserOptions(),
     onEncounterEnd: persistEncounter,
-    onRhythmsLearned: persistRhythms,
     onPetOwnersChanged: persistPetOwners,
   });
-  provideKnownRhythms();
 
   tailer = new Tailer({
     filePath: logPath,
     watchDirectory: config.get('autoSwitchCharacter'),
   });
 
+  triggers?.setCharacter(parser.selfName);
+
   tailer.on('lines', (lines) => {
-    for (const line of lines) parser.feed(line);
+    for (const line of lines) {
+      parser.feed(line);
+      // The same line, to the sibling engine. Two consumers of one stream is the price
+      // of keeping a stranger's regexes out of the scoring pipeline, and it is cheap:
+      // the engine prefilters with String.includes before any regex runs.
+      triggers?.feed(line);
+    }
+    // The parser learns the character's own name from the log rather than only from the
+    // filename, so `{C}` patterns may only become resolvable partway into a session.
+    triggers?.setCharacter(parser.selfName);
   });
 
   tailer.on('switch', ({ to, character }) => {
     // A different character means a different group and a different set of totals.
     parser.setLogFilename(path.basename(to));
     parser.reset();
-    // The server may have changed with the character, and rhythms are per server.
-    provideKnownRhythms();
+    // Every `{C}` in every pattern has to be resubstituted — which is exactly why the
+    // token survives into the stored pattern instead of being baked in at import.
+    triggers?.reset();
+    triggers?.setCharacter(character ?? parser.selfName);
     config.set({ logPath: to });
     toast(`Now following ${character}`);
     refreshTrayMenu();
@@ -172,6 +205,7 @@ async function startTailing(logPath) {
   tailer.on('reset', ({ reason }) => {
     // The log was rotated or truncated; anything in flight refers to bytes that are gone.
     parser.reset();
+    triggers?.reset();
     toast(reason === 'truncated' ? 'Log truncated — restarting' : 'Log replaced — restarting');
   });
 
@@ -224,30 +258,21 @@ function persistEncounter(enc) {
 }
 
 /**
- * Boss rhythms shipped with the app: measured from real session logs by
- * scripts/seed-rhythms.js and copied into src/main/baseline-rhythms.json — never
- * hand-written numbers. A missing or damaged file just means no baselines.
- */
-function loadBaselineRhythms() {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(HERE, 'baseline-rhythms.json'), 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Persist a closing fight's learned boss rhythms.
+ * Put the shipped boss-timer pack in the store, if the player has not made it theirs.
  *
- * Same failure posture as history: the store is a convenience, and a full disk must
- * not take the live overlay down — or even interrupt the fight report.
+ * The app's own boss timers are an ordinary pack now, so this is the one moment they get
+ * into the store — visible in the Triggers rail, switchable, editable and exportable like
+ * anything imported. `installSeedPack` decides whether to write; see it for why an edited
+ * copy is never overwritten.
+ *
+ * A store that cannot be written is not a reason to refuse to start: the player gets no
+ * boss timers and everything else works, which is strictly better than no overlay.
  */
-function persistRhythms(learned) {
-  if (!rhythmStore || !parser) return;
+function installSeedTimers() {
   try {
-    rhythmStore.merge(parser.server, learned, Date.now());
+    installSeedPack(triggerStore);
   } catch (err) {
-    toast(`Rhythm save failed: ${err.message}`);
+    console.warn('[triggers] seed pack not installed:', err?.message ?? err);
   }
 }
 
@@ -267,39 +292,103 @@ function persistPetOwners(mapping) {
   }
 }
 
-/** Hand the parser what previous fights on this server taught. */
-function provideKnownRhythms() {
-  if (!rhythmStore || !parser) return;
+/**
+ * Hand the engine every enabled pack, compiled.
+ *
+ * Called on startup and after any import, removal or switch — wholesale rather than
+ * incrementally, because recompiling a few hundred regexes takes microseconds and a
+ * diffing path would be several ways to reach a slightly wrong state.
+ *
+ * A store that cannot be read is not a reason to fail to start: the engine simply has no
+ * packs, the overlay is exactly what it was before this feature existed, and the problem
+ * is reported rather than fatal.
+ */
+function reloadTriggerPacks() {
+  if (!triggers || !triggerStore) return;
   try {
-    parser.setKnownRhythms(rhythmStore.knownFor(parser.server));
+    triggers.setPacks(triggerStore.enabledPacks());
+  } catch (err) {
+    triggers.setPacks([]);
+    toast(`Trigger packs failed to load: ${err.message}`);
+  }
+}
+
+/**
+ * Replay a pack against the player's own log and report what actually fires.
+ *
+ * The headline of the whole feature. A shared pack was written by a stranger, usually
+ * for a different server, and the only honest thing to say about it is what it does
+ * against THIS log — measured, not asserted from ours. See src/triggers/dryrun.js for
+ * the measurement that made this the design.
+ *
+ * A missing or unreadable log is not an error: the pack imports, and the report simply
+ * says it could not be measured.
+ */
+async function measurePack(pack, opts = {}) {
+  if (!tailer?.filePath) return null;
+  try {
+    return await dryRunLog(pack, tailer.filePath, {
+      character: parser?.selfName ?? null,
+      rankTolerant: opts.rankTolerant === true,
+    });
   } catch {
-    parser.setKnownRhythms([]);
+    return null;
   }
 }
 
 /**
  * Push a snapshot to the overlay on a fixed cadence.
  *
- * The parser is also ticked here so an encounter times out during a lull, when no log
- * lines are arriving to advance its clock.
+ * Both the parser and the trigger engine are ticked here so their clocks advance during
+ * a lull, when no log lines are arriving to advance them — an encounter has to be able
+ * to time out, and a chip raised just before the pull ended must not sit on screen until
+ * the next line, which can be minutes away.
  */
 function startPushLoop() {
   clearInterval(pushTimer);
   pushTimer = setInterval(() => {
     if (!parser || !overlayWindow || overlayWindow.isDestroyed()) return;
     parser.tick();
+    triggers?.tick();
 
-    // A running encounter's elapsed time changes every tick even when the revision
-    // has not, so only a closed, unchanged encounter can skip the push.
-    const snapshot = parser.snapshot();
-    if (parser.revision === lastRevision && !snapshot.active) return;
+    // A running encounter's elapsed time changes every tick even when the revision has
+    // not, so only a closed, unchanged encounter can skip the push. A live trigger row
+    // is the same case for the same reason: its countdown moves every tick, and it can
+    // be running with no encounter open at all — which is the ONE behaviour change this
+    // feature makes to the timers panel, and it only happens once a pack is imported.
+    const snapshot = buildSnapshot();
+    const unchanged = parser.revision === lastRevision &&
+      (triggers?.revision ?? -1) === lastTriggerRevision;
+    if (unchanged && !snapshot.active && !triggers?.live) return;
     lastRevision = parser.revision;
+    lastTriggerRevision = triggers?.revision ?? -1;
 
     overlayWindow.webContents.send(CHANNELS.SNAPSHOT, snapshot);
     for (const win of [alertsWindow, timersWindow]) {
       if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.SNAPSHOT, snapshot);
     }
   }, PUSH_INTERVAL_MS);
+}
+
+/**
+ * The parser's snapshot, with the trigger engine's two surfaces merged in.
+ *
+ * Merged HERE rather than in the parser, because the parser knows nothing about packs
+ * and must not start to. Trigger chips join `hostileCasts` so they share the stack's
+ * severity ordering and the renderer needs no second list; countdowns arrive as
+ * `triggerTimers`, which is now the ONLY source the boss-timer panel has — the learned
+ * `castTimers` list went with the estimator that produced it, and what used to be the
+ * app's own timers is a shipped pack running through this same engine.
+ */
+function buildSnapshot() {
+  const now = Date.now();
+  const snapshot = parser.snapshot();
+  if (!triggers) return { ...snapshot, triggerTimers: [] };
+  return {
+    ...snapshot,
+    hostileCasts: [...snapshot.hostileCasts, ...triggers.warnings(now)],
+    triggerTimers: triggers.timers(now),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +578,7 @@ function refreshTrayMenu() {
     {
       label: 'Reset encounter',
       accelerator: keys.resetEncounter,
-      click: () => { parser?.reset(); toast('Encounter reset'); },
+      click: resetEncounter,
     },
     { type: 'separator' },
     // A submenu, not five more top-level items: the menu is already nine entries, and
@@ -532,6 +621,10 @@ function refreshTrayMenu() {
         alertToggle('Summon announcements', 'summonAlerts'),
         alertToggle('Crowd control on the group', 'ccAlerts'),
         {
+          ...alertToggle('Trigger packs', 'triggerAlerts'),
+          toolTip: 'Chips raised by imported or authored triggers',
+        },
+        {
           ...alertToggle('Sound for interrupt warnings', 'castAlertSound'),
           // A beep for a warning that isn't drawn is a noise with no explanation.
           enabled: config.get('castAlerts') !== false,
@@ -540,8 +633,12 @@ function refreshTrayMenu() {
         // Below the line because it is not one of the categories above: the timers
         // draw in a window of their own, placed on their own. It stays in this menu
         // because the mute at the top still silences it.
+        //
+        // One switch, not two. There used to be a second for the countdowns this app
+        // learned by watching a boss, and there is no longer anything that learns —
+        // every row in that panel now comes from a pack, including the one we ship.
         {
-          ...alertToggle('Boss spell timers', 'castTimers'),
+          ...alertToggle('Boss spell timers', 'triggerTimers'),
           toolTip: 'A panel of its own — unlock the overlay to place it',
         },
       ],
@@ -549,6 +646,7 @@ function refreshTrayMenu() {
     { type: 'separator' },
     // "Show me past fights" is a destination people look for by name, so it gets its
     // own window and its own menu item rather than hiding inside settings.
+    { label: 'Triggers…', click: createTriggers },
     { label: 'History…', click: createHistory },
     { label: 'Settings…', click: () => createSetup('settings') },
     { type: 'separator' },
@@ -628,6 +726,51 @@ function createHistory() {
   historyWindow.on('moved', remember);
   historyWindow.on('resized', remember);
   historyWindow.on('closed', () => { historyWindow = null; });
+}
+
+/**
+ * The Triggers window: every source of a warning, in one place.
+ *
+ * Same construction as History and for the same reasons — a real window that takes
+ * mouse input, scrolls its panes internally, and keeps its own bounds key. It is not
+ * part of the HUD: it does not float, does not answer to the lock gesture, and is not
+ * hidden by Ctrl+Shift+H, because you open it between pulls rather than during one.
+ */
+function createTriggers() {
+  if (triggersWindow && !triggersWindow.isDestroyed()) {
+    triggersWindow.focus();
+    return;
+  }
+
+  triggersWindow = new BrowserWindow({
+    width: 1160,
+    height: 760,
+    ...(config.get('triggersBounds') ?? {}),
+    minWidth: 940,
+    minHeight: 560,
+    title: 'EQL DPS Overlay — Triggers',
+    backgroundColor: '#100d0a',
+    icon: path.join(ASSETS, 'icon-256.png'),
+    webPreferences: {
+      preload: path.join(RENDERER, 'triggers', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  triggersWindow.setMenuBarVisibility(false);
+  triggersWindow.loadFile(path.join(RENDERER, 'triggers', 'index.html'));
+
+  const remember = () => {
+    clearTimeout(saveTriggersBoundsTimer);
+    saveTriggersBoundsTimer = setTimeout(() => {
+      if (!triggersWindow || triggersWindow.isDestroyed()) return;
+      config.set({ triggersBounds: triggersWindow.getBounds() });
+    }, 400);
+  };
+  triggersWindow.on('moved', remember);
+  triggersWindow.on('resized', remember);
+  triggersWindow.on('closed', () => { triggersWindow = null; });
 }
 
 /**
@@ -955,12 +1098,26 @@ function registerHotkeys() {
 
   bind(keys.toggleLock, toggleLock, 'lock');
   bind(keys.toggleVisible, toggleVisible, 'show/hide');
-  bind(keys.resetEncounter, () => {
-    parser?.reset();
-    toast('Encounter reset');
-  }, 'reset');
+  bind(keys.resetEncounter, resetEncounter, 'reset');
   bind(keys.toggleMetric, toggleMetric, 'damage/healing');
   bind(keys.toggleAlerts, toggleAlerts, 'mute alerts');
+}
+
+/**
+ * "Start again from here" — the hotkey, the tray item and the overlay button.
+ *
+ * One function because it now has to clear TWO things, and three call sites each
+ * remembering to do both is three chances to forget the second. A reset is the player
+ * saying the screen no longer describes anything they care about, and a trigger chip or
+ * countdown left standing would be the one part of the HUD that disagreed.
+ *
+ * Deliberately NOT recorded in history, unchanged — the parser's onEncounterEnd contract
+ * is that a manual reset closes nothing.
+ */
+function resetEncounter() {
+  parser?.reset();
+  triggers?.reset();
+  toast('Encounter reset');
 }
 
 /** The metric cycle: damage → healing → taken → damage. */
@@ -1042,6 +1199,235 @@ function registerIpc() {
     refreshTrayMenu();
     pushStatus();
     return after;
+  });
+
+  // ---------------------------------------------------------------- triggers
+
+  ipcMain.handle(CHANNELS.TRIGGERS_GET, (_e, id) => triggerStore.get(id) ?? null);
+
+  /**
+   * Flip one built-in rule.
+   *
+   * The renderer names a ROW and `builtin-pack.js` decides which config key that is —
+   * an unknown name writes nothing rather than setting whatever key it happened to
+   * spell. Same reload path as a pack change, because the alerts and timers windows
+   * have to be re-derived either way.
+   */
+  ipcMain.handle(CHANNELS.TRIGGERS_SET_BUILTIN, (_e, { key, enabled }) => {
+    const patch = builtinPatch(key, enabled);
+    if (!patch) return { ok: false };
+    setAlertOption(patch);
+    return { ok: true };
+  });
+
+  ipcMain.handle(CHANNELS.TRIGGERS_SET_PRESET, (_e, name) => {
+    const patch = builtinPresetPatch(name);
+    if (!patch) return { ok: false };
+    setAlertOption(patch);
+    return { ok: true };
+  });
+
+  ipcMain.handle(CHANNELS.TRIGGERS_OPEN, () => { createTriggers(); });
+
+  ipcMain.handle(CHANNELS.TRIGGERS_LIST, () => ({
+    /**
+     * The rules this app ships with, first in the rail.
+     *
+     * Built from live config every time rather than cached, because the same keys are
+     * still writable from the tray — a stale copy here would show the player a switch
+     * in the position it was in when the window opened.
+     */
+    builtin: builtinPack(config.all),
+    // `packs` and `problems` — a pack file that would not parse is skipped rather than
+    // thrown over, and named here so a corrupt one is visible instead of just absent.
+    ...triggerStore.summary(),
+    // Patterns that ARE loaded but are not running: one that would not compile, or one
+    // the budget guard switched off for overrunning. Named rather than left to be
+    // discovered mid-raid as a trigger that mysteriously stopped.
+    silenced: triggers?.problems() ?? [],
+    // So the form can say "imported, but the chips are switched off" instead of leaving
+    // the player to wonder why nothing appears.
+    alertsOn: config.get('triggerAlerts') !== false && config.get('alertsMuted') !== true,
+    timersOn: config.get('triggerTimers') !== false && config.get('alertsMuted') !== true,
+  }));
+
+  /**
+   * Import a `.gtp` or a bare `SharedData.xml`, and report honestly on what arrived.
+   *
+   * The dry-run runs on import rather than on request: it takes about two seconds
+   * against a 79 MB log, and a report the player has to go and ask for is a report most
+   * of them will never see. The pack is saved either way — what fires is information
+   * about the pack, not a condition of keeping it.
+   */
+  ipcMain.handle(CHANNELS.TRIGGERS_IMPORT, async () => {
+    const result = await dialog.showOpenDialog(setupWindow ?? overlayWindow, {
+      title: 'Import a GINA trigger package',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'GINA packages', extensions: ['gtp', 'xml'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePaths.length) return { canceled: true };
+
+    const imported = [];
+    for (const file of result.filePaths) {
+      try {
+        const { pack, dropped } = parseGinaPackage(fs.readFileSync(file), {
+          name: path.basename(file).replace(/\.\w+$/i, ''),
+        });
+        const saved = triggerStore.add(pack);
+        if (!saved.ok) {
+          imported.push({ file: path.basename(file), ok: false, errors: saved.errors });
+          continue;
+        }
+        imported.push({
+          file: path.basename(file),
+          ok: true,
+          pack: { id: saved.pack.id, name: saved.pack.name, ...packStats(saved.pack) },
+          dropped,
+          dryRun: await measurePack(saved.pack),
+        });
+      } catch (err) {
+        imported.push({ file: path.basename(file), ok: false, errors: [err.message] });
+      }
+    }
+
+    reloadTriggerPacks();
+    return { canceled: false, imported };
+  });
+
+  ipcMain.handle(CHANNELS.TRIGGERS_EXPORT, async (_e, id) => {
+    const pack = triggerStore.get(id);
+    if (!pack) return { ok: false, error: 'no such pack' };
+
+    const result = await dialog.showSaveDialog(setupWindow ?? overlayWindow, {
+      title: 'Export as a GINA package',
+      defaultPath: `${pack.id}.gtp`,
+      filters: [{ name: 'GINA packages', extensions: ['gtp'] }],
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+
+    try {
+      const { buffer, lost } = exportGinaPackage(pack);
+      await fs.promises.writeFile(result.filePath, buffer);
+      // `lost` is returned rather than swallowed: GINA's schema has no element for a
+      // warning group, a severity tier or provenance, and a file that silently means
+      // less than the one it came from is the same failure as a lossy import.
+      return { ok: true, path: result.filePath, lost };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.TRIGGERS_REMOVE, (_e, id) => {
+    const removed = triggerStore.remove(id);
+    reloadTriggerPacks();
+    return { ok: removed };
+  });
+
+  ipcMain.handle(CHANNELS.TRIGGERS_SET_ENABLED, (_e, { id, enabled }) => {
+    const pack = triggerStore.setEnabled(id, enabled);
+    reloadTriggerPacks();
+    return { ok: Boolean(pack) };
+  });
+
+  ipcMain.handle(CHANNELS.TRIGGERS_SET_PART_ENABLED, (_e, { id, groupId, triggerId, enabled }) => {
+    const pack = groupId
+      ? triggerStore.setGroupEnabled(id, groupId, enabled)
+      : triggerStore.setTriggerEnabled(id, triggerId, enabled);
+    reloadTriggerPacks();
+    return { ok: Boolean(pack) };
+  });
+
+  /**
+   * Create an empty pack of the player's own.
+   *
+   * The name arrives from a renderer and becomes a FILENAME, which is the whole reason
+   * this goes through `triggerStore.add()`: that routes it through `freeId`/`safeId`, so
+   * a pack called `../../config` lands as `config.json` inside the triggers directory
+   * rather than anywhere else, and a second pack sharing a name gets its own id instead
+   * of silently replacing the first.
+   */
+  ipcMain.handle(CHANNELS.TRIGGERS_CREATE_PACK, (_e, { name } = {}) => {
+    const clean = String(name ?? '').trim();
+    if (!clean) return { ok: false, errors: ['a name is required'] };
+
+    const saved = triggerStore.add({
+      id: clean,
+      name: clean,
+      comments: 'Triggers written here.',
+      origin: 'native',
+      enabled: true,
+      groups: [],
+      triggers: [],
+    });
+    if (!saved.ok) return { ok: false, errors: saved.errors };
+    reloadTriggerPacks();
+    return { ok: true, packId: saved.pack.id };
+  });
+
+  /**
+   * Save an authored trigger into "My Triggers".
+   *
+   * The player's own work goes into a pack of its own rather than into whichever
+   * imported pack happens to be open — which matters the moment that pack is removed,
+   * re-imported, or exported back out with an attribution it no longer deserves.
+   */
+  ipcMain.handle(CHANNELS.TRIGGERS_SAVE_TRIGGER, (_e, { packId, triggerId, form }) => {
+    const pack = packId ? triggerStore.get(packId) : triggerStore.myTriggers();
+    if (!pack) return { ok: false, errors: ['no such pack'] };
+
+    const result = triggerId ? updateTrigger(pack, triggerId, form) : createTrigger(pack, form);
+    if (!result.ok) return { ok: false, errors: result.errors };
+
+    const saved = triggerStore.save(result.pack);
+    if (!saved.ok) return { ok: false, errors: saved.errors };
+    reloadTriggerPacks();
+    return { ok: true, packId: saved.pack.id, trigger: result.trigger };
+  });
+
+  ipcMain.handle(CHANNELS.TRIGGERS_DELETE_TRIGGER, (_e, { packId, triggerId }) => {
+    const pack = triggerStore.get(packId);
+    if (!pack) return { ok: false, errors: ['no such pack'] };
+    const result = deleteTrigger(pack, triggerId);
+    if (!result.ok) return { ok: false, errors: result.errors };
+    triggerStore.save(result.pack);
+    reloadTriggerPacks();
+    return { ok: true };
+  });
+
+  /**
+   * The Test button: one pattern, replayed against the player's OWN log.
+   *
+   * This is what GINA users do by hand-grepping their logs, and it is the whole
+   * authoring loop — write a pattern, press Test, see it fired 989 times in your own
+   * 149 hours with a sample line.
+   */
+  ipcMain.handle(CHANNELS.TRIGGERS_TEST_PATTERN, async (_e, { pattern, literal }) => {
+    if (!tailer?.filePath) return { ok: false, error: 'no log is being followed' };
+    try {
+      const built = patternTemplate(pattern ?? '', !literal);
+      const tail = await readLogTail(tailer.filePath);
+      return {
+        ...testPattern(built.template, tail.lines, { character: parser?.selfName ?? null }),
+        // Stated so the result reads "in the last N lines" rather than implying the
+        // whole file, which the tail read deliberately does not cover.
+        truncated: tail.truncated,
+      };
+    } catch (err) {
+      return { ok: false, error: err.message, hits: 0, samples: [], lines: 0 };
+    }
+  });
+
+  ipcMain.handle(CHANNELS.TRIGGERS_DRY_RUN, async (_e, { id, rankTolerant }) => {
+    const pack = triggerStore.get(id);
+    if (!pack) return { ok: false, error: 'no such pack' };
+    try {
+      return { ok: true, ...(await measurePack(pack, { rankTolerant })) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   ipcMain.handle(CHANNELS.PETS_STATE, () => ({
@@ -1215,10 +1601,7 @@ function registerIpc() {
 
   ipcMain.on(CHANNELS.TOGGLE_LOCK, toggleLock);
   ipcMain.on(CHANNELS.TOGGLE_METRIC, toggleMetric);
-  ipcMain.on(CHANNELS.RESET_ENCOUNTER, () => {
-    parser?.reset();
-    toast('Encounter reset');
-  });
+  ipcMain.on(CHANNELS.RESET_ENCOUNTER, resetEncounter);
   ipcMain.on(CHANNELS.CLOSE_WINDOW, () => app.quit());
   ipcMain.on('open-external', (_e, url) => shell.openExternal(url));
 }

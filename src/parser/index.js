@@ -15,7 +15,6 @@ import { resolveEntity, looksLikePlayerName, nearestName, stripArticle } from '.
 import { Roster, parseLogFilename } from './roster.js';
 import { Encounter, DEFAULTS } from './encounter.js';
 import { classify, UNKNOWN_GROUP } from './spellwatch.js';
-import { RhythmTracker } from './rhythm.js';
 
 /** Row name used when damage cannot be attributed to anyone (see attributeNonMelee). */
 export const UNKNOWN = 'Unknown';
@@ -194,14 +193,6 @@ export class LogParser {
      * @type {Array<{who: string, effect: string, ts: number}>}
      */
     this.ccStates = [];
-    /** Recast rhythms of named casters — the learned spell timers. */
-    this.rhythms = new RhythmTracker();
-    /**
-     * Called with the qualified rhythms a closing encounter taught us, on the same
-     * close paths as onEncounterEnd — and, like it, deliberately NOT on a manual
-     * reset: a fight the player disowned teaches nothing on the record.
-     */
-    this.onRhythmsLearned = options.onRhythmsLearned ?? null;
     this.zone = null;
     /** Bumped whenever a snapshot would differ, so the UI can skip idle repaints. */
     this.revision = 0;
@@ -560,15 +551,6 @@ export class LogParser {
     }
 
     if (targetFriendly) {
-      // A named boss's spell LANDING is rhythm evidence too: innate breath weapons
-      // (Lava Breath) never print a cast line, so their cycle is visible only here.
-      // Spells only — melee is continuous and DoT ticks are periodic by mechanic,
-      // not by the boss's decision, so both would learn garbage rhythms.
-      if (event.source === 'spell' && event.ability &&
-          stripArticle(event.attacker) === String(event.attacker).trim()) {
-        this.rhythms.noteLanded(attacker.display, event.ability, event.ts);
-      }
-
       // The spell landed, so the cast it was warning about is over. Spells only: a
       // melee swing carries the ability "Hit", which keys no warning and must never
       // be allowed to clear one.
@@ -996,15 +978,6 @@ export class LogParser {
   noteHostileCast(event, caster) {
     if (!this.isHostileCaster(caster.name)) return;
 
-    // Named casters — no leading article on the RAW name — feed the rhythm tracker.
-    // Every cast counts, including ones that merely refresh a warning below: each
-    // real cast is what re-anchors the prediction clock. Generic article-mobs never
-    // get timers ("a ghoul scribe" rebuffing every 11s is metronomic and worthless),
-    // and the anonymous cast form has no spell to key a rhythm on.
-    if (event.ability && stripArticle(event.attacker) === String(event.attacker).trim()) {
-      this.rhythms.noteCast(caster.display, event.ability, event.ts);
-    }
-
     const existing = this.hostileCasts.find(
       (c) => c.caster === caster.display && c.ability === event.ability,
     );
@@ -1099,10 +1072,6 @@ export class LogParser {
    */
   handleInterrupt(event) {
     const caster = this.resolve(event.attacker);
-
-    // The mob will retry early; the gap after an interruption must not be learned.
-    this.rhythms.noteInterrupt(caster.display, event.ability);
-
     const cast = this.casts.get(caster.name);
     if (cast && (cast.ability === event.ability || cast.ability === null)) {
       this.casts.delete(caster.name);
@@ -1118,13 +1087,11 @@ export class LogParser {
   }
 
   /**
-   * A friendly resisted a hostile named caster's spell — the volley still FIRED,
-   * which is what the rhythm tracker needs to know. A wholly-resisted breath AE
-   * leaves no damage line at all; without this, a clean resist reads as a skipped
-   * beat and retracts a perfectly healthy timer.
+   * A friendly resisted a hostile caster's spell.
    *
-   * Outgoing resists (the mob resisting OUR spells) teach nothing about the mob's
-   * own rhythm and are ignored.
+   * A resist is a resolution: the volley fired and we shrugged it off, so the warning
+   * has nothing left to warn about. Outgoing resists — the mob shrugging off OURS —
+   * say nothing about what the mob is doing to us and are ignored.
    */
   handleResist(event) {
     if (!event.ability) return;
@@ -1133,13 +1100,7 @@ export class LogParser {
     if (!this.isFriendly(target.name)) return;
     if (this.isFriendly(attacker.name)) return;
 
-    // A resist is a resolution too — the volley fired and we shrugged it off, so the
-    // warning has nothing left to warn about. Above the named-caster guard below,
-    // which exists only to keep the rhythm tracker from learning generic trash.
     this.resolveHostileCast(attacker.display, event.ability);
-
-    if (stripArticle(event.attacker) !== String(event.attacker).trim()) return;
-    this.rhythms.noteLanded(attacker.display, event.ability, event.ts);
   }
 
   /**
@@ -1397,11 +1358,12 @@ export class LogParser {
 
     const target = this.resolve(event.target);
     // Encounter or not, a dead caster's warning is over. Friendlies never have one,
-    // so this is a no-op for player and pet deaths. Its timer rows LEAVE the panel at
-    // the same moment — a countdown for a corpse is not information — though what the
-    // fight already learned from it still exports when the encounter closes.
+    // so this is a no-op for player and pet deaths. Its countdown rows leave at the
+    // same moment — a countdown for a corpse is not information — but that is the
+    // trigger engine's doing now: each shipped boss timer names its own caster's death
+    // line as an early ender, which puts the rule in a pack a player can read rather
+    // than in a tracker nobody could see. See src/triggers/seed-pack.js.
     this.clearHostileCastsFrom(target.display);
-    this.rhythms.dropCaster(target.display);
     // Death outlives every status effect — a MEZZED chip on a corpse is a lie.
     this.endCcState(target.display, null);
 
@@ -1444,22 +1406,6 @@ export class LogParser {
     this.last = this.current;
     this.current = null;
     this.onEncounterEnd?.(this.last);
-    this.flushRhythms();
-  }
-
-  /**
-   * Hand a closing fight's qualified rhythms to whoever persists them, then start
-   * the tracker clean. Runs on the real close paths only — reset() skips it.
-   */
-  flushRhythms() {
-    const learned = this.rhythms.learned();
-    if (learned.length) this.onRhythmsLearned?.(learned);
-    this.rhythms.reset();
-  }
-
-  /** Rhythms learned in previous fights, from the persistent store (see main). */
-  setKnownRhythms(rhythms) {
-    this.rhythms.setKnown(rhythms);
   }
 
   /**
@@ -1476,7 +1422,6 @@ export class LogParser {
       this.current = null;
       this.revision++;
       this.onEncounterEnd?.(this.last);
-      this.flushRhythms();
     }
   }
 
@@ -1487,8 +1432,6 @@ export class LogParser {
     this.casts.clear();
     this.hostileCasts = [];
     this.ccStates = [];
-    // No flush: a disowned fight teaches nothing on the record, same as history.
-    this.rhythms.reset();
     this.roster.clearCharms();
     this.revision++;
   }
@@ -1537,16 +1480,6 @@ export class LogParser {
       remainingMs: Math.max(0, NOTICE_TTL_MS - (now - n.ts)),
     }));
 
-    // Timers only exist while a fight is running: a prediction about a mob nobody is
-    // fighting is a promise the log can't keep. Warnings are facts and show anytime;
-    // timers are estimates and need the fight live to stay grounded.
-    const castTimers = this.current && !this.current.closed
-      ? this.rhythms.timers(now).map((t) => {
-          const cls = classify(t.ability);
-          return { ...t, category: cls?.category ?? null, tier: cls?.tier ?? 0 };
-        })
-      : [];
-
     const enc = this.current ?? this.last;
     if (!enc) {
       return {
@@ -1562,7 +1495,6 @@ export class LogParser {
         groupHps: 0,
         rows: [],
         hostileCasts,
-        castTimers,
         memberEffects,
         notices,
       };
@@ -1580,7 +1512,6 @@ export class LogParser {
       zone: this.zone,
       self: this.selfName,
       hostileCasts,
-      castTimers,
       memberEffects,
       notices,
     };

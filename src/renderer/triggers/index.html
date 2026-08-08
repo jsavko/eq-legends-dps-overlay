@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>Triggers</title>
+  <link rel="stylesheet" href="triggers.css" />
+</head>
+<body>
+  <!--
+    TWO fixed panes, not three. The first attempt docked the editor as a 380px third
+    column, which squeezed a form with a pattern field, a token row and a test result
+    into less width than the patterns themselves needed — it read as a permanent cramped
+    mini-window rather than as an editor.
+
+    So: the rail is SOURCES, the middle is the LIST and gets the rest of the width, and
+    anything that needs a form or an explanation opens in a real dialog, sized for its
+    content. A dialog is also the honest shape for editing — it is a task you finish and
+    leave, not a pane you live beside.
+  -->
+  <header id="titlebar">
+    <h1>Triggers</h1>
+    <span id="summary" class="muted"></span>
+    <span class="spacer"></span>
+
+    <!-- The two output surfaces. Global, and deliberately NOT per-pack: a pack switch
+         says "match these", these say "draw the result anywhere". Mute beats both. -->
+    <div id="surfaces" role="group" aria-label="Output surfaces">
+      <span class="surfaces-label">show</span>
+      <button id="surface-chips" class="surface" aria-pressed="true">chips</button>
+      <button id="surface-timers" class="surface" aria-pressed="true">timers</button>
+    </div>
+
+    <button id="import" class="primary">Import…</button>
+  </header>
+
+  <aside id="rail">
+    <p class="rail-head">SOURCES</p>
+    <ol id="packs"></ol>
+    <!-- New pack sits with Export and Remove because they are all "what to do with a
+         source", and it is never disabled: it is the one control in this window that works
+         before you own anything at all. -->
+    <footer id="rail-foot">
+      <button id="new-pack" class="primary">+ New pack</button>
+      <button id="export" class="secondary" disabled>Export…</button>
+      <button id="remove" class="danger" disabled>Remove</button>
+    </footer>
+  </aside>
+
+  <main id="contents">
+    <div id="contents-head">
+      <div class="head-row">
+        <h2 id="pack-name"></h2>
+        <span id="pack-sub" class="muted"></span>
+        <span class="spacer"></span>
+        <!-- Never hidden. It used to be, on the built-in pack — which is the selection
+             every time this window opens, so the default view had no way to create
+             anything. `newTrigger()` already routed a built-in selection into My Triggers;
+             the button was hidden, not the capability missing. -->
+        <button id="new-trigger" class="primary">+ New trigger</button>
+      </div>
+      <p id="pack-note" class="muted small"></p>
+    </div>
+
+    <!-- Built-in only: the three presets that write all six cast switches at once. -->
+    <div id="presets" hidden>
+      <span class="preset-label">SHOW</span>
+      <button class="preset" data-preset="essential">Essential</button>
+      <button class="preset" data-preset="balanced">Balanced</button>
+      <button class="preset" data-preset="everything">Everything</button>
+      <span id="preset-custom" class="muted small" hidden>Custom</span>
+    </div>
+
+    <!-- Imported packs only: what actually fired against the player's own log. -->
+    <div id="measured" hidden>
+      <div class="measured-row">
+        <span id="measured-text"></span>
+        <span class="spacer"></span>
+        <label class="inline-check">
+          <input id="rank-tolerant" type="checkbox" />
+          <span id="rank-label">allow rank suffixes</span>
+        </label>
+      </div>
+      <p id="measured-note" class="muted small"></p>
+    </div>
+
+    <ol id="rows"></ol>
+  </main>
+
+  <!-- ------------------------------------------------------------ editor -->
+  <!-- One dialog for both "write a new trigger" and "edit this one": the fields are
+       identical, and a separate wizard would be the same form with more clicks. -->
+  <dialog id="editor">
+    <form method="dialog" class="dialog-form">
+      <header class="dialog-head">
+        <h3 id="e-title">New trigger</h3>
+        <p id="e-provenance" class="muted small"></p>
+      </header>
+
+      <div class="dialog-body">
+        <label class="field">
+          <span class="kicker">NAME</span>
+          <input id="e-name" type="text" spellcheck="false" placeholder="Mob enrages" />
+        </label>
+
+        <!-- A group is how a pack gets switched on a boss at a time. Until now the only
+             groups that existed were ones an imported pack brought with it — the form
+             could file a trigger into one and there was no way whatsoever to make one. -->
+        <div class="field">
+          <span class="kicker">GROUP</span>
+          <div class="row">
+            <select id="e-group"></select>
+            <input id="e-new-group" type="text" spellcheck="false" placeholder="Lady Vox" hidden />
+            <span class="muted small">optional — a switch for everything filed under it</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-head">
+            <span class="kicker">PATTERN</span>
+            <span class="spacer"></span>
+            <div class="seg" role="group">
+              <button type="button" id="e-regex" class="seg-btn" aria-pressed="true">regex</button>
+              <button type="button" id="e-literal" class="seg-btn" aria-pressed="false">literal</button>
+            </div>
+          </div>
+          <input id="e-pattern" type="text" spellcheck="false" class="mono"
+                 placeholder="(?&lt;mob&gt;.*) has become ENRAGED\." />
+          <p id="e-pattern-error" class="error mono" hidden></p>
+          <div class="tokens">
+            <span class="muted small">insert</span>
+            <button type="button" class="token" data-token="(?&lt;mob&gt;.*)">(?&lt;mob&gt;.*)</button>
+            <button type="button" class="token" data-token="${mob}">${mob}</button>
+            <button type="button" class="token" data-token="{C}">{C}</button>
+          </div>
+          <p class="muted small">
+            <code>(?&lt;mob&gt;…)</code> captures whatever sits there; use it in SHOW as
+            <code>${mob}</code>. <code>{C}</code> becomes your character’s name.
+          </p>
+        </div>
+
+        <label class="field">
+          <span class="kicker">SHOW</span>
+          <input id="e-warn" type="text" spellcheck="false" class="mono"
+                 placeholder="ENRAGE — back off ${mob}" />
+        </label>
+
+        <div class="field">
+          <span class="kicker">TIMER</span>
+          <div class="row">
+            <select id="e-timer-kind">
+              <option value="none">No timer</option>
+              <option value="countdown">Countdown</option>
+              <option value="repeating">Repeating</option>
+            </select>
+            <input id="e-duration" type="number" min="1" max="86400" step="1" />
+            <span id="e-seconds" class="muted small">seconds</span>
+            <span id="e-timer-hint" class="muted small">a warning chip only — that is enough</span>
+          </div>
+        </div>
+
+        <label class="field" id="e-early-wrap">
+          <span class="kicker">ENDS EARLY ON</span>
+          <input id="e-early" type="text" spellcheck="false" class="mono"
+                 placeholder="${mob} is no longer enraged" />
+        </label>
+
+        <div class="test">
+          <div class="row">
+            <button type="button" id="e-test" class="secondary">Test against my log</button>
+            <span class="spacer"></span>
+            <span id="e-test-elapsed" class="muted small"></span>
+          </div>
+          <p id="e-test-result" class="muted small">Not tested yet.</p>
+          <ul id="e-test-samples" class="samples"></ul>
+          <p class="muted small faint">
+            The tail of your log, not the whole file — the scan yields between reads so it
+            cannot stall the overlay mid-raid.
+          </p>
+        </div>
+
+        <ul id="e-errors" class="errors" hidden></ul>
+      </div>
+
+      <footer class="dialog-foot">
+        <button type="button" id="e-save" class="primary">Save</button>
+        <button type="button" id="e-cancel" class="secondary">Cancel</button>
+        <span class="spacer"></span>
+        <button type="button" id="e-delete" class="danger">Delete</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ------------------------------------------------------------ built-in info -->
+  <!--
+    Four sections, and the order is the argument: why this rule exists, the real patterns
+    behind it, the real lines they catch, the same thing written as a trigger you could
+    own — and then, last, the honest part about what a copy will not carry.
+
+    There is no "Curated, not a pattern" callout any more. There was, and it was wrong:
+    these ARE patterns, they live in rules.js and spellwatch.js, and hiding them made the
+    rules this app ships with the only thing in the window a player could not read.
+  -->
+  <dialog id="info">
+    <div class="dialog-form">
+      <header class="dialog-head">
+        <p class="kicker ember">BUILT-IN RULE</p>
+        <h3 id="i-name"></h3>
+        <p id="i-sub" class="muted small"></p>
+      </header>
+      <div class="dialog-body">
+        <div class="block">
+          <p class="kicker">WHY IT WARNS</p>
+          <p id="i-why"></p>
+        </div>
+
+        <!-- Read live from the parser at render time, never a copy kept over here: a
+             pattern quoted by hand in a renderer is one that goes stale the first time
+             the real one is corrected, and the failure is a screen that lies. -->
+        <div class="block" id="i-how-wrap">
+          <p class="kicker">HOW IT MATCHES</p>
+          <p id="i-lines-note" class="muted small"></p>
+          <ul id="i-lines" class="samples"></ul>
+          <p id="i-spells-note" class="muted small"></p>
+          <ul id="i-spells" class="samples"></ul>
+        </div>
+
+        <div class="block" id="i-catches-wrap">
+          <p class="kicker">WHAT IT CATCHES</p>
+          <ul id="i-catches" class="samples"></ul>
+        </div>
+
+        <div class="block" id="i-recipe-wrap">
+          <p class="kicker">WRITTEN AS A TRIGGER</p>
+          <pre id="i-pattern" class="recipe"></pre>
+          <p class="kicker">SHOW</p>
+          <pre id="i-show" class="recipe"></pre>
+        </div>
+
+        <div class="callout" id="i-gap-wrap">
+          <p class="callout-title">What the copy will not know</p>
+          <p class="muted small">
+            The pattern above is the real one, and it is still only half of what this rule
+            does. A copy fires on any line that matches — including one a player typed into
+            /general.
+          </p>
+          <ul id="i-gaps" class="pointlist"></ul>
+        </div>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" id="i-close" class="primary">Close</button>
+        <span class="spacer"></span>
+        <button type="button" id="i-start-from" class="secondary">Start a trigger from this…</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- ------------------------------------------------------------ import report -->
+  <dialog id="report">
+    <div class="dialog-form">
+      <header class="dialog-head">
+        <p class="kicker balm">IMPORT REPORT</p>
+        <h3 id="r-title"></h3>
+        <p class="muted small">
+          What crossed over, and what did not. Nothing was silently discarded — everything
+          dropped is named below.
+        </p>
+      </header>
+      <div class="dialog-body" id="r-body"></div>
+      <footer class="dialog-foot">
+        <button type="button" id="r-dismiss" class="primary">Done</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <script type="module" src="triggers.js"></script>
+</body>
+</html>
