@@ -21,6 +21,13 @@ export const CHANNELS = {
    * a list frozen at whatever moment it was opened.
    */
   HISTORY_APPENDED: 'history:appended',
+  /**
+   * A play session was written — `{ key }` names whose file grew. The session window's
+   * twin of HISTORY_APPENDED, and it matters more here: a session closes after an hour of
+   * silence, so an open window would otherwise show a rail frozen at whatever moment it
+   * was opened, with last night's session permanently missing from it.
+   */
+  SESSION_APPENDED: 'session:appended',
 
   // renderer -> main (invoke, returns a value)
   CONFIG_GET: 'config:get',
@@ -28,8 +35,23 @@ export const CHANNELS = {
   LOGS_LIST: 'logs:list',
   LOGS_PICK: 'logs:pick',
   LOGS_VALIDATE: 'logs:validate',
-  /** Truncate the followed eqlog to zero bytes; the tailer's reset path handles the rest. */
+  /**
+   * Truncate the followed eqlog to zero bytes; the tailer's reset path handles the rest.
+   *
+   * Refuses while GINA or GamParse is running — both tail the same file by byte position,
+   * and emptying it under them leaves them reading past the end and silently dead.
+   */
   LOGS_CLEAR: 'logs:clear',
+  /**
+   * The game client's own settings file.
+   *
+   * `EQCONFIG_STATE` reports whether `Log=1` is set and where the file is; `ENABLE_LOG`
+   * sets it. Separate from the config channels because this writes to a file that is not
+   * ours — it belongs to the player and to EverQuest — and a channel that could be
+   * mistaken for our own settings is the wrong shape for that.
+   */
+  EQCONFIG_STATE: 'eqconfig:state',
+  EQCONFIG_ENABLE_LOG: 'eqconfig:enable-log',
   SETUP_COMPLETE: 'setup:complete',
   OPEN_SETTINGS: 'window:open-settings',
   /** Encounter history (history window): list index, fetch one record, wipe a file. */
@@ -95,6 +117,29 @@ export const CHANNELS = {
   TRIGGERS_SET_PRESET: 'triggers:set-preset',
   /** Open the Triggers window — the settings form's entry point to it. */
   TRIGGERS_OPEN: 'triggers:open',
+
+  /**
+   * Play sessions, for the session window.
+   *
+   * The same three-channel shape history uses, plus one that history does not need:
+   * `SESSION_CURRENT` returns the session in FLIGHT. A fight is over by the time you
+   * browse it, but the session you most want to read is usually the one you are in, and
+   * it is not on disk yet — only a checkpoint of it is.
+   */
+  SESSION_LIST: 'session:list',
+  SESSION_GET: 'session:get',
+  SESSION_CURRENT: 'session:current',
+  SESSION_CLEAR: 'session:clear',
+  /**
+   * Replay a log file into the session store.
+   *
+   * `scripts/backfill-history.js` has done this for encounters from the command line
+   * since the history window shipped, which is a capability nobody without a terminal
+   * has. Same logic, reachable from the window that shows the result.
+   */
+  SESSION_IMPORT: 'session:import',
+  /** Open the Session window — the settings form's entry point to it. */
+  SESSION_OPEN: 'session:open',
 
   // renderer -> main (fire and forget)
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',

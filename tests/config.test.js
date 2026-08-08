@@ -7,8 +7,10 @@ import {
   ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled, timersEnabled,
   ALERT_CATEGORIES, ALERT_PRESETS, TIMER_KEYS, WARN_GROUPS, WARN_KEYS,
   warnKeyFor, warnGroupOn, presetOf,
+  SESSION_CATEGORIES, sessionEnabled, sessionLineEnabled, sessionCategories,
 } from '../src/main/config.js';
 import { GROUPS, UNKNOWN_GROUP } from '../src/parser/spellwatch.js';
+import { SESSION_RULES } from '../src/session/rules.js';
 
 function tmpdir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'eqcfg-'));
@@ -320,4 +322,79 @@ test('the groups do not decide whether the alert window exists', () => {
   // so the window must stay. `castAlerts` is still the switch that means "no warnings".
   const allOff = Object.fromEntries(WARN_KEYS.map((k) => [k, false]));
   assert.equal(alertsEnabled({ ...DEFAULTS, ...allOff }), true);
+});
+
+// -------------------------------------------------------------------- session stats
+
+test('session tracking ships off, and its categories ship on', () => {
+  // The master is what protects the raid HUD, and nothing the categories gate can reach
+  // the screen while it is off — so categories default ON. A master switch that turns on
+  // nothing is not a preference, it is a feature that looks broken the first time it is
+  // used.
+  assert.equal(DEFAULTS.session.enabled, false);
+  assert.equal(DEFAULTS.session.meterLine, false);
+  for (const c of SESSION_CATEGORIES) {
+    assert.equal(DEFAULTS.session[c], true, `${c} should ship on`);
+  }
+});
+
+test('every session category has rules behind it, and every rule a category', () => {
+  const used = new Set(SESSION_RULES.map((r) => r.category));
+  for (const c of SESSION_CATEGORIES) {
+    assert.ok(used.has(c), `${c} is a switch with no rules behind it`);
+  }
+  for (const c of used) {
+    assert.ok(SESSION_CATEGORIES.includes(c), `${c} is data the player cannot switch off`);
+  }
+});
+
+test('sessionEnabled and sessionLineEnabled both require the master', () => {
+  assert.equal(sessionEnabled(DEFAULTS), false);
+  assert.equal(sessionEnabled({ session: { enabled: true } }), true);
+  assert.equal(sessionEnabled({}), false, 'a config predating the block reads as off');
+  assert.equal(sessionEnabled(null), false);
+
+  assert.equal(sessionLineEnabled({ session: { enabled: true, meterLine: true } }), true);
+  assert.equal(sessionLineEnabled({ session: { enabled: false, meterLine: true } }), false,
+    'the line cannot draw from a tracker that was never constructed');
+  assert.equal(sessionLineEnabled({ session: { enabled: true, meterLine: false } }), false);
+});
+
+test('sessionCategories hands the tracker seven booleans and nothing else', () => {
+  const cats = sessionCategories({ session: { enabled: true, meterLine: true, coin: false } });
+  assert.deepEqual(Object.keys(cats).sort(), [...SESSION_CATEGORIES].sort());
+  assert.equal(cats.coin, false);
+  assert.equal(cats.kills, true, 'an absent category reads as on');
+  assert.equal('enabled' in cats, false, 'the master is not a category');
+  assert.equal('meterLine' in cats, false);
+});
+
+test('a config predating the session block gains it whole, off, without losing anything', () => {
+  const dir = tmpdir();
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ opacity: 0.5, scale: 1.2 }));
+
+  const store = new ConfigStore(dir);
+  store.load();
+  assert.equal(store.get('session').enabled, false);
+  assert.equal(store.get('session').kills, true);
+  assert.equal(store.get('opacity'), 0.5, 'unrelated settings must survive');
+});
+
+test('setting one session key merges rather than replacing the block', () => {
+  const store = new ConfigStore(tmpdir());
+  store.load();
+  store.set({ session: { enabled: true } });
+
+  assert.equal(store.get('session').enabled, true);
+  assert.equal(store.get('session').coin, true, 'the other seven must survive the patch');
+  assert.equal(store.get('session').meterLine, false);
+});
+
+test('the session window has its own bounds key, derived from nobody', () => {
+  assert.equal(DEFAULTS.sessionBounds, null);
+  // Every window keeps its own; deriving one from another's live bounds is the historical
+  // "window climbs the screen" bug.
+  const keys = ['bounds', 'alertsBounds', 'timersBounds', 'historyBounds', 'triggersBounds', 'sessionBounds'];
+  assert.equal(new Set(keys).size, keys.length);
+  for (const k of keys) assert.equal(k in DEFAULTS, true);
 });

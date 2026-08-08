@@ -145,3 +145,48 @@ test('the rows hold still: the space added above equals the panel height', () =>
   const withPanel = placeWindow({ ...RESTING, restingY, width: 360, height: 460, area: AREA });
   assert.equal(withoutPanel.y - withPanel.y, 460 - 260);
 });
+
+/**
+ * The session line changes the resting height, and that must not move the window.
+ *
+ * A line appearing between the readout and the rows makes the content taller by its own
+ * height and nothing else. Everything about placement is derived from the RESTING
+ * position, so switching the line on and off has to be a pure height change — a window
+ * that crept a few pixels every time the player toggled it would be the "climbs the
+ * screen" bug in miniature, and it is the same mechanism that would cause it.
+ */
+test('turning the session line on and off leaves the window exactly where it was', () => {
+  const resting = { restingX: 1540, restingY: 300 };
+  const LINE_H = 26;
+
+  const without = placeWindow({ ...resting, width: 360, height: 260, area: AREA });
+  const withLine = placeWindow({ ...resting, width: 360, height: 260 + LINE_H, area: AREA });
+  const back = placeWindow({ ...resting, width: 360, height: 260, area: AREA });
+
+  assert.deepEqual(without, back, 'the round trip must be exact');
+  // With room below, the top edge is the fixed point and the window simply grows down.
+  assert.equal(withLine.y, without.y);
+  assert.equal(withLine.x, without.x);
+  assert.equal(withLine.above, false);
+});
+
+test('near the bottom edge the session line grows the window upward, not off-screen', () => {
+  // Bottom-anchored, exactly as the breakdown is: the line's height is added above, so
+  // the rows the player is reading do not move down under the cursor.
+  const resting = { restingX: 1540, restingY: 1000 };
+  const LINE_H = 26;
+
+  const without = placeWindow({ ...resting, width: 360, height: 260, area: AREA });
+  const withLine = placeWindow({ ...resting, width: 360, height: 260 + LINE_H, area: AREA });
+
+  assert.equal(without.above, true);
+  assert.equal(without.y - withLine.y, LINE_H);
+  assert.equal(without.y + 260, withLine.y + 260 + LINE_H, 'the bottom edge is the fixed point');
+});
+
+test('the session line cannot push the resting height past the clamp', () => {
+  // The 80% rule still governs: a raid-sized roster plus a session line is exactly the
+  // case where the window would otherwise take over the display.
+  const tall = clampHeight(AREA.height, AREA);
+  assert.equal(clampHeight(AREA.height + 26, AREA), tall, 'the clamp absorbs the extra line');
+});

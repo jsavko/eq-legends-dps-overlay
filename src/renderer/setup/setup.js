@@ -7,6 +7,16 @@
 
 const $ = (id) => document.getElementById(id);
 
+/**
+ * The seven session categories, paired with the checkbox that switches each.
+ *
+ * Restated here rather than imported because this renderer cannot reach `config.js` (it
+ * imports `fs`) — the same constraint the alerts renderer works under. The pairing is a
+ * convention, `session-<category>`, so the ids and the config keys cannot drift halfway:
+ * either every one resolves or none does, which one render makes obvious.
+ */
+const SESSION_CATEGORIES = ['kills', 'loot', 'coin', 'xp', 'faction', 'skills', 'zones'];
+
 const state = {
   config: null,
   dir: null,
@@ -35,6 +45,8 @@ async function init() {
   if (state.selected) await validate(state.selected);
   await renderPets();
   await renderTriggerSummary();
+  await renderSessionSummary();
+  await renderLoggingState();
   refreshSaveButton();
 }
 
@@ -99,6 +111,15 @@ function fillForm(cfg) {
   $('group-only').checked = cfg.groupOnly;
   $('auto-switch').checked = cfg.autoSwitchCharacter;
   $('pet-owners').value = formatPetOwners(cfg.petOwners);
+
+  const session = cfg.session ?? {};
+  $('session-enabled').checked = session.enabled === true;
+  $('session-meter-line').checked = session.meterLine === true;
+  // Absent reads as ON, matching `sessionCategories` in config.js: a config written
+  // before a category existed must gain it switched on, not silently off.
+  for (const c of SESSION_CATEGORIES) $(`session-${c}`).checked = session[c] !== false;
+  syncSessionEnabled();
+
   $('hk-lock').value = cfg.hotkeys.toggleLock;
   $('hk-show').value = cfg.hotkeys.toggleVisible;
   $('hk-reset').value = cfg.hotkeys.resetEncounter;
@@ -129,6 +150,80 @@ async function renderTriggerSummary() {
   }
 }
 
+/**
+ * What EverQuest itself currently does about logging.
+ *
+ * Every uncertain answer says so rather than guessing. Claiming logging is off when the
+ * ini simply could not be found would send the player to fix a setting that is not
+ * broken; the button stays available in that case, because trying it is how they find out.
+ */
+async function renderLoggingState() {
+  const el = $('enable-log-status');
+  const btn = $('enable-log');
+  if (!el || !btn) return;
+
+  let state = { ok: false };
+  try {
+    state = await window.api.eqconfigState();
+  } catch {
+    // No log chosen yet (first-run setup) — an empty status is the honest answer.
+  }
+
+  if (!state.ok) {
+    setStatus(el, state.reason === 'no-path'
+      ? 'Choose a log file first — that is how the game folder is found.'
+      : 'eqclient.ini could not be read.', '');
+    btn.disabled = state.reason === 'no-path';
+    return;
+  }
+
+  btn.disabled = state.logEnabled === true;
+  if (state.logEnabled === true) {
+    setStatus(el, 'EverQuest is already set to log every session.', 'ok');
+  } else if (state.gameRunning) {
+    setStatus(el, 'EverQuest is running — close it first, it rewrites this file on exit.', 'warn');
+  } else {
+    setStatus(el, 'Sets Log=1 in eqclient.ini. One line, original backed up.', '');
+  }
+}
+
+/**
+ * Grey out everything the master switch governs while it is off.
+ *
+ * Disabled rather than hidden: a player looking for "does this thing record loot" needs
+ * to see that it can, and that it is not currently doing so. A section that vanishes
+ * answers neither question. The checkboxes keep their values while disabled, so switching
+ * tracking off and on again restores the choices rather than resetting them.
+ */
+function syncSessionEnabled() {
+  const on = $('session-enabled').checked;
+  $('session-meter-line').disabled = !on;
+  for (const c of SESSION_CATEGORIES) $(`session-${c}`).disabled = !on;
+  $('session-categories').classList.toggle('disabled', !on);
+  $('open-session').disabled = !on;
+}
+
+/**
+ * What the session store has, in one line.
+ *
+ * The same courtesy the trigger summary pays, and silent on failure for the same reason:
+ * a settings screen must still open when a store cannot be read.
+ */
+async function renderSessionSummary() {
+  const el = $('session-summary');
+  if (!el) return;
+  try {
+    const list = await window.api.sessionList(null);
+    const n = list.sessions?.length ?? 0;
+    const chars = list.characters?.length ?? 0;
+    el.textContent = n === 0
+      ? 'no sessions recorded yet'
+      : `${n} session(s) recorded · ${chars} character(s)`;
+  } catch {
+    el.textContent = '';
+  }
+}
+
 function syncOutputs() {
   $('opacity-out').textContent = `${Math.round($('opacity').value * 100)}%`;
   $('scale-out').textContent = `${Number($('scale').value).toFixed(2)}×`;
@@ -139,6 +234,8 @@ function wireEvents() {
   $('scale').addEventListener('input', syncOutputs);
 
   $('open-triggers').addEventListener('click', () => window.api.openTriggers());
+  $('open-session').addEventListener('click', () => window.api.openSession());
+  $('session-enabled').addEventListener('change', syncSessionEnabled);
 
   $('browse-dir').addEventListener('click', async () => {
     const r = await window.api.pick('directory');
@@ -167,6 +264,20 @@ function wireEvents() {
     )) return;
     const r = await window.api.clearLog();
     setStatus($('validation'), r.ok ? 'Log file cleared.' : `Could not clear — ${r.error}`, r.ok ? 'ok' : 'bad');
+  });
+
+  $('enable-log').addEventListener('click', async () => {
+    if (!window.confirm(
+      'Set Log=1 in eqclient.ini?\n\n' +
+      'That is EverQuest\'s own "always log" setting, so you never have to type ' +
+      '/log on again. Only that one line is changed, and the original file is backed ' +
+      'up first.\n\nThe game must be closed — it rewrites this file when it exits.'
+    )) return;
+    const r = await window.api.enableGameLogging();
+    if (!r.ok) setStatus($('enable-log-status'), r.error, 'bad');
+    else if (!r.changed) setStatus($('enable-log-status'), 'Already set — nothing to do.', 'ok');
+    else setStatus($('enable-log-status'), 'Done. EverQuest will log every session from now on.', 'ok');
+    await renderLoggingState();
   });
 
   $('save').addEventListener('click', save);
@@ -293,6 +404,14 @@ async function save() {
     // window now, and a form that still wrote them would clobber whatever was set there
     // the next time somebody pressed Save on an unrelated setting.
     petOwners: parsePetOwners($('pet-owners').value),
+    // Written whole, because this form is the only screen that owns them — unlike the
+    // alert switches above, which moved out precisely so a Save here would stop clobbering
+    // what the Triggers window had just set.
+    session: {
+      enabled: $('session-enabled').checked,
+      meterLine: $('session-meter-line').checked,
+      ...Object.fromEntries(SESSION_CATEGORIES.map((c) => [c, $(`session-${c}`).checked])),
+    },
     hotkeys: {
       toggleLock: $('hk-lock').value.trim(),
       toggleVisible: $('hk-show').value.trim(),

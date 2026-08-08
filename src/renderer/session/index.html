@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>EQL DPS Overlay — Session</title>
+  <link rel="stylesheet" href="session.css" />
+</head>
+<body>
+  <header id="titlebar">
+    <h1>Session</h1>
+    <select id="character" title="Which character's sessions to show"></select>
+    <span class="grow"></span>
+    <span id="tracked" class="meta"></span>
+    <button id="import" class="primary" title="Replay an eqlog into the session store">
+      Import a log…
+    </button>
+  </header>
+
+  <!--
+    Three fixed panes on the History window's model: sessions -> summary -> detail.
+    Every click swaps content INSIDE a pane. Nothing here resizes, expands, or pushes
+    other content around — that no-reflow rule is the reason this window exists rather
+    than being a fourth mode of the History window, and it is why every row that can be
+    empty renders an explicit empty state instead of disappearing.
+  -->
+  <main>
+    <!-- Pane 1: which sitting. -->
+    <section id="rail">
+      <div class="pane-head">
+        <h2>Sessions</h2>
+        <input id="search" type="search" placeholder="zone or day…" spellcheck="false" />
+        <div id="chips" class="chips">
+          <button data-chip="all" class="chip" aria-pressed="true">All</button>
+          <button data-chip="week" class="chip" aria-pressed="false">This week</button>
+          <button data-chip="deaths" class="chip" aria-pressed="false">Deaths</button>
+        </div>
+      </div>
+      <ol id="session-list"></ol>
+      <p id="rail-empty" class="empty" hidden></p>
+    </section>
+
+    <!-- Pane 2: what that sitting was, and which category to open. -->
+    <section id="summary">
+      <div class="pane-head">
+        <h2 id="s-when">—</h2>
+        <p id="s-sub" class="meta"></p>
+        <p id="s-deaths" class="meta"></p>
+      </div>
+      <div id="s-headline" class="headline"></div>
+      <div class="pane-head sub"><h2>Categories</h2></div>
+      <ol id="category-list"></ol>
+    </section>
+
+    <!-- Pane 3: the whole of one category. Never truncated. -->
+    <section id="detail">
+      <div class="pane-head">
+        <h2 id="d-title">—</h2>
+        <p id="d-lead" class="lead"></p>
+      </div>
+      <div class="col-head">
+        <span id="d-col-name"></span>
+        <span id="d-col-value"></span>
+      </div>
+      <ol id="detail-list"></ol>
+      <p id="d-footer" class="footer"></p>
+    </section>
+  </main>
+
+  <script type="module" src="session.js"></script>
+</body>
+</html>

@@ -39,6 +39,19 @@
       </div>
     </header>
 
+    <!-- The running session, between the readout and the rows because that is exactly
+         what it is: a total for the night, not a fact about this fight. A sibling of
+         #rows rather than part of the header, so `hidden` removes it from the fit
+         measurement entirely — when it is off the overlay is bit-for-bit what it was.
+         Stats are dropped from the RIGHT when the window is too narrow to hold them
+         (see dropOverflowingStats): this window cannot scroll, and an ellipsis in the
+         middle of a number is worse than one fewer number. -->
+    <div id="session-line" hidden>
+      <span id="session-label">Session</span>
+      <span id="session-stats"></span>
+      <span id="session-elapsed" class="tabular"></span>
+    </div>
+
     <ol id="rows"></ol>
 
     <p id="empty">Waiting for combat…</p>

@@ -14,6 +14,10 @@ const CH = {
   PETS_STATE: 'pets:state',
   TRIGGERS_OPEN: 'triggers:open',
   TRIGGERS_LIST: 'triggers:list',
+  SESSION_OPEN: 'session:open',
+  SESSION_LIST: 'session:list',
+  EQCONFIG_STATE: 'eqconfig:state',
+  EQCONFIG_ENABLE_LOG: 'eqconfig:enable-log',
 };
 
 const modeArg = process.argv.find((a) => a.startsWith('--overlay-mode='));
@@ -31,4 +35,10 @@ contextBridge.exposeInMainWorld('api', {
   /** The alert switches live in their own window now — this is the way in. */
   openTriggers: () => ipcRenderer.invoke(CH.TRIGGERS_OPEN),
   triggersList: () => ipcRenderer.invoke(CH.TRIGGERS_LIST),
+  /** Session stats own this form's switches, but the browsing surface is its own window. */
+  openSession: () => ipcRenderer.invoke(CH.SESSION_OPEN),
+  sessionList: (key) => ipcRenderer.invoke(CH.SESSION_LIST, key),
+  /** EverQuest's own settings file — read what it says, and set Log=1 in it. */
+  eqconfigState: () => ipcRenderer.invoke(CH.EQCONFIG_STATE),
+  enableGameLogging: () => ipcRenderer.invoke(CH.EQCONFIG_ENABLE_LOG),
 });

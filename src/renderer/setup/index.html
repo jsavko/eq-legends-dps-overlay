@@ -34,8 +34,13 @@
 
       <p class="hint">
         The overlay can only see what your client logs. Type <code>/log on</code> in game
-        if the file below looks stale.
+        if the file below looks stale — or set it once and stop typing it:
       </p>
+
+      <div class="row">
+        <button id="enable-log" class="secondary">Always log…</button>
+        <span id="enable-log-status" class="unit"></span>
+      </div>
 
       <div class="row">
         <button id="clear-log" class="danger">Clear log file…</button>
@@ -97,6 +102,72 @@
       <div class="row">
         <button id="open-triggers" class="secondary">Triggers…</button>
         <span id="triggers-summary" class="unit"></span>
+      </div>
+
+      <!-- SESSION lives here and the alert switches do not, which is not a contradiction:
+           that removal happened because two screens were answering one question, so a
+           pack could be enabled while its surface was off with neither screen saying so.
+           These seven have exactly one screen. There is no second place to disagree. -->
+      <h2>Session</h2>
+      <p class="hint no-top">
+        The other half of a play night: what you killed, looted, earned, and advanced.
+        Off by default — nothing below runs, or costs anything, until you switch it on.
+      </p>
+
+      <div class="row checkbox">
+        <input id="session-enabled" type="checkbox" />
+        <label for="session-enabled">Track play sessions
+          <span class="unit">a session ends after an hour with nothing recorded</span>
+        </label>
+      </div>
+
+      <div class="row checkbox">
+        <input id="session-meter-line" type="checkbox" />
+        <label for="session-meter-line">Show a session line on the meter
+          <span class="unit">one dim line under the DPS readout, above the group rows</span>
+        </label>
+      </div>
+
+      <p class="hint">Record:</p>
+      <div id="session-categories" class="session-grid">
+        <div class="row checkbox">
+          <input id="session-kills" type="checkbox" />
+          <label for="session-kills">Kills and deaths</label>
+        </div>
+        <div class="row checkbox">
+          <input id="session-loot" type="checkbox" />
+          <label for="session-loot">Loot</label>
+        </div>
+        <div class="row checkbox">
+          <input id="session-coin" type="checkbox" />
+          <label for="session-coin">Coin</label>
+        </div>
+        <div class="row checkbox">
+          <input id="session-xp" type="checkbox" />
+          <label for="session-xp">Experience, levels and AA</label>
+        </div>
+        <div class="row checkbox">
+          <input id="session-faction" type="checkbox" />
+          <label for="session-faction">Faction</label>
+        </div>
+        <div class="row checkbox">
+          <input id="session-skills" type="checkbox" />
+          <label for="session-skills">Skill-ups and combines</label>
+        </div>
+        <div class="row checkbox">
+          <input id="session-zones" type="checkbox" />
+          <label for="session-zones">Zones</label>
+        </div>
+      </div>
+
+      <p class="hint">
+        Each of these is checked before its patterns run, so anything switched off costs
+        nothing at all rather than being recorded and then hidden.
+      </p>
+
+      <div class="row">
+        <button id="open-session" class="secondary">Session…</button>
+        <span id="session-summary" class="unit"></span>
       </div>
 
       <h2>Named pets</h2>

@@ -26,6 +26,71 @@ export function storeKey(character, server) {
   return `${clean(character)}_${clean(server)}`;
 }
 
+/**
+ * Sum the fights that happened inside a play session.
+ *
+ * The Session window's Combat row comes from HERE rather than from anything the session
+ * tracker counts, and that is the whole point. `src/session/` is a sibling of the combat
+ * parser precisely so it never has to score damage; giving it a second damage pipeline
+ * would create two answers to one question that can disagree, and the one on screen would
+ * be the wrong one. Both stores already stamp real timestamps, so joining them on time
+ * is a fact rather than a duplication.
+ *
+ * Fights are attributed to a session by their START, not their overlap: a pull that began
+ * before the session's first tracked event belongs to whatever came before it, and a
+ * fight cannot be half in two sessions.
+ *
+ * @param {Array<Object>} records  encounter records, as `EncounterStore.records` returns
+ * @param {number} startTs
+ * @param {number} endTs
+ * @param {{character?: string}} [opts]  whose row to report; absent reports the group only
+ */
+export function combatBetween(records, startTs, endTs, { character = null } = {}) {
+  const inWindow = records.filter((r) => r.startTs >= startTs && r.startTs <= endTs);
+
+  const out = {
+    encounters: inWindow.length,
+    fightMs: 0,
+    groupDamage: 0,
+    groupHealing: 0,
+    damageTaken: 0,
+    damage: 0,
+    healing: 0,
+    hits: 0,
+    misses: 0,
+    crits: 0,
+    deaths: 0,
+    dps: null,
+    accuracy: null,
+  };
+
+  for (const r of inWindow) {
+    const snap = r.snapshot ?? {};
+    out.fightMs += r.durationMs ?? 0;
+    out.groupDamage += snap.totalDamage ?? 0;
+    out.groupHealing += snap.totalHealing ?? 0;
+    out.deaths += (snap.deaths ?? []).filter((d) => !d.isPet).length;
+
+    const self = character ? (snap.rows ?? []).find((row) => row.name === character) : null;
+    if (!self) continue;
+    out.damage += self.damage ?? 0;
+    out.healing += self.healing ?? 0;
+    out.damageTaken += self.damageTaken ?? 0;
+    out.hits += self.hits ?? 0;
+    out.misses += self.misses ?? 0;
+    out.crits += self.crits ?? 0;
+  }
+
+  // Rates divide by TIME IN COMBAT, not by session length. A four-hour night with forty
+  // minutes of fighting has a real DPS and a meaningless one, and only the first is worth
+  // printing — the same reason encounter.js measures a fight rather than a sitting.
+  const fightSec = out.fightMs / 1000;
+  if (fightSec > 0) out.dps = out.damage / fightSec;
+  const swings = out.hits + out.misses;
+  if (swings > 0) out.accuracy = out.hits / swings;
+  return out;
+}
+
 export class EncounterStore {
   /** @param {string} dir directory to hold the .jsonl files */
   constructor(dir) {

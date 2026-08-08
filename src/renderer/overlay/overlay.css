@@ -207,6 +207,84 @@ body:not([data-locked="true"]) #controls { display: flex; }
 #controls button:hover { color: var(--ink); border-color: var(--ember); }
 #controls button:focus-visible { outline: 1px solid var(--ember-lit); outline-offset: 1px; }
 
+/* --------------------------------------------------------- the session line */
+
+/*
+ * One dim line for the whole night, hairlined off from the fight above and the group
+ * below. It is deliberately the quietest thing on the slab: a player mid-pull is reading
+ * the DPS number and the rows, and a session total that competed with either would be
+ * taking attention it has no claim on.
+ *
+ * No overflow rules and no max-width, on purpose. This window cannot scroll and must
+ * never clip, so when the content will not fit the RENDERER drops trailing stats rather
+ * than CSS hiding them — a number that is silently half-shown is worse than a number
+ * that is honestly absent.
+ */
+/*
+ * `display: flex` overrides the user-agent's `[hidden] { display: none }`, so without
+ * this rule the "off" state still paints its borders and still costs the window its
+ * height — which is the whole promise of the switch, broken silently. Measured at 20px
+ * of overlay taken from the game for a line nobody asked for.
+ */
+#session-line[hidden] { display: none; }
+
+#session-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  flex: 0 0 auto;
+  padding: 0.28em 0.7em;
+  margin: 0 0 0.15em;
+  border-top: 1px solid var(--edge);
+  border-bottom: 1px solid var(--edge);
+  font-size: 0.78em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#session-label {
+  font-stretch: 87.5%;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
+#session-stats {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55em;
+  flex: 0 1 auto;
+}
+
+/* A value and its unit, read as one word: "118 kills". The value carries the weight and
+   the unit recedes, which is the same relationship #dps has with #dps-unit. */
+#session-stats .s-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.22em;
+}
+#session-stats .s-value {
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+#session-stats .s-unit {
+  color: var(--ink-faint);
+  font-size: 0.88em;
+  letter-spacing: 0.05em;
+}
+/* Ability points get the player's own accent. They are the rarest thing on the line — a
+   handful across a whole night against hundreds of kills — so the one that almost never
+   changes is the one worth noticing when it does. */
+#session-stats .s-stat[data-kind="aa"] .s-value { color: var(--ember-lit); }
+
+#session-elapsed {
+  margin-left: auto;
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+
 /* ------------------------------------------------------------------- rows */
 
 #rows {

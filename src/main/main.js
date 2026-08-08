@@ -21,9 +21,11 @@ import { LogParser } from '../parser/index.js';
 import { Tailer, listLogs } from './tailer.js';
 import {
   ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, alertsEnabled, timersEnabled,
-  ALERT_PRESETS, warnKeyFor, presetOf,
+  ALERT_PRESETS, warnKeyFor, presetOf, sessionEnabled, sessionCategories,
 } from './config.js';
-import { EncounterStore, RECORD_VERSION, storeKey } from './history.js';
+import { EncounterStore, RECORD_VERSION, storeKey, combatBetween } from './history.js';
+import { SessionStore, sessionKey, CHECKPOINT_INTERVAL_MS } from './session-store.js';
+import { SessionTracker } from '../session/session.js';
 import { TriggerStore } from './triggers-store.js';
 import { builtinPack, builtinPatch, builtinPresetPatch } from './builtin-pack.js';
 import { TriggerEngine } from '../triggers/engine.js';
@@ -33,6 +35,9 @@ import { createTrigger, updateTrigger, deleteTrigger, packStats } from '../trigg
 import { installSeedPack } from '../triggers/seed-pack.js';
 import { patternTemplate } from '../triggers/tokens.js';
 import { dryRunLog, readLogTail, testPattern } from '../triggers/dryrun.js';
+import {
+  setLogEnabled, isLogEnabled, eqclientIniPath, runningLogReaders, GAME_PROCESS,
+} from './eqconfig.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
 import { clampHeight, clampWidth, placeWindow } from './layout.js';
 import { startUpdater, updateMode } from './updater.js';
@@ -64,8 +69,23 @@ const STALE_LOG_MS = 10 * 60 * 1000;
  * that pack, and the meter and the history carry on. See src/triggers/engine.js.
  */
 /** @type {TriggerEngine|null} */ let triggers = null;
+/**
+ * The session tracker — a SECOND sibling of the parser, on the same terms as the triggers.
+ *
+ * Null whenever `session.enabled` is off, and that is the entire cost of the feature to
+ * someone who does not want it: `main` never constructs it, so no session regex ever runs,
+ * nothing accumulates, and the tray has no entry. The store is built either way, because
+ * the window has to be able to read what past sessions recorded even after tracking is
+ * switched back off.
+ */
+/** @type {SessionTracker|null} */ let session = null;
+/** @type {SessionStore|null} */  let sessionStore = null;
+/** @type {BrowserWindow|null} */ let sessionWindow = null;
 
 let pushTimer = null;
+let checkpointTimer = null;
+let saveSessionBoundsTimer = null;
+let lastSessionRevision = -1;
 let stopUpdater = null;
 let lastRevision = -1;
 let lastTriggerRevision = -1;
@@ -111,6 +131,8 @@ async function main() {
   config = new ConfigStore(app.getPath('userData'));
   config.load();
   history = new EncounterStore(path.join(app.getPath('userData'), 'history'));
+  sessionStore = new SessionStore(path.join(app.getPath('userData'), 'sessions'));
+  recoverSessions();
   triggerStore = new TriggerStore(path.join(app.getPath('userData'), 'triggers'));
   installSeedTimers();
   triggers = new TriggerEngine();
@@ -150,6 +172,11 @@ app.on('will-quit', () => {
   tailer?.stop();
   clearInterval(pushTimer);
   clearInterval(hoverTimer);
+  clearInterval(checkpointTimer);
+  // A quit is the end of the sitting, so the session in flight is closed and written here
+  // rather than left for the next launch to recover. Recovery exists for the crash case;
+  // using it for the ordinary one would mislabel every clean shutdown as a crash.
+  closeSession('shutdown');
   stopUpdater?.();
   tray?.destroy();
 });
@@ -174,18 +201,25 @@ async function startTailing(logPath) {
   });
 
   triggers?.setCharacter(parser.selfName);
+  syncSessionTracker();
 
   tailer.on('lines', (lines) => {
     for (const line of lines) {
-      parser.feed(line);
+      const event = parser.feed(line);
       // The same line, to the sibling engine. Two consumers of one stream is the price
       // of keeping a stranger's regexes out of the scoring pipeline, and it is cheap:
       // the engine prefilters with String.includes before any regex runs.
       triggers?.feed(line);
+      // And to the third consumer, WITH what the parser made of it. That second argument
+      // is the whole chat guard: the parser classifies speech first by design, so a
+      // player quoting "You have slain a froglok shin knight!" in guild chat arrives
+      // already labelled and never reaches the night's kill count.
+      session?.feed(line, event);
     }
     // The parser learns the character's own name from the log rather than only from the
     // filename, so `{C}` patterns may only become resolvable partway into a session.
     triggers?.setCharacter(parser.selfName);
+    session?.setCharacter(parser.selfName, parser.server);
   });
 
   tailer.on('switch', ({ to, character }) => {
@@ -196,6 +230,9 @@ async function startTailing(logPath) {
     // token survives into the stored pattern instead of being baked in at import.
     triggers?.reset();
     triggers?.setCharacter(character ?? parser.selfName);
+    // The session closes and is written rather than continuing under the new name — a
+    // different character is a different purse, level and faction standing.
+    session?.setCharacter(character ?? parser.selfName, parser.server);
     config.set({ logPath: to });
     toast(`Now following ${character}`);
     refreshTrayMenu();
@@ -254,6 +291,238 @@ function persistEncounter(enc) {
     // History is a convenience; a full disk or a locked file must never take the
     // live overlay down with it.
     toast(`History write failed: ${err.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Play sessions
+// ---------------------------------------------------------------------------
+
+/**
+ * Build, rebuild or tear down the session tracker to match the config.
+ *
+ * Called on startup, after a settings change and whenever the followed character changes.
+ * Wholesale rather than incrementally, for the same reason `reloadTriggerPacks` is: the
+ * construction is microseconds and a diffing path would be several ways to reach a
+ * slightly wrong state.
+ *
+ * Switching tracking OFF closes and writes whatever was open rather than dropping it —
+ * the player asked to stop recording, not to discard the last three hours.
+ */
+function syncSessionTracker() {
+  if (!sessionEnabled(config.all)) {
+    if (session) {
+      closeSession('disabled');
+      session = null;
+      clearInterval(checkpointTimer);
+      checkpointTimer = null;
+      refreshTrayMenu();
+    }
+    return;
+  }
+
+  const categories = sessionCategories(config.all);
+  if (session) {
+    session.setCategories(categories);
+    session.setCharacter(parser?.selfName ?? null, parser?.server ?? null);
+    return;
+  }
+
+  session = new SessionTracker({
+    categories,
+    character: parser?.selfName ?? null,
+    server: parser?.server ?? null,
+    // The roster's own answer, so a group member's kill counts and a passing stranger's
+    // does not. Read through a getter rather than captured, because `startTailing`
+    // replaces the parser wholesale on a character switch.
+    isOurs: (name) => parser?.roster?.includes(name, false) === true,
+    minTs: lastRecordedSessionTs(),
+    onSessionEnd: persistSession,
+  });
+
+  clearInterval(checkpointTimer);
+  checkpointTimer = setInterval(checkpointSession, CHECKPOINT_INTERVAL_MS);
+  refreshTrayMenu();
+}
+
+/**
+ * The last instant already accounted for on disk, for the character being followed.
+ *
+ * The tailer seeds itself 64 KB back from the end of the log so a fight in progress is
+ * not missed, which means every launch re-reads lines the last one already counted. That
+ * is harmless for the combat parser and is double-counting for a session store, so the
+ * tracker is given a floor and the floor is a fact from the store rather than a guess.
+ */
+function lastRecordedSessionTs() {
+  if (!sessionStore) return null;
+  try {
+    const key = sessionKey(parser?.selfName, parser?.server);
+    const ends = sessionStore.records(key).map((r) => r.endTs ?? 0);
+    return ends.length ? Math.max(...ends) : null;
+  } catch {
+    return null;   // an unreadable store is not a reason to refuse to track
+  }
+}
+
+/**
+ * Persist a closed session.
+ *
+ * The same contract `persistEncounter` follows: a write failure toasts rather than
+ * propagating, because a full disk must never take the live overlay down. The checkpoint
+ * is cleared only after a successful append — a spent checkpoint whose session did not
+ * land would lose the night for real.
+ */
+function persistSession(record) {
+  if (!sessionStore) return;
+  try {
+    const { key, written } = sessionStore.append(record);
+    sessionStore.clearCheckpoint(key);
+    if (written && sessionWindow && !sessionWindow.isDestroyed()) {
+      sessionWindow.webContents.send(CHANNELS.SESSION_APPENDED, { key });
+    }
+  } catch (err) {
+    toast(`Session write failed: ${err.message}`);
+  }
+}
+
+/** Close whatever is open, with a reason. Safe to call when nothing is. */
+function closeSession(reason) {
+  try {
+    session?.close(reason);
+  } catch (err) {
+    console.warn('[session] close failed:', err?.message ?? err);
+  }
+}
+
+/**
+ * Write the session in flight to its checkpoint file.
+ *
+ * Every five minutes, for hours. A session is not an encounter: a crash at hour four with
+ * no checkpoint costs the whole night, which is the difference between a feature that
+ * records your play and one that records it unless something goes wrong.
+ *
+ * Failures are swallowed rather than toasted. This runs on a timer the player did not
+ * ask for, and a toast every five minutes about a disk that is still full would be worse
+ * than the problem it reports; the next successful checkpoint fixes it silently.
+ */
+function checkpointSession() {
+  if (!session || !sessionStore) return;
+  const record = session.checkpoint();
+  if (!record) return;
+  try {
+    sessionStore.saveCheckpoint(record);
+  } catch (err) {
+    console.warn('[session] checkpoint failed:', err?.message ?? err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The client's own settings
+// ---------------------------------------------------------------------------
+
+/**
+ * Which log readers are running right now.
+ *
+ * Shells out to `tasklist` because that is the one process lister present on every
+ * Windows since XP with no dependency and no native module — and a native module is the
+ * one thing this project will not take (see CLAUDE.md). The parsing lives in
+ * `eqconfig.js`, pure and tested; this function's only job is to produce the text.
+ *
+ * A listing we cannot obtain reads as "nothing is running", deliberately. The alternative
+ * — treating an unavailable process list as "assume everything is running" — would make
+ * both features permanently refuse themselves on any machine where the command is
+ * missing, which is a worse failure than the one it guards against.
+ */
+async function runningReaders() {
+  if (process.platform !== 'win32') return [];
+  try {
+    const { execFile } = await import('node:child_process');
+    const output = await new Promise((resolve, reject) => {
+      execFile('tasklist.exe', ['/fo', 'csv', '/nh'], { timeout: 4000 }, (err, stdout) => {
+        if (err) reject(err);
+        else resolve(stdout);
+      });
+    });
+    return runningLogReaders(output);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Replay a whole log file into the session store.
+ *
+ * A private parser and a private tracker, never the live ones: the imported log is very
+ * often a different character, and an import must not touch the session in flight or the
+ * meter the player is looking at.
+ *
+ * No `minTs` floor here, deliberately — that floor exists to stop the tailer's 64 KB
+ * backfill being counted twice, and applying it to an import would refuse exactly the old
+ * data the import is for. Duplicates are caught by the store's id dedup instead, so
+ * importing the same file twice is a no-op and the report says so.
+ *
+ * The read yields to the event loop every few thousand lines. A month-old eqlog is over a
+ * million lines and blocking the main process through all of it would freeze the overlay,
+ * the alerts and the timers for several seconds during a raid.
+ *
+ * @returns {Promise<{imported: number, duplicates: number, key: string|null, character: string|null}>}
+ */
+async function importSessionLog(filePath) {
+  // latin1, never utf8 — EQ writes single-byte text and utf8 mangles accented mob names.
+  const text = await fs.promises.readFile(filePath, 'latin1');
+  const lines = text.split(/\r?\n/);
+  const name = path.basename(filePath);
+
+  const logParser = new LogParser({
+    logFilename: /^eqlog_/.test(name) ? name : 'eqlog_Unknown_unknown.txt',
+    ...config.parserOptions(),
+  });
+
+  let imported = 0;
+  let duplicates = 0;
+  const tracker = new SessionTracker({
+    categories: sessionCategories(config.all),
+    character: logParser.selfName,
+    server: logParser.server,
+    isOurs: (who) => logParser.roster.includes(who, false) === true,
+    onSessionEnd: (record) => {
+      const { written } = sessionStore.append(record);
+      if (written) imported += 1;
+      else duplicates += 1;
+    },
+  });
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    tracker.feed(line, logParser.feed(line));
+    if ((i & 0x1fff) === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  tracker.close('imported');
+
+  const key = sessionKey(logParser.selfName, logParser.server);
+  if (imported > 0 && sessionWindow && !sessionWindow.isDestroyed()) {
+    sessionWindow.webContents.send(CHANNELS.SESSION_APPENDED, { key });
+  }
+  return { imported, duplicates, key, character: logParser.selfName };
+}
+
+/**
+ * Fold any checkpoint left by a previous run into the store, before anything else starts.
+ *
+ * A checkpoint that survived to this launch means the app went down without closing its
+ * session — a crash, a task kill, a power cut. The night happened, so it is written as a
+ * finished session marked `recovered`, and the minutes between the last checkpoint and
+ * the crash are honestly gone rather than being invented.
+ */
+function recoverSessions() {
+  try {
+    const recovered = sessionStore.recover();
+    if (recovered.length > 0) {
+      console.log(`[session] recovered ${recovered.length} interrupted session(s)`);
+    }
+  } catch (err) {
+    console.warn('[session] recovery failed:', err?.message ?? err);
   }
 }
 
@@ -350,6 +619,10 @@ function startPushLoop() {
     if (!parser || !overlayWindow || overlayWindow.isDestroyed()) return;
     parser.tick();
     triggers?.tick();
+    // And the session's clock, for the same reason as the other two: a night that ended
+    // an hour ago has to be able to close and be written during the silence that ended
+    // it, rather than waiting for the player to come back and produce a line.
+    session?.tick();
 
     // A running encounter's elapsed time changes every tick even when the revision has
     // not, so only a closed, unchanged encounter can skip the push. A live trigger row
@@ -358,10 +631,15 @@ function startPushLoop() {
     // feature makes to the timers panel, and it only happens once a pack is imported.
     const snapshot = buildSnapshot();
     const unchanged = parser.revision === lastRevision &&
-      (triggers?.revision ?? -1) === lastTriggerRevision;
-    if (unchanged && !snapshot.active && !triggers?.live) return;
+      (triggers?.revision ?? -1) === lastTriggerRevision &&
+      (session?.revision ?? -1) === lastSessionRevision;
+    // An open session is the third thing whose display moves every tick even when nothing
+    // has happened: its elapsed time, and every per-hour rate divided by it, advance on
+    // the clock alone. Same case as a running encounter and a live countdown.
+    if (unchanged && !snapshot.active && !triggers?.live && !session?.current) return;
     lastRevision = parser.revision;
     lastTriggerRevision = triggers?.revision ?? -1;
+    lastSessionRevision = session?.revision ?? -1;
 
     overlayWindow.webContents.send(CHANNELS.SNAPSHOT, snapshot);
     for (const win of [alertsWindow, timersWindow]) {
@@ -383,11 +661,18 @@ function startPushLoop() {
 function buildSnapshot() {
   const now = Date.now();
   const snapshot = parser.snapshot();
-  if (!triggers) return { ...snapshot, triggerTimers: [] };
+  // `session` is a compact summary, never the full record: this crosses the IPC boundary
+  // four times a second, and the browse-time shape (every creature, every item, every
+  // faction) is fetched by name when the Session window asks for it. Null when tracking
+  // is off or no session is open, which is what lets the renderer draw nothing at all
+  // rather than an empty row.
+  const sessionSummary = session?.summary(now) ?? null;
+  if (!triggers) return { ...snapshot, triggerTimers: [], session: sessionSummary };
   return {
     ...snapshot,
     hostileCasts: [...snapshot.hostileCasts, ...triggers.warnings(now)],
     triggerTimers: triggers.timers(now),
+    session: sessionSummary,
   };
 }
 
@@ -648,6 +933,10 @@ function refreshTrayMenu() {
     // own window and its own menu item rather than hiding inside settings.
     { label: 'Triggers…', click: createTriggers },
     { label: 'History…', click: createHistory },
+    // Present only while session tracking is on. A menu entry for a window that can only
+    // ever be empty is a promise the app cannot keep, and the switch that would fill it
+    // is one screen away in Settings.
+    ...(sessionEnabled(config.all) ? [{ label: 'Session…', click: createSession }] : []),
     { label: 'Settings…', click: () => createSetup('settings') },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
@@ -771,6 +1060,54 @@ function createTriggers() {
   triggersWindow.on('moved', remember);
   triggersWindow.on('resized', remember);
   triggersWindow.on('closed', () => { triggersWindow = null; });
+}
+
+/**
+ * The Session window: what the night earned, beside what it killed.
+ *
+ * Third of the reading surfaces, built exactly like History and Triggers — a real window
+ * with three fixed panes that take mouse input and scroll internally, its own bounds key,
+ * and no part in the click-through HUD. It is not a mode of the History window on
+ * purpose: that window's entire reason to exist is three panes that never reflow, and a
+ * mode switch changing what all three mean is the accordion it replaced wearing a hat.
+ * They also answer different questions on different clocks — you read history after a
+ * pull and a session after a night.
+ */
+function createSession() {
+  if (sessionWindow && !sessionWindow.isDestroyed()) {
+    sessionWindow.focus();
+    return;
+  }
+
+  sessionWindow = new BrowserWindow({
+    width: 1200,
+    height: 780,
+    ...(config.get('sessionBounds') ?? {}),
+    minWidth: 940,
+    minHeight: 560,
+    title: 'EQL DPS Overlay — Session',
+    backgroundColor: '#100d0a',
+    icon: path.join(ASSETS, 'icon-256.png'),
+    webPreferences: {
+      preload: path.join(RENDERER, 'session', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  sessionWindow.setMenuBarVisibility(false);
+  sessionWindow.loadFile(path.join(RENDERER, 'session', 'index.html'));
+
+  const remember = () => {
+    clearTimeout(saveSessionBoundsTimer);
+    saveSessionBoundsTimer = setTimeout(() => {
+      if (!sessionWindow || sessionWindow.isDestroyed()) return;
+      config.set({ sessionBounds: sessionWindow.getBounds() });
+    }, 400);
+  };
+  sessionWindow.on('moved', remember);
+  sessionWindow.on('resized', remember);
+  sessionWindow.on('closed', () => { sessionWindow = null; });
 }
 
 /**
@@ -1192,6 +1529,10 @@ function registerIpc() {
     // timers window answers to its own switch, and to the same mute.
     if (ALERT_KEYS.some((key) => patch[key] !== undefined)) syncAlertsWindow();
     if (TIMER_KEYS.some((key) => patch[key] !== undefined)) syncTimersWindow();
+    // One block, one predicate — the master switch decides whether the tracker exists at
+    // all and the seven categories decide what it reads, so any touch of it re-derives
+    // both rather than trying to work out which half moved.
+    if (patch.session !== undefined) syncSessionTracker();
 
     broadcastConfig(after);
     // The tray carries the same switches as the settings form, so a change made in
@@ -1498,17 +1839,104 @@ function registerIpc() {
   });
 
   /**
-   * Empty the followed eqlog on disk. Safe while the game runs — EQ appends per
-   * line, and truncation is the classic way players manage these files — and safe
-   * for the overlay: the tailer notices the shrink, emits 'reset', and the parser
-   * starts clean. Encounter history is untouched; persisting fights is exactly what
-   * makes clearing the raw log a loss of nothing.
+   * Empty the followed eqlog on disk.
+   *
+   * Safe for the overlay — the tailer notices the shrink, emits 'reset', and the parser
+   * starts clean — and safe for the game, which appends per line. It is NOT safe for
+   * anything else tailing the same file by byte position. GINA and GamParse both do, and
+   * truncating under them leaves them reading from an offset past the end: silently dead
+   * until restarted, with nothing on screen saying so. EQBuddy shipped that bug and then
+   * fixed it; we can have the fix without the bug.
+   *
+   * Refused rather than warned-and-proceeded. The player can close the other tool and try
+   * again in five seconds, and there is no undo for the alternative.
    */
   ipcMain.handle(CHANNELS.LOGS_CLEAR, async () => {
     if (!tailer?.filePath) return { ok: false, error: 'no log is being followed' };
+
+    const holding = await runningReaders();
+    if (holding.length > 0) {
+      return {
+        ok: false,
+        blockedBy: holding,
+        error: `${holding.join(' and ')} ${holding.length > 1 ? 'are' : 'is'} reading this ` +
+          'log by position — emptying it now would leave them stuck past the end. ' +
+          'Close them first.',
+      };
+    }
+
     try {
       await fs.promises.truncate(tailer.filePath, 0);
       return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  /**
+   * What the client currently does about logging, and where that is written down.
+   *
+   * Read-only, so the settings form can say what the state is before offering to change
+   * it. Every failure reads as "we cannot tell", never as "it is off": claiming a setting
+   * is off when the file simply could not be found would send the player to fix something
+   * that is not broken.
+   */
+  ipcMain.handle(CHANNELS.EQCONFIG_STATE, async () => {
+    const iniPath = eqclientIniPath(tailer?.filePath ?? config.get('logPath'));
+    if (!iniPath) return { ok: false, reason: 'no-path' };
+    try {
+      const text = await fs.promises.readFile(iniPath, 'latin1');
+      return {
+        ok: true,
+        iniPath,
+        logEnabled: isLogEnabled(text),
+        gameRunning: (await runningReaders()).includes(GAME_PROCESS),
+      };
+    } catch (err) {
+      return { ok: false, reason: 'unreadable', iniPath, error: err.message };
+    }
+  });
+
+  /**
+   * Set `Log=1` in the client's own settings, so `/log on` stops being a ritual.
+   *
+   * Three guards, in order, and each one is load-bearing:
+   *
+   *   1. The path is DERIVED from the log we were told to follow, never searched for. A
+   *      function that writes to a path must not invent one.
+   *   2. The game must not be running. EverQuest reads this file at startup and writes it
+   *      back on exit, so editing it under a live client means the client overwrites us.
+   *   3. The original is backed up once, before the first write, and never overwritten
+   *      afterwards — so the backup is always the file as it was before this app first
+   *      touched it, not as it was one edit ago.
+   */
+  ipcMain.handle(CHANNELS.EQCONFIG_ENABLE_LOG, async () => {
+    const iniPath = eqclientIniPath(tailer?.filePath ?? config.get('logPath'));
+    if (!iniPath) return { ok: false, error: 'could not work out where eqclient.ini lives' };
+
+    if ((await runningReaders()).includes(GAME_PROCESS)) {
+      return {
+        ok: false,
+        error: 'EverQuest is running. It rewrites this file when it exits, so close the ' +
+          'game first or the change will be undone.',
+      };
+    }
+
+    try {
+      // latin1, like the logs: this is a file a Windows game wrote, and utf8 would mangle
+      // any non-ASCII byte in a path or a comment on the way through.
+      const before = await fs.promises.readFile(iniPath, 'latin1');
+      const { text, changed, action } = setLogEnabled(before, true);
+      if (!changed) return { ok: true, changed: false, action, iniPath };
+
+      const backup = `${iniPath}.eqoverlay-backup`;
+      // `wx` fails if it exists, which is exactly the behaviour wanted: the backup is the
+      // file as it was before this app ever touched it.
+      await fs.promises.writeFile(backup, before, { encoding: 'latin1', flag: 'wx' })
+        .catch(() => {});
+
+      await fs.promises.writeFile(iniPath, text, 'latin1');
+      return { ok: true, changed: true, action, iniPath, backup };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -1543,6 +1971,94 @@ function registerIpc() {
   ipcMain.handle(CHANNELS.HISTORY_GET, (_e, { key, id }) => history.get(key, id));
 
   ipcMain.handle(CHANNELS.HISTORY_CLEAR, (_e, key) => history.clear(key));
+
+  // ---------------------------------------------------------------- sessions
+
+  /**
+   * Sessions, for the session window. Same shape as HISTORY_LIST and for the same
+   * reasons — the default key is whoever is being followed, and every character with a
+   * file on disk is offered.
+   */
+  ipcMain.handle(CHANNELS.SESSION_LIST, (_e, key) => {
+    const current = sessionKey(parser?.selfName, parser?.server);
+    const characters = sessionStore.characters();
+    const selected = key ?? (characters.some((c) => c.key === current) ? current : characters[0]?.key);
+    return {
+      characters,
+      selected: selected ?? null,
+      sessions: selected ? sessionStore.list(selected) : [],
+      /** Which character the tracker is actually recording, so the rail can say so. */
+      tracking: session ? current : null,
+    };
+  });
+
+  /**
+   * One session in full, with the fights that happened inside it.
+   *
+   * The combat block is JOINED from the encounter store on time rather than counted by
+   * the session tracker. `src/session/` is a sibling of the combat parser precisely so it
+   * never has to score damage — a second damage pipeline there would be a second answer
+   * to one question, and the one on screen would be the wrong one. Both stores stamp real
+   * timestamps, so joining them is a fact.
+   */
+  ipcMain.handle(CHANNELS.SESSION_GET, (_e, { key, id }) => {
+    const record = sessionStore.get(key, id);
+    if (!record) return null;
+    let combat = null;
+    try {
+      combat = combatBetween(
+        history.records(storeKey(record.character, record.server)),
+        record.startTs,
+        record.endTs,
+        { character: record.character },
+      );
+    } catch {
+      // No encounter history for this character is not an error — the Combat row simply
+      // says so, and every other category is unaffected.
+    }
+    return { record, combat };
+  });
+
+  /**
+   * The session in flight, as a full record.
+   *
+   * History has no equivalent because a fight is over by the time you browse it. The
+   * session you most want to read is usually the one you are still in, and it is not on
+   * disk — only a five-minute-old checkpoint of it is, which is exactly the wrong thing
+   * to show someone asking about right now.
+   */
+  ipcMain.handle(CHANNELS.SESSION_CURRENT, () => session?.checkpoint() ?? null);
+
+  ipcMain.handle(CHANNELS.SESSION_CLEAR, (_e, key) => sessionStore.clear(key));
+
+  ipcMain.handle(CHANNELS.SESSION_OPEN, () => { createSession(); });
+
+  /**
+   * Replay a log file into the session store.
+   *
+   * The whole point is that this is reachable without a terminal. A player who has been
+   * running the game for weeks before installing this has all of it in their eqlog, and
+   * the parser can read it — it just could not, before, be asked to.
+   *
+   * A private tracker is used rather than the live one: importing must not disturb the
+   * session in flight, and the imported log may be a different character entirely. The
+   * store's own id dedup makes re-importing the same file a no-op rather than a doubling.
+   */
+  ipcMain.handle(CHANNELS.SESSION_IMPORT, async () => {
+    const picked = await dialog.showOpenDialog({
+      title: 'Import a log file',
+      defaultPath: config.get('logDir') ?? DEFAULT_LOG_DIR,
+      filters: [{ name: 'EverQuest logs', extensions: ['txt'] }],
+      properties: ['openFile'],
+    });
+    if (picked.canceled || !picked.filePaths[0]) return { ok: false, canceled: true };
+
+    try {
+      return { ok: true, ...importSessionLog(picked.filePaths[0]) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 
   /**
    * The renderer measured its content and wants the window to match.

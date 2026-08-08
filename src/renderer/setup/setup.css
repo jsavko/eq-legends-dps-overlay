@@ -80,6 +80,18 @@ h2:not(:first-child) { margin-top: 22px; }
    window along with the switches they wrote. Their styles went with them; the indent
    rules above stay, because other sub-settings still use them. */
 
+/* The seven session categories, two to a line. Indented like any other block of
+   sub-settings, and dimmed rather than hidden while the master switch is off: a player
+   asking "can this record loot" needs to see that it can and currently is not, and a
+   section that vanishes answers neither half. */
+.session-grid {
+  margin-left: 22px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+.session-grid.disabled { opacity: 0.55; }
+
 input[type="text"], input[type="number"] {
   flex: 1;
   min-width: 0;

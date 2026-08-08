@@ -1,0 +1,377 @@
+/*
+ * The session window wears the overlay's warm palette, like History and Triggers — this
+ * is a reading surface for a night of play, so it should read as the overlay's ledger
+ * rather than as another settings form.
+ *
+ * Layout is three fixed panes (sessions / summary / detail) on one grid, on History's
+ * model and for History's reason. Every interaction swaps content INSIDE a pane; nothing
+ * here may resize, expand or push a neighbour. That is why every row which can be empty
+ * has an explicit empty state rather than vanishing: a line that renders only sometimes
+ * moves every line below it, which is the reflow bug this whole window shape exists to
+ * avoid.
+ *
+ * Panes scroll internally, which is fine in a normal window: only the click-through
+ * surfaces — the overlay, the alerts and the timers — may never scroll.
+ */
+
+:root {
+  --bg:        #100d0a;
+  --panel:     #17130f;
+  --panel-2:   #221b14;
+  --line:      #2e2620;
+
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+
+  --ember:     #b9702a;
+  --gold:      #e0a53f;   /* coin, experience, and the selection accent */
+  --balm:      #63c2b4;   /* things made rather than found: combines */
+  --bad:       #e5766b;   /* deaths */
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  /* The summary pane carries four headline numbers side by side and needs the room; the
+     detail pane is a two-column table and reads fine narrower. */
+  grid-template-columns: 300px minmax(0, 1.05fr) minmax(0, 1fr);
+  grid-template-areas:
+    "titlebar titlebar titlebar"
+    "rail     summary  detail";
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow: hidden;
+  user-select: none;
+}
+
+.num, .tabular { font-variant-numeric: tabular-nums; }
+.grow { flex: 1; }
+
+/* ---------------------------------------------------------------- titlebar */
+
+#titlebar {
+  grid-area: titlebar;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+#titlebar h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+#character {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+}
+#character:focus { outline: none; border-color: var(--ember); }
+
+.meta { margin: 0; color: var(--ink-faint); font-size: 12px; }
+
+#import {
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--ember);
+  background: var(--ember);
+  color: #170f06;
+  font-weight: 600;
+  cursor: pointer;
+}
+#import:hover { background: var(--gold); border-color: var(--gold); }
+#import:disabled { opacity: 0.5; cursor: default; }
+
+/* ------------------------------------------------------------------- panes */
+
+main { display: contents; }
+
+section {
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+}
+#rail    { grid-area: rail;    background: var(--panel); }
+#summary { grid-area: summary; }
+#detail  { grid-area: detail;  border-right: none; }
+
+section::-webkit-scrollbar { width: 6px; }
+section::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+
+.pane-head {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.pane-head.sub { padding-top: 16px; }
+.pane-head h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+/* The selected session's own heading is a real title, not a section label. */
+#s-when {
+  font-size: 17px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  font-weight: 500;
+}
+#s-sub, #s-deaths { margin-top: 4px; }
+/*
+ * Two lines tall whether or not it needs both.
+ *
+ * This line is "4h 12m tracked · <zones> · closed by 60m idle", and the zone list makes
+ * its length vary by session — one line for a night in Lower Guk, two for a night that
+ * wandered. Left free it would move the headline numbers and the whole CATEGORIES list
+ * every time the selection changed, which is reflow-on-selection: the exact thing this
+ * window's three-fixed-pane shape exists to prevent.
+ */
+#s-sub { min-height: 2.9em; }
+
+ol { list-style: none; margin: 0; padding: 0; }
+
+.empty {
+  padding: 18px 16px;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+/* --------------------------------------------------------------- the rail */
+
+#search {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+#search:focus { outline: none; border-color: var(--ember); }
+
+.chips { display: flex; gap: 6px; margin-top: 10px; }
+.chip {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.chip:hover { color: var(--ink); }
+.chip[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
+
+.day-head {
+  padding: 8px 16px 6px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.session-row {
+  padding: 10px 16px 11px;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+.session-row:hover { background: var(--panel-2); }
+.session-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--ember) 12%, var(--panel));
+  border-left-color: var(--gold);
+}
+
+.row-top { display: flex; align-items: baseline; gap: 10px; }
+.row-time { font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.row-span {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-dim);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.row-zone {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-stats { margin-top: 2px; font-size: 11px; color: var(--ink-faint); }
+/* Rendered ALWAYS — faint "no deaths" on a clean night. A line that appears only on
+   death-sessions shifts every row below it, which is precisely the bug the History
+   window already fixed once. */
+.row-deaths { color: var(--ink-faint); }
+.row-deaths[data-had="true"] { color: var(--bad); }
+
+/* ------------------------------------------------------------- the summary */
+
+.headline {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 14px 16px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.stat-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+/*
+ * Value and unit on one baseline, wrapping to a second line when the numbers get big
+ * ("104 pp · 90.8/hr" does not fit beside three siblings at this width).
+ *
+ * The min-height is what makes the wrap safe: the cell is already two lines tall whether
+ * or not it uses both, so a night that earned 3.4pp and one that earned 104pp put the
+ * CATEGORIES heading below on exactly the same pixel. Letting the row grow instead would
+ * be reflow-on-selection, which is the thing this window is built not to do.
+ */
+.stat-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 5px;
+  margin-top: 3px;
+  /* 3.2em is the measured wrapped height: a 25px number plus an 11px unit on its own
+     line. Anything less and a big-coin night pushes CATEGORIES down 8px relative to a
+     small one, which is the reflow this is here to stop. */
+  min-height: 3.2em;
+}
+.stat-value b {
+  font-size: 25px;
+  font-weight: 600;
+  font-stretch: 87.5%;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.stat-value[data-accent="true"] b { color: var(--gold); }
+.stat-value span { font-size: 11px; color: var(--ink-faint); }
+
+.category-row {
+  padding: 11px 16px 12px;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+.category-row:hover { background: var(--panel-2); }
+.category-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--ember) 12%, var(--panel));
+  border-left-color: var(--gold);
+}
+/* Both are <span>s built by the same helper the rest of the window uses, so they need to
+   be told to stack — inline they run together as "Combat412k dealt". */
+.cat-name { display: block; font-size: 14px; color: var(--ink); }
+.cat-sub { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-faint); }
+
+/* -------------------------------------------------------------- the detail */
+
+.lead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+  min-height: 30px;   /* holds the row whether or not there is a lead to show */
+}
+.lead b {
+  font-size: 26px;
+  font-weight: 600;
+  font-stretch: 87.5%;
+  line-height: 1;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.lead span { font-size: 12px; color: var(--ink-dim); }
+
+.col-head {
+  display: flex;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.col-head span:last-child { margin-left: auto; }
+
+.detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.d-name { flex: 1; min-width: 0; }
+.d-name b { display: block; font-weight: 400; font-size: 13px; color: var(--ink); }
+/*
+ * The sub-line WRAPS rather than ellipsizing. Some of these are prose — "no time-to-level
+ * — the log never said where this level started" — and a sentence cut off at "the log
+ * never said wh…" is exactly the truncation this project refuses everywhere else. This
+ * pane scrolls, so there is room; a taller row costs nothing.
+ *
+ * The min-height reserves the line even when a row has no sub-text, which is what keeps
+ * rows from jumping as the list is rebuilt.
+ */
+.d-name i {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1.4;
+  min-height: 1.4em;
+  color: var(--ink-faint);
+}
+.d-value {
+  flex: 0 0 auto;
+  font-size: 14px;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The current level in the Progress pane, and the note that follows it. The note is the
+   honesty rule made visible — a dash where a session-wide XP total would go, and one
+   line saying why — so it is styled as prose rather than as a value. */
+.detail-row[data-kind="current"] .d-value { color: var(--gold); }
+.detail-row[data-kind="past"] .d-value { color: var(--ink-dim); }
+.detail-row[data-kind="note"] .d-value { color: var(--ink-faint); }
+.detail-row[data-kind="note"] .d-name b { color: var(--ink-dim); }
+.detail-row[data-kind="aa"] .d-value { color: var(--gold); }
+/* A spend is the other direction, so it reads as the other direction. */
+.detail-row[data-kind="aa-spend"] .d-value { color: var(--ink-dim); }
+.detail-row[data-kind="death"] .d-name b { color: var(--bad); }
+
+.footer {
+  margin: 0;
+  padding: 12px 16px 18px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}

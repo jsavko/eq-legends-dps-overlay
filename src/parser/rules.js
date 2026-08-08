@@ -720,8 +720,16 @@ export const RULES = [
   },
   {
     // (confirmed) "You have entered The Ruins of Old Guk 2 (Adaptive)."
+    //
+    // The zone name must start with a CAPITAL, because the game words one of its flavour
+    // messages exactly like a zone line:
+    //   "You have entered an area where levitation effects do not function."
+    // Without the anchor that reads as zoning, and zoning closes the encounter — so
+    // stepping into a no-levitate room ended the fight you were in the middle of. It is
+    // in the live log 8 times. Zone names are proper nouns and are always capitalized;
+    // the flavour messages are sentences and are not.
     id: 'zone-entered',
-    re: /^You have entered (.+?)\.$/,
+    re: /^You have entered ([A-Z].*?)\.$/,
     make: (m) => ({ kind: 'zone', phase: 'entered', zone: m[1] }),
   },
 
@@ -819,6 +827,22 @@ export function ruleSource(id) {
 
 /** Every id `ruleSource` answers for, so a caller can be checked against reality. */
 export const RULE_IDS = Object.freeze(RULES.map((rule) => rule.id).filter(Boolean));
+
+/**
+ * The rules that consume somebody TALKING.
+ *
+ * Named by rule id rather than inferred from the event kind, because the chat rule emits
+ * TWO kinds: `chat` normally, and `player-proof` when the channel itself proves the
+ * speaker is a real player. So "kind === 'chat'" is a strictly narrower question than
+ * "was this line speech", and anything relying on the former silently lets guild, group,
+ * raid and auction lines through.
+ *
+ * `src/session/` asks exactly this question — it is the entire chat guard that keeps a
+ * player quoting "You have slain a froglok shin knight!" in /general out of the night's
+ * kill count. Asking it by id means a future chat form cannot reopen the hole by
+ * inventing a third kind.
+ */
+export const CHAT_RULE_IDS = Object.freeze(['chat', 'chat-self']);
 
 /**
  * "frenzies on" -> "Frenzy", "crushes" -> "Crush", "crush" -> "Crush".

@@ -8,6 +8,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { SESSION_CATEGORIES } from '../session/rules.js';
+
 /** Where the Daybreak launcher installs EverQuest Legends by default. */
 export const DEFAULT_LOG_DIR =
   'C:\\Users\\Public\\Daybreak Game Company\\Installed Games\\EverQuest Legends\\Logs';
@@ -146,6 +148,53 @@ export const DEFAULTS = {
   historyBounds: null,
   /** Triggers window position and size; null until the user moves or resizes it. */
   triggersBounds: null,
+  /** Session window position and size; null until the user moves or resizes it. */
+  sessionBounds: null,
+
+  /**
+   * The non-combat half of a play session: kills, loot, coin, experience, faction,
+   * skills, zones.
+   *
+   * `enabled` is OFF by default and that is the whole promise of this block — a raid HUD
+   * that is bit-for-bit what it was before this feature existed for anyone who does not
+   * want it. Master off means `main.js` never constructs the tracker at all, so a
+   * disabled session costs no regex, no memory and no disk.
+   *
+   * The seven CATEGORIES default ON, which is a deliberate departure from "everything
+   * off": a master switch that turns on nothing is not a preference, it is a feature that
+   * appears broken the first time it is used. Nothing they gate can reach the screen until
+   * `enabled` is set, so the raid HUD is protected by the master alone and the categories
+   * are free to mean what they say.
+   *
+   * They are gated at RULE EVALUATION rather than at display — see
+   * `matchSessionRule` — so a category that is off never runs its regex and never
+   * accumulates, instead of being computed and then hidden.
+   *
+   * These live in the settings form, and that does NOT reopen the wound that removed the
+   * ALERTS and BOSS TIMERS sections from it. That removal happened because two screens
+   * were answering one question, so a pack could be enabled while its surface was off with
+   * neither screen saying so. Session categories have exactly one screen; there is no
+   * second place to disagree with.
+   */
+  session: {
+    enabled: false,
+    kills: true,
+    loot: true,
+    coin: true,
+    xp: true,
+    faction: true,
+    skills: true,
+    zones: true,
+    /**
+     * One dim line on the meter, under the readout and above the group rows.
+     *
+     * Its own switch, independent of the categories feeding it: "track my night" and "put
+     * my night on the overlay" are different requests, and a player who wants the Session
+     * window has not thereby asked for another line between them and the DPS numbers.
+     * Off by default for the same reason `enabled` is.
+     */
+    meterLine: false,
+  },
 
   hotkeys: {
     toggleLock: 'Control+Shift+L',
@@ -164,6 +213,47 @@ export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
 
 /** Every key that can change whether the boss-timer window should exist. */
 export const TIMER_KEYS = ['triggerTimers', 'alertsMuted'];
+
+/**
+ * The seven session categories, in the order they read in the settings form.
+ *
+ * Re-exported from `src/session/rules.js` rather than restated, because the rule table is
+ * where a category becomes real — a name here with no rules behind it would be a switch
+ * that does nothing, and a rule with a category not listed here would be data the player
+ * cannot turn off. `tests/config.test.js` pins the two together.
+ */
+export { SESSION_CATEGORIES };
+
+/**
+ * The seven switches in the shape `SessionTracker` wants, with absent reading as ON.
+ *
+ * Derived rather than handed over wholesale so the tracker is never passed `enabled` and
+ * `meterLine` as if they were categories, and so a config written before a category
+ * existed gains it switched on rather than silently off.
+ */
+export function sessionCategories(cfg) {
+  const block = cfg?.session ?? {};
+  return Object.fromEntries(SESSION_CATEGORIES.map((c) => [c, block[c] !== false]));
+}
+
+/**
+ * Is the session tracker on at all?
+ *
+ * Its own predicate for the same reason `alertsEnabled` is: one switch decides whether a
+ * whole subsystem gets constructed, and putting that decision in an Electron-shaped
+ * conditional in main.js would make it the one piece of this feature that cannot be
+ * tested in WSL. A missing block reads as OFF — unlike the alert categories, where absent
+ * means on. That asymmetry is deliberate: the alert rule protects warnings a player
+ * already had from being swallowed by an upgrade, and nobody has ever had this.
+ */
+export function sessionEnabled(cfg) {
+  return cfg?.session?.enabled === true;
+}
+
+/** Should the meter draw its session line? Both switches, because both are real. */
+export function sessionLineEnabled(cfg) {
+  return sessionEnabled(cfg) && cfg?.session?.meterLine === true;
+}
 
 /**
  * The six warning groups a cast can land in, in the order they read in the settings

@@ -35,6 +35,9 @@ const els = {
   dSources: $('d-sources'),
   dTypes: $('d-types'),
   dAbilities: $('d-abilities'),
+  sessionLine: $('session-line'),
+  sessionStats: $('session-stats'),
+  sessionElapsed: $('session-elapsed'),
   status: $('status'),
   toast: $('toast'),
 };
@@ -47,6 +50,17 @@ let toastTimer = null;
 let metric = 'damage';
 /** Row elements by combatant name, so pushes update in place. */
 const rowCache = new Map();
+/**
+ * Both switches behind the session line, from config.
+ *
+ * The renderer needs its own copy because a snapshot carrying `session: null` is
+ * ambiguous — it means either "tracking is off" or "tracking is on and no session has
+ * opened yet", and the line must be absent in both cases but the second one will change
+ * on its own. Keeping the config answer here also means turning the line off hides it
+ * on the next config push rather than on the next log line, which during a lull can be
+ * minutes away.
+ */
+let sessionLineOn = false;
 
 init();
 
@@ -78,7 +92,12 @@ function applyConfig(config) {
   // already told by the unit label and the fill color.
   $('btn-metric').textContent = METRIC_CYCLE[(METRIC_CYCLE.indexOf(metric) + 1) % METRIC_CYCLE.length];
   applyLock(config.locked);
+  // Both switches, because both are real: a tracker that was never constructed cannot
+  // feed a line, and a player who wanted the Session window has not thereby asked for
+  // another line between them and the DPS numbers.
+  sessionLineOn = config.session?.enabled === true && config.session?.meterLine === true;
   if (snapshot) render(snapshot);   // repaint in the new metric without waiting for a push
+  else renderSessionLine(null);     // so switching it off takes effect during a lull
 }
 
 function applyLock(locked) {
@@ -144,6 +163,7 @@ function render(snap) {
   els.rolling.textContent = formatNumber(topRolling);
 
   renderRows(rows, m);
+  renderSessionLine(snap.session ?? null);
 
   // The pace tick marks the share an even group would each have.
   if (rows.length >= 2) {
@@ -160,6 +180,110 @@ function render(snap) {
   }
 
   fitWindow();
+}
+
+/**
+ * The running session, in one line.
+ *
+ * Renders NOTHING — not an empty row, not a zeroed one — when the line is switched off or
+ * no session is open. The overlay pays for every pixel it takes from the game, and a
+ * placeholder for a night that has not started yet is a pixel nobody asked for. `hidden`
+ * rather than `display: none` because `measureContentHeight` skips hidden children, so an
+ * absent line costs the window exactly zero height.
+ *
+ * The stat order is the priority order, and it is not alphabetical or arbitrary: kills is
+ * what a camp is measured in, coin is what it is for, experience is why you are there at
+ * all, ability points are the rarest thing that can happen in a night, and loot is the
+ * long tail. When the window is too narrow to hold them all, the ones at the end go —
+ * see dropOverflowingStats.
+ */
+function renderSessionLine(session) {
+  if (!sessionLineOn || !session) {
+    els.sessionLine.hidden = true;
+    return;
+  }
+  els.sessionLine.hidden = false;
+  els.sessionElapsed.textContent = formatDuration(session.elapsedMs);
+
+  // Counts, not rates: `formatNumber` exists for DPS and renders 88 as "88.0", which on a
+  // tally of looted items is a decimal place that cannot mean anything.
+  const stats = [
+    ['kills', formatTally(session.kills), 'kills'],
+    ['coin', formatCoin(session.copperEarned), ''],
+    ['xp', `${session.xpPercent.toFixed(1)}%`, session.xpLevel === null ? 'xp' : `L${session.xpLevel}`],
+    ['aa', String(session.aa), 'aa'],
+    ['loot', formatTally(session.loot), 'loot'],
+  ];
+
+  els.sessionStats.replaceChildren(...stats.map(([kind, value, unit]) => {
+    const wrap = document.createElement('span');
+    wrap.className = 's-stat';
+    wrap.dataset.kind = kind;
+
+    const v = document.createElement('span');
+    v.className = 's-value';
+    v.textContent = value;
+    wrap.append(v);
+
+    if (unit) {
+      const u = document.createElement('span');
+      u.className = 's-unit';
+      u.textContent = unit;
+      wrap.append(u);
+    }
+    return wrap;
+  }));
+
+  dropOverflowingStats();
+}
+
+/**
+ * Drop stats from the right until the line fits.
+ *
+ * This window cannot scroll — it ignores mouse input so the game keeps every click, so
+ * the wheel never reaches it and anything past the edge is content silently gone. The
+ * usual CSS answers are all worse here: `overflow: hidden` clips a number mid-digit,
+ * `text-overflow: ellipsis` turns "1038p" into "10…", and either one leaves a figure on
+ * screen that reads as a smaller number than it is. Removing the whole stat is the only
+ * option that cannot mislead.
+ *
+ * The label and the elapsed time are never dropped: without the first the line has no
+ * name, and without the second every rate on it is unreadable.
+ */
+function dropOverflowingStats() {
+  const line = els.sessionLine;
+  // A dozen iterations at worst, five in practice, and only while the line is on.
+  while (els.sessionStats.children.length > 0 && line.scrollWidth > line.clientWidth) {
+    els.sessionStats.lastElementChild.remove();
+  }
+}
+
+/** A whole-number tally: 142 kills is 142, never 142.0, and 1240 is "1.2k". */
+function formatTally(n) {
+  const v = Math.round(Number(n) || 0);
+  return v >= 10_000 ? `${(v / 1000).toFixed(1)}k` : String(v);
+}
+
+/**
+ * Copper as the game says it — "178p 8g", not "178886".
+ *
+ * Two denominations, which is a deliberate truncation and the only one on this line: at
+ * this width the difference between 178p 8g and 178p 8g 8s 6c is four characters that
+ * nobody reads mid-pull, and the exact purse is one click away in the Session window.
+ * Everything else on the line is the whole number or absent.
+ */
+function formatCoin(copper) {
+  const n = Math.max(0, Math.round(copper));
+  if (n === 0) return '0c';
+  const parts = [];
+  let rest = n;
+  for (const [suffix, per] of [['p', 1000], ['g', 100], ['s', 10], ['c', 1]]) {
+    const q = Math.floor(rest / per);
+    rest -= q * per;
+    if (q > 0) parts.push(`${q}${suffix}`);
+    if (parts.length === 2) break;
+  }
+  return parts.join(' ');
 }
 
 /**
