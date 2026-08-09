@@ -64,7 +64,8 @@ export function railSummary(entry) {
     stats: [
       `${entry.kills} kills`,
       `${formatPlatinum(entry.copperEarned)}pp`,
-      entry.levelsGained > 0 ? `${entry.levelsGained} level` : null,
+      entry.levelsGained > 0
+        ? `${entry.levelsGained} level${entry.levelsGained === 1 ? '' : 's'}` : null,
     ].filter(Boolean).join(' · '),
     deaths: entry.deaths > 0
       ? `${entry.deaths} death${entry.deaths === 1 ? '' : 's'}`
@@ -390,6 +391,32 @@ function progressDetail(record) {
         sub: 'the log prints no absolute XP — 1% at 27 is not 1% at 28',
         kind: 'note',
       },
+      /**
+       * Levels gained, as a count, beside the ability points.
+       *
+       * The segment rows above list what each level EARNED — "+99%", "15:47 in level" —
+       * and never state how many levels the night was worth. Reading it off them means
+       * counting rows and knowing that the first one is a level you were already in, which
+       * is arithmetic the pane should be doing. Ability points had a row of their own and
+       * levels did not, which made the rarer and larger event the harder one to find.
+       *
+       * Placed before the ability points for the same reason it outranks them on the meter
+       * line: a level is the bigger event of the two.
+       */
+      ...(xp.levelsGained > 0 || xp.levelsLost > 0 ? [{
+        name: 'Levels',
+        value: String(xp.levelsGained),
+        sub: [
+          xp.levelUps?.length > 0
+            ? `reached level ${xp.levelUps[xp.levelUps.length - 1].level}`
+            : null,
+          // A de-level is rare enough to be worth stating outright rather than netting
+          // away — the count above is gross, and silence would make it look like it was not.
+          xp.levelsLost > 0
+            ? `${xp.levelsLost} lost` : null,
+        ].filter(Boolean).join(' · '),
+        kind: 'level',
+      }] : []),
       ...(aa.earned > 0 || aa.abilities.length > 0 ? [{
         name: 'Ability points',
         value: String(aa.earned),

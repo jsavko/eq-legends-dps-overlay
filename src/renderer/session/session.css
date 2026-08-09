@@ -380,6 +380,9 @@ ol { list-style: none; margin: 0; padding: 0; }
 .detail-row[data-kind="past"] .d-value { color: var(--ink-dim); }
 .detail-row[data-kind="note"] .d-value { color: var(--ink-faint); }
 .detail-row[data-kind="note"] .d-name b { color: var(--ink-dim); }
+/* The night's two rare events — a level and an ability point — carry the accent, the same
+   pairing the meter's session line gives them. */
+.detail-row[data-kind="level"] .d-value,
 .detail-row[data-kind="aa"] .d-value { color: var(--gold); }
 /* A spend is the other direction, so it reads as the other direction. */
 .detail-row[data-kind="aa-spend"] .d-value { color: var(--ink-dim); }

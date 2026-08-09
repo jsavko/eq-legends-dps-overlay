@@ -84,6 +84,49 @@ test('the session in flight ends its span in "now", never in a time it has not r
   assert.equal(live.deaths, finished.deaths);
 });
 
+test('the Progress pane counts the levels rather than making you count rows', () => {
+  // The segment rows say what each level EARNED ("+99%", "15:47 in level") and never how
+  // many levels the night was worth — and the first row is a level you were already in, so
+  // counting them is wrong as well as tedious. Ability points had a row of their own from
+  // the start; this is the matching one, and it sits above them because a level is bigger.
+  const view = detail(realRecord(), 'progress');
+  const levels = view.rows.find((r) => r.name === 'Levels');
+  assert.ok(levels, 'the Progress pane must state levels gained as a number');
+  assert.equal(levels.value, '1');
+  assert.equal(levels.sub, 'reached level 28');
+
+  const order = view.rows.map((r) => r.name);
+  assert.ok(
+    order.indexOf('Levels') < order.indexOf('Ability points'),
+    'levels outranks ability points, as it does on the meter line',
+  );
+});
+
+test('a de-level is stated, never netted away', () => {
+  const view = detail({
+    xp: { segments: [], levelsGained: 2, levelsLost: 1, levelUps: [{ ts: 0, level: 28 }] },
+    aa: { earned: 0, spent: 0, abilities: [] },
+  }, 'progress');
+  const levels = view.rows.find((r) => r.name === 'Levels');
+  // Gross, matching the meter line and the rail — with the loss said out loud rather than
+  // subtracted, since silence would make a gross count look like a net one.
+  assert.equal(levels.value, '2');
+  assert.equal(levels.sub, 'reached level 28 · 1 lost');
+});
+
+test('a night with no level-up gets no levels row at all', () => {
+  const view = detail({
+    xp: { segments: [], levelsGained: 0, levelsLost: 0, levelUps: [] },
+    aa: { earned: 2, spent: 0, abilities: [] },
+  }, 'progress');
+  assert.equal(view.rows.some((r) => r.name === 'Levels'), false);
+});
+
+test('the rail counts levels in plural', () => {
+  assert.ok(railSummary({ ...ENTRY, levelsGained: 1 }).stats.endsWith('1 level'));
+  assert.ok(railSummary({ ...ENTRY, levelsGained: 4 }).stats.endsWith('4 levels'));
+});
+
 test('timeRange states an end only when there is one', () => {
   assert.equal(timeRange(T0, T0 + HOUR), '09:12 – 10:12');
   assert.equal(timeRange(T0, T0 + HOUR, { live: true }), '09:12 – now');
