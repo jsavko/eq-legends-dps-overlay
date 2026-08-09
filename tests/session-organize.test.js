@@ -67,6 +67,28 @@ test('the rail summary names the zones rather than counting them', () => {
   assert.equal(zoneLabel({ zoneNames: [] }), 'Unknown');
 });
 
+test('the session in flight ends its span in "now", never in a time it has not reached', () => {
+  // The live entry carries `endTs = this instant`, so the ordinary formatting would state
+  // as fact that the night finished at the moment the player happened to look at it.
+  const finished = railSummary(ENTRY);
+  assert.equal(finished.range, '09:12 – 13:12');
+  assert.equal(finished.live, false);
+
+  const live = railSummary({ ...ENTRY, live: true });
+  assert.equal(live.range, '09:12 – now');
+  assert.equal(live.live, true);
+
+  // Everything else about the row is the same sentence about a shorter night.
+  assert.equal(live.zone, finished.zone);
+  assert.equal(live.stats, finished.stats);
+  assert.equal(live.deaths, finished.deaths);
+});
+
+test('timeRange states an end only when there is one', () => {
+  assert.equal(timeRange(T0, T0 + HOUR), '09:12 – 10:12');
+  assert.equal(timeRange(T0, T0 + HOUR, { live: true }), '09:12 – now');
+});
+
 test('filters narrow by week, deaths and free text without re-sorting', () => {
   const now = T0 + 2 * 24 * HOUR;
   const old = { ...ENTRY, id: '2', startTs: T0 - 20 * 24 * HOUR, zoneNames: ['Befallen'] };

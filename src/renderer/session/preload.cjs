@@ -9,7 +9,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 const CH = {
   SESSION_LIST: 'session:list',
   SESSION_GET: 'session:get',
-  SESSION_CURRENT: 'session:current',
   SESSION_CLEAR: 'session:clear',
   SESSION_IMPORT: 'session:import',
   SESSION_APPENDED: 'session:appended',
@@ -17,9 +16,11 @@ const CH = {
 
 contextBridge.exposeInMainWorld('api', {
   sessionList: (key) => ipcRenderer.invoke(CH.SESSION_LIST, key),
+  /**
+   * One session in full. Serves the night in flight as well as the ones on disk — it is an
+   * ordinary row in the rail and asks the ordinary question.
+   */
   sessionGet: (args) => ipcRenderer.invoke(CH.SESSION_GET, args),
-  /** The session in flight — not on disk yet, and usually the one you came to read. */
-  sessionCurrent: () => ipcRenderer.invoke(CH.SESSION_CURRENT),
   sessionClear: (key) => ipcRenderer.invoke(CH.SESSION_CLEAR, key),
   sessionImport: () => ipcRenderer.invoke(CH.SESSION_IMPORT),
   onSessionAppended: (fn) => ipcRenderer.on(CH.SESSION_APPENDED, (_e, payload) => fn(payload)),

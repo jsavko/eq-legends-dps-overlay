@@ -109,13 +109,19 @@ function applyLock(locked) {
   }
 }
 
+/**
+ * Who we are following. The name, and nothing else.
+ *
+ * This used to append "log is stale — type /log on" when main said so. It said so from a
+ * check made once, when this window was created, and never revisited — so the warning
+ * outlived the condition and sat over rows of live numbers that contradicted it. The rows
+ * are the honest answer to that question and they are already on screen; a footer that can
+ * disagree with them earns nothing. See `pushStatus` in main for the whole reasoning.
+ */
 function applyStatus(status) {
   if (!status) return;
   selfName = null;   // re-derived from the snapshot's `self` field
-  els.body.dataset.stale = String(Boolean(status.stale));
-  els.status.textContent = status.stale
-    ? `${status.character}: log is stale — type /log on`
-    : `${status.character}`;
+  els.status.textContent = status.character;
   els.status.title = status.logPath;
 }
 
@@ -193,9 +199,16 @@ function render(snap) {
  *
  * The stat order is the priority order, and it is not alphabetical or arbitrary: kills is
  * what a camp is measured in, coin is what it is for, experience is why you are there at
- * all, ability points are the rarest thing that can happen in a night, and loot is the
- * long tail. When the window is too narrow to hold them all, the ones at the end go —
- * see dropOverflowingStats.
+ * all, then the two things that almost never happen — a level, then an ability point —
+ * and loot is the long tail. When the window is too narrow to hold them all, the ones at
+ * the end go, so position IS priority; see dropOverflowingStats. Levels sits ahead of
+ * ability points because it is the rarer and the larger of the two events, and therefore
+ * the one worth keeping longest on a narrow overlay.
+ *
+ * Levels and the experience percentage are adjacent and must not be read as the same
+ * number. The xp stat's unit is a POSITION — the prefixed `L28`, the level you are
+ * standing in — and the levels stat is a GAIN, a plain count with a suffixed `lvl`. The
+ * prefix/suffix split is the whole of what keeps them apart at this font size.
  */
 function renderSessionLine(session) {
   if (!sessionLineOn || !session) {
@@ -211,6 +224,7 @@ function renderSessionLine(session) {
     ['kills', formatTally(session.kills), 'kills'],
     ['coin', formatCoin(session.copperEarned), ''],
     ['xp', `${session.xpPercent.toFixed(1)}%`, session.xpLevel === null ? 'xp' : `L${session.xpLevel}`],
+    ['levels', formatTally(session.levels), 'lvl'],
     ['aa', String(session.aa), 'aa'],
     ['loot', formatTally(session.loot), 'loot'],
   ];

@@ -38,6 +38,18 @@ const state = {
   search: '',
 };
 
+/**
+ * How often the session in flight is re-read while it is the one being looked at.
+ *
+ * Two seconds, against the overlay's 4 Hz: this window is opened between pulls and read,
+ * not watched, so the cost of a slower tick is nothing and the cost of a faster one is
+ * a re-render nobody is looking at.
+ */
+const LIVE_REFRESH_MS = 2000;
+
+/** The timer, live only while a still-running session is selected. See startLiveRefresh. */
+let liveTimer = null;
+
 init();
 
 async function init() {
@@ -89,6 +101,13 @@ function wireEvents() {
   });
 
   $('import').addEventListener('click', importLog);
+
+  // Nothing is worth re-reading for a window that is not on screen, and a session left
+  // selected behind another window would otherwise tick all night.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && isLiveSelected()) startLiveRefresh();
+    else stopLiveRefresh();
+  });
 }
 
 /**
@@ -177,8 +196,15 @@ function renderRail() {
   list.replaceChildren(...nodes);
 }
 
+/**
+ * Build one rail row — structure only; every value is written by `paintRailRow`.
+ *
+ * The split exists for the session in flight, whose numbers change while it is on screen.
+ * Repainting a row it already built means the live row can be brought up to date without
+ * `renderRail()` rebuilding the list, which would reset the rail's scroll position and
+ * re-run the day grouping under the player's cursor.
+ */
 function railRow(entry) {
-  const summary = railSummary(entry);
   const li = document.createElement('li');
   li.className = 'session-row';
   li.dataset.id = entry.id;
@@ -186,21 +212,30 @@ function railRow(entry) {
 
   const top = document.createElement('div');
   top.className = 'row-top';
-  top.append(
-    span('row-time', timeRange(entry.startTs, entry.endTs)),
-    span('row-span', formatSpan(entry.durationMs)),
-  );
+  top.append(span('row-time', ''), span('row-span', ''));
 
   const stats = document.createElement('div');
   stats.className = 'row-stats';
-  stats.append(document.createTextNode(`${summary.stats} · `));
-  const deaths = span('row-deaths', summary.deaths);
-  deaths.dataset.had = String(summary.hadDeaths);
-  stats.append(deaths);
+  stats.append(span('row-tally', ''), span('row-deaths', ''));
 
-  li.append(top, span('row-zone', summary.zone), stats);
+  li.append(top, span('row-zone', ''), stats);
   li.addEventListener('click', () => select(entry.id));
+  paintRailRow(li, entry);
   return li;
+}
+
+/** Write an entry's values into an existing row. Text only — no element ever moves. */
+function paintRailRow(li, entry) {
+  const summary = railSummary(entry);
+  li.dataset.live = String(summary.live);
+  li.querySelector('.row-time').textContent = summary.range;
+  li.querySelector('.row-span').textContent = formatSpan(entry.durationMs);
+  li.querySelector('.row-zone').textContent = summary.zone;
+  li.querySelector('.row-tally').textContent = `${summary.stats} · `;
+
+  const deaths = li.querySelector('.row-deaths');
+  deaths.textContent = summary.deaths;
+  deaths.dataset.had = String(summary.hadDeaths);
 }
 
 // ------------------------------------------------------------------------ the summary
@@ -212,6 +247,7 @@ async function select(id) {
   }
 
   if (id === null) {
+    stopLiveRefresh();
     state.record = null;
     state.combat = null;
     renderSummary();
@@ -224,6 +260,67 @@ async function select(id) {
   state.combat = got?.combat ?? null;
   renderSummary();
   renderDetail();
+
+  // Only the night still being played needs watching, and only while it is the one on
+  // screen. Every other session is finished and cannot change.
+  if (isLiveSelected()) startLiveRefresh();
+  else stopLiveRefresh();
+}
+
+/** Is the selected row the session in flight? */
+function isLiveSelected() {
+  return state.sessions.some((s) => s.id === state.selectedId && s.live === true);
+}
+
+function startLiveRefresh() {
+  stopLiveRefresh();
+  // A hidden window is a window nobody is reading. The tick resumes on visibilitychange.
+  if (document.visibilityState !== 'visible') return;
+  liveTimer = setInterval(() => { void refreshLive(); }, LIVE_REFRESH_MS);
+}
+
+function stopLiveRefresh() {
+  clearInterval(liveTimer);
+  liveTimer = null;
+}
+
+/**
+ * Re-read the session in flight and repaint the three places it shows.
+ *
+ * Deliberately NOT `load()` or `renderRail()`. Rebuilding the rail on a timer would reset
+ * its scroll position and re-run the day grouping under the player's cursor every two
+ * seconds — the no-reflow rule this window exists for, broken on a schedule. Only the
+ * selected row's own text and the two right-hand panes change, and none of them moves.
+ */
+async function refreshLive() {
+  const id = state.selectedId;
+  if (id === null) return;
+
+  const [got, list] = await Promise.all([
+    window.api.sessionGet({ key: state.key, id }),
+    window.api.sessionList(state.key),
+  ]);
+  // The selection moved while those were in flight; what came back describes a pane
+  // nobody is looking at any more.
+  if (state.selectedId !== id) return;
+
+  const entry = (list?.sessions ?? []).find((s) => s.id === id);
+  if (!got || entry?.live !== true) {
+    // The night ended between ticks. It is on disk now, and the append push is what
+    // redraws the rail properly — this tick's job is only to stop.
+    stopLiveRefresh();
+    return;
+  }
+
+  state.record = got.record ?? null;
+  state.combat = got.combat ?? null;
+  renderSummary();
+  renderDetail();
+
+  const index = state.sessions.findIndex((s) => s.id === id);
+  if (index >= 0) state.sessions[index] = entry;
+  const row = $('session-list').querySelector(`.session-row[data-id="${CSS.escape(String(id))}"]`);
+  if (row) paintRailRow(row, entry);
 }
 
 function renderSummary() {
@@ -238,9 +335,14 @@ function renderSummary() {
   }
 
   const day = new Date(record.startTs);
+  // `closeReason: 'open'` is the record's own word for "still running", so the summary
+  // pane reads it rather than being told separately — and ends the span in "now" for the
+  // same reason the rail row does: a checkpoint's `endTs` is this instant, and printing it
+  // would state as fact that the night finished when you happened to look.
+  const live = record.closeReason === 'open';
   $('s-when').textContent =
     `${day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · ` +
-    timeRange(record.startTs, record.endTs);
+    timeRange(record.startTs, record.endTs, { live });
   $('s-sub').textContent =
     `${formatSpan(record.durationMs)} tracked · ${zoneLabel({ zoneNames: zoneNamesOf(record) })} · ` +
     closeReasonLabel(record.closeReason);

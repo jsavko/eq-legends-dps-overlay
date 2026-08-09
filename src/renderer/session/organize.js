@@ -49,10 +49,18 @@ export function groupByDay(entries, now = Date.now()) {
  * nothing at all. A line that appears only sometimes shifts every row below it by its own
  * height, which is the exact failure the history window already fixed once and the reason
  * this window inherits its no-reflow rule.
+ *
+ * The session in flight is one of these rows like any other. It differs in exactly two
+ * visible ways and both live here rather than in the renderer, so they are unit-tested:
+ * the span ends in "now" rather than in a time it has not reached, and `live` is passed
+ * through for the marker. Everything else about a live row — the zone, the kills, the coin
+ * — is the same sentence about a shorter night.
  */
 export function railSummary(entry) {
   return {
     zone: zoneLabel(entry),
+    live: entry.live === true,
+    range: timeRange(entry.startTs, entry.endTs, { live: entry.live === true }),
     stats: [
       `${entry.kills} kills`,
       `${formatPlatinum(entry.copperEarned)}pp`,
@@ -539,9 +547,16 @@ export function timeOfDay(ts) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-/** "09:12 – 13:48" — a sitting is a span, and both ends matter. */
-export function timeRange(startTs, endTs) {
-  return `${timeOfDay(startTs)} – ${timeOfDay(endTs)}`;
+/**
+ * "09:12 – 13:48" — a sitting is a span, and both ends matter.
+ *
+ * A session still running has no end, and printing one is not a formatting detail: the
+ * record in flight carries `endTs = now`, so the honest-looking "09:12 – 13:48" would
+ * state as fact that the night finished at the moment you happened to look at it. "– now"
+ * is the only end this session has.
+ */
+export function timeRange(startTs, endTs, { live = false } = {}) {
+  return `${timeOfDay(startTs)} – ${live ? 'now' : timeOfDay(endTs)}`;
 }
 
 const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];

@@ -131,9 +131,17 @@ test('the line renders through the same fit path as everything else', () => {
 test('the session summary crosses IPC as a scalar bag, never a list', () => {
   // Four times a second. Every browse-time shape — every creature, item and faction — is
   // fetched by name when the Session window asks for it.
-  assert.ok(CHANNELS.SESSION_CURRENT, 'no channel for the session in flight');
   assert.ok(CHANNELS.SESSION_LIST && CHANNELS.SESSION_GET);
   assert.equal(DEFAULTS.session.meterLine, false, 'the line must ship off');
+});
+
+test('the session in flight has no channel of its own', () => {
+  // It had one — `session:current` — and it went when the live session became an ordinary
+  // row in the rail: SESSION_LIST includes it and SESSION_GET serves it, the ids matching
+  // by construction on both sides of the moment it closes. Two ways to fetch one record is
+  // two things to keep in step, and the second is the one that goes stale.
+  assert.equal(CHANNELS.SESSION_CURRENT, undefined);
+  assert.equal(read('session', 'preload.cjs').includes('session:current'), false);
 });
 
 // ------------------------------------------------------------------ the Session window

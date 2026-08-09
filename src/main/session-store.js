@@ -41,6 +41,49 @@ function dedupeZones(visits) {
   return [...total.entries()].sort((a, b) => b[1] - a[1]).map(([zone]) => zone);
 }
 
+/**
+ * One full record -> the compact row the session browser's rail draws.
+ *
+ * Exported and pure because two callers need it and they must not diverge: `list()` maps
+ * the records on disk, and the SESSION_LIST handler maps the checkpoint of the session
+ * still in flight so tonight appears in the rail alongside the nights that finished. If
+ * that mapping existed twice, the live row and the stored row would carry different
+ * fields, and the rail's filters and summary line would work on one and quietly not on the
+ * other — the sort of difference nobody sees until the night ends and the row changes
+ * shape under them.
+ *
+ * Every field is defaulted, because this is fed both a finished record and a checkpoint,
+ * and an early checkpoint legitimately has categories that have not happened yet.
+ */
+export function listEntry(r) {
+  return {
+    id: r.id,
+    character: r.character,
+    server: r.server,
+    startTs: r.startTs,
+    endTs: r.endTs,
+    durationMs: r.durationMs,
+    closeReason: r.closeReason,
+    kills: r.kills?.total ?? 0,
+    deaths: (r.deaths ?? []).length,
+    loot: r.loot?.total ?? 0,
+    copperEarned: r.coin?.earned?.copperTotal ?? 0,
+    netCopper: r.coin?.netCopper ?? 0,
+    levelsGained: r.xp?.levelsGained ?? 0,
+    aaEarned: r.aa?.earned ?? 0,
+    zones: (r.zones ?? []).length,
+    /**
+     * The zones themselves, longest visit first and de-duplicated.
+     *
+     * Names rather than a count, because "Lower Guk, Upper Guk" is how a player
+     * recognises which night they are looking for and "2 zones" is not. Longest
+     * first rather than in visit order for the same reason: the camp is what the
+     * night was, and the two-minute walk through Innothule Swamp is not.
+     */
+    zoneNames: dedupeZones(r.zones ?? []),
+  };
+}
+
 export class SessionStore {
   /** @param {string} dir directory to hold the .jsonl and .current.json files */
   constructor(dir) {
@@ -104,32 +147,7 @@ export class SessionStore {
    */
   list(key) {
     return this.records(key)
-      .map((r) => ({
-        id: r.id,
-        character: r.character,
-        server: r.server,
-        startTs: r.startTs,
-        endTs: r.endTs,
-        durationMs: r.durationMs,
-        closeReason: r.closeReason,
-        kills: r.kills?.total ?? 0,
-        deaths: (r.deaths ?? []).length,
-        loot: r.loot?.total ?? 0,
-        copperEarned: r.coin?.earned?.copperTotal ?? 0,
-        netCopper: r.coin?.netCopper ?? 0,
-        levelsGained: r.xp?.levelsGained ?? 0,
-        aaEarned: r.aa?.earned ?? 0,
-        zones: (r.zones ?? []).length,
-        /**
-         * The zones themselves, longest visit first and de-duplicated.
-         *
-         * Names rather than a count, because "Lower Guk, Upper Guk" is how a player
-         * recognises which night they are looking for and "2 zones" is not. Longest
-         * first rather than in visit order for the same reason: the camp is what the
-         * night was, and the two-minute walk through Innothule Swamp is not.
-         */
-        zoneNames: dedupeZones(r.zones ?? []),
-      }))
+      .map(listEntry)
       .sort((a, b) => b.startTs - a.startTs);
   }
 

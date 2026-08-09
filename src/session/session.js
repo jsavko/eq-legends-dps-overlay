@@ -520,6 +520,20 @@ export class SessionTracker {
       copper: s.coinEarned.copperTotal - s.coinSpent.copperTotal,
       copperEarned: s.coinEarned.copperTotal,
       aa: s.aaEarned,
+      /**
+       * Levels GAINED, gross, never a net of gained-minus-lost.
+       *
+       * `railSummary` and `progressDetail` both already print the gross count, and one
+       * number that means different things in two windows is worse than one that means a
+       * slightly narrower thing everywhere. A de-level is rare and the Session window
+       * states both halves; `levelsLost` rides along here so a future caller can say so
+       * without a second round trip, though nothing renders it yet.
+       *
+       * Distinct from `xpLevel` below, which is the level you are STANDING IN. Those are
+       * different facts and the line shows both.
+       */
+      levels: s.levelsGained,
+      levelsLost: s.levelsLost,
       xpPercent: seg?.percent ?? 0,
       xpLevel: seg?.level ?? null,
       killsPerHour: perHour(s.killsOurs, elapsedMs),

@@ -211,6 +211,22 @@ ol { list-style: none; margin: 0; padding: 0; }
 
 .row-top { display: flex; align-items: baseline; gap: 10px; }
 .row-time { font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* The night still being played. A dot on the time rather than a badge of its own, and
+   deliberately not the left border, which selection already owns — a live row that is also
+   the selected row must still read as selected. Inline and 5px, so it costs the row no
+   height: this rail cannot reflow, and a marker that appears when a session opens and goes
+   when it closes would otherwise move every row beneath it. */
+.session-row[data-live="true"] .row-time::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  vertical-align: middle;
+}
 .row-span {
   margin-left: auto;
   font-size: 12px;

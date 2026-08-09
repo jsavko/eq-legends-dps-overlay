@@ -449,6 +449,7 @@ test('the snapshot summary carries what the meter line needs and nothing heavy',
     [20, "--You have looted a Mote of Lesser Potential from a shin ghoul knight's corpse.--"],
     [30, 'You have gained an ability point!  You now have 1 ability point.'],
     [40, 'You gain experience! (8%)'],
+    [50, 'You have gained a level! Welcome to level 28!'],
   ]);
   const s = t.summary(T0 + 3_600_000);
 
@@ -456,11 +457,35 @@ test('the snapshot summary carries what the meter line needs and nothing heavy',
   assert.equal(s.loot, 1);
   assert.equal(s.aa, 1);
   assert.equal(s.copperEarned, 1000);
-  assert.equal(s.xpPercent, 8);
   assert.equal(s.elapsedMs, 3_600_000);
   assert.equal(s.killsPerHour, 1);
+
+  // Levels GAINED, which is not the level you are standing in — the meter line shows both
+  // and they must not be the same field. The level-up closed the 8% segment and opened a
+  // fresh one at 28, so the percentage resets while the count does not.
+  assert.equal(s.levels, 1);
+  assert.equal(s.xpLevel, 28);
+  assert.equal(s.xpPercent, 0);
+
   // Nothing list-shaped crosses the IPC boundary four times a second.
   for (const v of Object.values(s)) assert.equal(Array.isArray(v), false);
+});
+
+test('the summary counts levels gained gross, never net of a de-level', () => {
+  const t = tracker();
+  feed(t, [
+    [0, 'You have slain a froglok shin knight!'],
+    [10, 'You have gained a level! Welcome to level 28!'],
+    [20, 'You have been slain by an urd ghoul wizard!'],
+    [30, 'You LOST a level! You are now level 27!'],
+  ]);
+  const s = t.summary(T0 + 60_000);
+
+  // Gross, deliberately: `railSummary` and `progressDetail` both print the gained count,
+  // and one number meaning different things in two windows is worse than a narrower one
+  // meaning the same thing everywhere. The loss is carried separately, not subtracted.
+  assert.equal(s.levels, 1);
+  assert.equal(s.levelsLost, 1);
 });
 
 test('summary is null with no session open', () => {

@@ -274,9 +274,10 @@ body:not([data-locked="true"]) #controls { display: flex; }
   font-size: 0.88em;
   letter-spacing: 0.05em;
 }
-/* Ability points get the player's own accent. They are the rarest thing on the line — a
-   handful across a whole night against hundreds of kills — so the one that almost never
-   changes is the one worth noticing when it does. */
+/* Levels and ability points get the player's own accent. They are the two rarest things on
+   the line — a handful across a whole night against hundreds of kills — so the ones that
+   almost never change are the ones worth noticing when they do. */
+#session-stats .s-stat[data-kind="levels"] .s-value,
 #session-stats .s-stat[data-kind="aa"] .s-value { color: var(--ember-lit); }
 
 #session-elapsed {
@@ -622,8 +623,6 @@ body[data-panel="above"] #detail {
 /* A first-run hint is longer than the character name it shares the row with. */
 #toast[data-wide="true"] { flex: 1 1 auto; text-align: right; }
 body:has(#toast[data-wide="true"][data-show="true"]) #status { display: none; }
-
-body[data-stale="true"] #status { color: var(--live); }
 
 /* Unlocked: make the window's edges obvious, since it can now be grabbed. */
 body:not([data-locked="true"]) #slab {

@@ -121,14 +121,14 @@ export const CHANNELS = {
   /**
    * Play sessions, for the session window.
    *
-   * The same three-channel shape history uses, plus one that history does not need:
-   * `SESSION_CURRENT` returns the session in FLIGHT. A fight is over by the time you
-   * browse it, but the session you most want to read is usually the one you are in, and
-   * it is not on disk yet — only a checkpoint of it is.
+   * The same channel shape history uses, and deliberately no extra channel for the session
+   * in FLIGHT. There was one — `session:current` — and it was removed once the live
+   * session became an ordinary row in the rail: `SESSION_LIST` includes it and
+   * `SESSION_GET` serves it, ids being `String(startTs)` on both sides of the moment it
+   * closes. A second way to fetch the same record is a second thing to keep in step.
    */
   SESSION_LIST: 'session:list',
   SESSION_GET: 'session:get',
-  SESSION_CURRENT: 'session:current',
   SESSION_CLEAR: 'session:clear',
   /**
    * Replay a log file into the session store.

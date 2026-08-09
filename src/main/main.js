@@ -24,7 +24,7 @@ import {
   ALERT_PRESETS, warnKeyFor, presetOf, sessionEnabled, sessionCategories,
 } from './config.js';
 import { EncounterStore, RECORD_VERSION, storeKey, combatBetween } from './history.js';
-import { SessionStore, sessionKey, CHECKPOINT_INTERVAL_MS } from './session-store.js';
+import { SessionStore, sessionKey, listEntry, CHECKPOINT_INTERVAL_MS } from './session-store.js';
 import { SessionTracker } from '../session/session.js';
 import { TriggerStore } from './triggers-store.js';
 import { builtinPack, builtinPatch, builtinPresetPatch } from './builtin-pack.js';
@@ -46,7 +46,19 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(HERE, '..', 'renderer');
 const ASSETS = path.join(HERE, '..', 'assets');
 
-/** A log not written to in this long is probably a session where /log was never enabled. */
+/**
+ * A log not written to in this long is probably a session where /log was never enabled.
+ *
+ * One caller now: `LOG_VALIDATE`, which the settings window asks about a file the player is
+ * choosing. That is the right question there — nothing is tailing that file, so its mtime
+ * is the only evidence there is, and the answer is wanted at the moment of choosing rather
+ * than continuously.
+ *
+ * It is emphatically NOT the right question about the file being tailed, which is why the
+ * overlay's own stale warning is gone: see `pushStatus`. If a live staleness check is ever
+ * wanted again, the honest source is the tailer, which knows when it last read bytes —
+ * `tailer.js` rejected mtime for its own switch detection for exactly this reason.
+ */
 const STALE_LOG_MS = 10 * 60 * 1000;
 
 /** @type {BrowserWindow|null} */ let overlayWindow = null;
@@ -414,6 +426,30 @@ function checkpointSession() {
   } catch (err) {
     console.warn('[session] checkpoint failed:', err?.message ?? err);
   }
+}
+
+/**
+ * The session in flight as a full record, when it belongs to the key being browsed.
+ *
+ * Freshly derived on every call rather than read from the checkpoint FILE, which is up to
+ * five minutes old — showing someone a five-minute-old version of the night they are
+ * currently having is exactly the wrong answer to the question they asked.
+ *
+ * @param {string|null} browsing  the store key the window is showing
+ * @param {string} tracked        the store key the tracker is recording
+ */
+function liveRecord(browsing, tracked) {
+  if (!session || !browsing || browsing !== tracked) return null;
+  return session.checkpoint();
+}
+
+/** The same record as a rail row, in the identical shape `SessionStore.list()` produces. */
+function liveEntry(browsing, tracked) {
+  const record = liveRecord(browsing, tracked);
+  if (!record) return null;
+  // `live` is the only field a stored row does not have, and it exists so the renderer can
+  // say "– now" instead of an end time it would otherwise print as fact.
+  return { ...listEntry(record), live: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -1541,18 +1577,31 @@ function toast(message, ms) {
   overlayWindow?.webContents.send(CHANNELS.TOAST, { message, ms });
 }
 
+/**
+ * Who we are following, and how the overlay should look. Sent rarely, on purpose.
+ *
+ * This deliberately carries no staleness verdict. It used to: the footer read "log is
+ * stale — type /log on", computed here from the file's mtime. But this function runs three
+ * times in a session — when the overlay window appears, on a character switch, and after a
+ * settings save — while the snapshot that fills the meter is pushed four times a second on
+ * a different channel. So the verdict was reached once, at startup, and then frozen. Launch
+ * the overlay before the game is writing and the warning latched on and stayed on all
+ * night, over rows of live numbers that disproved it.
+ *
+ * It was deleted rather than repaired, and that is the interesting decision. The meter
+ * already answers "is my log live" continuously and unambiguously: the numbers move. A
+ * second claim in words, one that can disagree with the numbers beside it, is worse than
+ * no claim — and even repaired it could only ever restate what an empty meter already says.
+ * The nudge for a player who genuinely has logging off survives where it is actually
+ * useful: the settings window checks the file it is about to adopt and says so
+ * (`LOG_VALIDATE`, and `validate()` in the setup renderer), which is a real check made at
+ * the moment of choosing and is on screen at first run.
+ */
 function pushStatus() {
   if (!overlayWindow || overlayWindow.isDestroyed() || !tailer) return;
-  let stale = false;
-  try {
-    stale = Date.now() - fs.statSync(tailer.filePath).mtimeMs > STALE_LOG_MS;
-  } catch {
-    stale = true;
-  }
   overlayWindow.webContents.send(CHANNELS.STATUS, {
     logPath: tailer.filePath,
     character: tailer.character,
-    stale,
     locked: config.get('locked'),
     opacity: config.get('opacity'),
     scale: config.get('scale'),
@@ -2043,11 +2092,24 @@ function registerIpc() {
   ipcMain.handle(CHANNELS.SESSION_LIST, (_e, key) => {
     const current = sessionKey(parser?.selfName, parser?.server);
     const characters = sessionStore.characters();
-    const selected = key ?? (characters.some((c) => c.key === current) ? current : characters[0]?.key);
+    let selected = key ?? (characters.some((c) => c.key === current) ? current : characters[0]?.key);
+    // A first night has no file yet, so `characters()` is empty and nothing would be
+    // selected — which would hide the session in flight behind the very emptiness it
+    // disproves. The tracked character is offered whether or not it has been written yet.
+    if (!selected && session) selected = current;
+
+    const sessions = selected ? sessionStore.list(selected) : [];
+    const live = liveEntry(selected, current);
+    // Newest first is the rail's order and the session in flight is always the newest, so
+    // it goes on the front. The id guard is for the recovery path: a checkpoint that
+    // outlived a crash is appended to the store on the next launch, and for the moment
+    // both could name the same night, one row is the right number of rows.
+    if (live && !sessions.some((s) => s.id === live.id)) sessions.unshift(live);
+
     return {
       characters,
       selected: selected ?? null,
-      sessions: selected ? sessionStore.list(selected) : [],
+      sessions,
       /** Which character the tracker is actually recording, so the rail can say so. */
       tracking: session ? current : null,
     };
@@ -2061,9 +2123,19 @@ function registerIpc() {
    * never has to score damage — a second damage pipeline there would be a second answer
    * to one question, and the one on screen would be the wrong one. Both stores stamp real
    * timestamps, so joining them is a fact.
+   *
+   * The session in FLIGHT is served from here too, on the same path and with the same
+   * combat join, because it is an ordinary row in the rail and deserves the ordinary
+   * answer. It is not on disk, so the store misses and the tracker is asked instead — and
+   * the ids line up by construction, both being `String(startTs)`, which is what lets the
+   * row keep its identity through the moment the night ends and it becomes a stored record.
    */
   ipcMain.handle(CHANNELS.SESSION_GET, (_e, { key, id }) => {
-    const record = sessionStore.get(key, id);
+    let record = sessionStore.get(key, id);
+    if (!record) {
+      const live = liveRecord(key, sessionKey(parser?.selfName, parser?.server));
+      record = live && live.id === id ? live : null;
+    }
     if (!record) return null;
     let combat = null;
     try {
@@ -2079,16 +2151,6 @@ function registerIpc() {
     }
     return { record, combat };
   });
-
-  /**
-   * The session in flight, as a full record.
-   *
-   * History has no equivalent because a fight is over by the time you browse it. The
-   * session you most want to read is usually the one you are still in, and it is not on
-   * disk — only a five-minute-old checkpoint of it is, which is exactly the wrong thing
-   * to show someone asking about right now.
-   */
-  ipcMain.handle(CHANNELS.SESSION_CURRENT, () => session?.checkpoint() ?? null);
 
   ipcMain.handle(CHANNELS.SESSION_CLEAR, (_e, key) => sessionStore.clear(key));
 

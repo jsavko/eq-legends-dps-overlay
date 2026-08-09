@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  SessionStore, sessionKey, SESSION_RECORD_VERSION, CHECKPOINT_INTERVAL_MS,
+  SessionStore, sessionKey, listEntry, SESSION_RECORD_VERSION, CHECKPOINT_INTERVAL_MS,
 } from '../src/main/session-store.js';
 import { SessionTracker } from '../src/session/session.js';
 
@@ -65,6 +65,42 @@ test('append/list/get round-trip', () => {
   const full = store.get(key, '1000000');
   assert.equal(full.coin.earned.platinum, 178);
   assert.equal(store.get(key, 'nope'), null);
+});
+
+test('listEntry maps a checkpoint and a stored record to the same shape', () => {
+  // The rail draws the session in flight alongside the ones on disk, and main builds that
+  // row from the tracker's checkpoint rather than from a file. If the two mappings ever
+  // came apart, the live row would carry different fields from its stored self — and would
+  // change shape under the player at the moment the night ended.
+  const t = new SessionTracker({ character: 'Rhale', server: 'oggok' });
+  t.feed('[Sat Aug  8 21:14:00 2026] You have slain a froglok shin knight!', null);
+  t.feed('[Sat Aug  8 21:14:30 2026] You have gained a level! Welcome to level 28!', null);
+
+  const open = listEntry(t.checkpoint());
+  const closed = listEntry(t.close('idle'));
+
+  assert.deepEqual(Object.keys(open).sort(), Object.keys(closed).sort());
+  assert.deepEqual(Object.keys(open).sort(), Object.keys(listEntry(record())).sort());
+
+  // The id is what carries a row's identity across the moment it stops being live, so it
+  // must be the same on both sides of that moment.
+  assert.equal(open.id, closed.id);
+  assert.equal(open.closeReason, 'open');
+  assert.equal(closed.closeReason, 'idle');
+  assert.equal(open.levelsGained, 1);
+});
+
+test('listEntry defaults every category, so an early checkpoint is still a row', () => {
+  // A session seconds old has kills and nothing else. The rail must still be able to draw
+  // it rather than throwing on a coin block that does not exist yet.
+  const bare = listEntry({ id: '1', character: 'Rhale', server: 'oggok', startTs: 1, endTs: 2 });
+  assert.equal(bare.kills, 0);
+  assert.equal(bare.deaths, 0);
+  assert.equal(bare.loot, 0);
+  assert.equal(bare.copperEarned, 0);
+  assert.equal(bare.levelsGained, 0);
+  assert.equal(bare.aaEarned, 0);
+  assert.deepEqual(bare.zoneNames, []);
 });
 
 test('list is newest first, across characters kept in separate files', () => {
