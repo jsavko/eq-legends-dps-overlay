@@ -202,6 +202,14 @@ export const DEFAULTS = {
     resetEncounter: 'Control+Shift+R',
     toggleMetric: 'Control+Shift+M',
     toggleAlerts: 'Control+Shift+A',
+    /**
+     * "That grind is over, start counting again from here."
+     *
+     * No migration for a config written before this key existed: `load()` merges DEFAULTS
+     * one level deep, so an old config simply gains the binding. Nothing changed meaning
+     * underneath the player, which is the only thing migrateAlerts-style rescue is for.
+     */
+    newSession: 'Control+Shift+N',
   },
 };
 

@@ -46,6 +46,27 @@ test('a partial hotkey patch keeps the other bindings', () => {
   assert.equal(store.get('hotkeys').toggleVisible, DEFAULTS.hotkeys.toggleVisible);
 });
 
+test('a config written before a hotkey existed gains it rather than losing the binding', () => {
+  const dir = tmpdir();
+  // Every binding the previous version knew about, and none it did not — which is exactly
+  // what an upgrading player's config.json looks like on the first launch after this ships.
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
+    hotkeys: {
+      toggleLock: 'Control+Alt+D',
+      toggleVisible: 'Control+Shift+H',
+      resetEncounter: 'Control+Shift+R',
+      toggleMetric: 'Control+Shift+M',
+      toggleAlerts: 'Control+Shift+A',
+    },
+  }));
+
+  const store = new ConfigStore(dir);
+  store.load();
+  assert.ok(DEFAULTS.hotkeys.newSession, 'the new-session gesture ships with a binding');
+  assert.equal(store.get('hotkeys').newSession, DEFAULTS.hotkeys.newSession);
+  assert.equal(store.get('hotkeys').toggleLock, 'Control+Alt+D', 'their own choices survive');
+});
+
 test('a config written by a newer version keeps its unknown keys', () => {
   const dir = tmpdir();
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ opacity: 0.3, futureKey: 42 }));

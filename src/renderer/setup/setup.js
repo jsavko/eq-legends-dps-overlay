@@ -123,6 +123,7 @@ function fillForm(cfg) {
   $('hk-lock').value = cfg.hotkeys.toggleLock;
   $('hk-show').value = cfg.hotkeys.toggleVisible;
   $('hk-reset').value = cfg.hotkeys.resetEncounter;
+  $('hk-session').value = cfg.hotkeys.newSession ?? '';
   $('hk-metric').value = cfg.hotkeys.toggleMetric;
   $('hk-alerts').value = cfg.hotkeys.toggleAlerts ?? '';
   syncOutputs();
@@ -416,6 +417,7 @@ async function save() {
       toggleLock: $('hk-lock').value.trim(),
       toggleVisible: $('hk-show').value.trim(),
       resetEncounter: $('hk-reset').value.trim(),
+      newSession: $('hk-session').value.trim(),
       toggleMetric: $('hk-metric').value.trim(),
       toggleAlerts: $('hk-alerts').value.trim(),
     },

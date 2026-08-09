@@ -97,6 +97,41 @@ test('zoning does not close a session; a character change does', () => {
   assert.equal(t.current, null);
 });
 
+test('a manual close writes the night and the next kill starts a clean one', () => {
+  const closed = [];
+  const t = tracker({ onSessionEnd: (r) => closed.push(r) });
+  feed(t, [
+    [0, 'You have slain a froglok shin knight!'],
+    [60, 'You have slain a shin ghoul knight!'],
+  ]);
+
+  const rec = t.close('manual');
+  assert.equal(rec.closeReason, 'manual', 'the grind that ended is kept, not discarded');
+  assert.equal(rec.kills.total, 2);
+  assert.equal(rec.endTs, T0 + 60_000, 'dated to the last event, not to the keypress');
+  assert.equal(closed.length, 1);
+  assert.equal(t.current, null);
+
+  // The floor moved to the closed session's last event, so the new camp counts only what
+  // happens after it — the same guard that stops the tailer's 64 KB backfill double-counting.
+  feed(t, [[120, 'You have slain a sand giant!']]);
+  assert.ok(t.current);
+  assert.equal(t.current.startTs, T0 + 120_000);
+  assert.equal(t.current.killsOurs, 1, 'the previous grind is not carried into this one');
+});
+
+test('a manual close with nothing in flight writes nothing and does not throw', () => {
+  const closed = [];
+  const t = tracker({ onSessionEnd: (r) => closed.push(r) });
+  feed(t, [[0, 'You have slain a froglok shin knight!']]);
+
+  assert.ok(t.close('manual'));
+  // Pressing the hotkey twice is the ordinary case — the second press has nothing to save,
+  // and must say so by returning null rather than writing an empty night.
+  assert.equal(t.close('manual'), null);
+  assert.equal(closed.length, 1);
+});
+
 test('a session of nothing but zone lines is never written', () => {
   const closed = [];
   const t = tracker({ onSessionEnd: (r) => closed.push(r) });

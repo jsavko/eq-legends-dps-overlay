@@ -865,6 +865,17 @@ function refreshTrayMenu() {
       accelerator: keys.resetEncounter,
       click: resetEncounter,
     },
+    // Below the encounter reset because it is the same gesture at the other timescale —
+    // and present only while tracking is on, following the `Session…` item further down:
+    // a row that can only ever do nothing is a promise the app cannot keep. The tooltip
+    // carries the one thing that separates it from the row above, which is that this one
+    // keeps what it closes.
+    ...(sessionEnabled(config.all) ? [{
+      label: 'Start new session',
+      accelerator: keys.newSession,
+      toolTip: 'Saves the night so far and starts counting again',
+      click: startNewSession,
+    }] : []),
     { type: 'separator' },
     // A submenu, not five more top-level items: the menu is already nine entries, and
     // these are settings you reach for occasionally rather than the every-pull controls
@@ -1438,6 +1449,7 @@ function registerHotkeys() {
   bind(keys.resetEncounter, resetEncounter, 'reset');
   bind(keys.toggleMetric, toggleMetric, 'damage/healing');
   bind(keys.toggleAlerts, toggleAlerts, 'mute alerts');
+  bind(keys.newSession, startNewSession, 'new session');
 }
 
 /**
@@ -1455,6 +1467,55 @@ function resetEncounter() {
   parser?.reset();
   triggers?.reset();
   toast('Encounter reset');
+}
+
+/**
+ * "That grind is over" — close the night's record and start a fresh one from here.
+ *
+ * Deliberately NOT part of `resetEncounter` above, and the difference is the whole point:
+ * an encounter reset DISCARDS (the parser's onEncounterEnd contract is that a manual reset
+ * closes nothing), while this one SAVES. The last three hours happened, so they are
+ * written as a finished session with `closeReason: 'manual'` and appear in the Session
+ * window immediately; only the counting starts again. Folding this into the every-pull
+ * reset hotkey would end the night's record every time the player cleared a stale meter
+ * mid-fight, which is a very different cost to get wrong.
+ *
+ * `close()` does the rest of the work: it hands the record to `persistSession`, and it
+ * moves its own `minTs` floor to the last tracked event so the session that opens next
+ * cannot re-count anything the closed one already had.
+ *
+ * The checkpoint is cleared unconditionally rather than left to `persistSession`, which
+ * only clears it when a record actually arrives. A session holding nothing but zone lines
+ * has `events === 0`, so `close()` discards it and calls nothing — and the checkpoint file
+ * written five minutes ago would then survive to the next launch, where `recover()`
+ * appends without re-checking `events` and resurrects the very session the player just
+ * ended. One line here shuts that.
+ */
+function startNewSession() {
+  // Honest about WHICH nothing happened. A global shortcut that silently does nothing is
+  // worse than one that explains itself — and the tray row for this is hidden while
+  // tracking is off, so the hotkey is the only way to reach the first branch. The two are
+  // separated because they are separate states: the switch being off is a preference, while
+  // a tracker that does not exist yet means no log is being followed at all.
+  if (!sessionEnabled(config.all)) {
+    toast('Session tracking is off');
+    return;
+  }
+  if (!session) {
+    toast('No session in progress');
+    return;
+  }
+
+  const record = session.close('manual');
+  try {
+    sessionStore?.clearCheckpoint(sessionKey(parser?.selfName, parser?.server));
+  } catch {
+    // An unremovable checkpoint costs a duplicate-suppressed recovery at worst; it is not
+    // a reason to tell the player their session did not close, because it did.
+  }
+  // The toast is frequently the ONLY confirmation: the meter's session line is off by
+  // default and the Session window is usually shut during a grind.
+  toast(record ? 'Session saved — starting a new one' : 'No session in progress');
 }
 
 /** The metric cycle: damage → healing → taken → damage. */

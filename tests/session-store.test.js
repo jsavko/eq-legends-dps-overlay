@@ -152,6 +152,23 @@ test('a checkpoint for a session already written normally does not duplicate it'
   assert.equal(store.loadCheckpoint('Rhale_oggok'), null);
 });
 
+test('a cleared checkpoint stops recovery resurrecting a session the player ended', () => {
+  const store = new SessionStore(tmp());
+  store.saveCheckpoint(record({ closeReason: 'open' }));
+
+  // What `startNewSession` does on a manual close: clear the checkpoint whether or not a
+  // record was worth writing. A zero-event session is discarded by the tracker and never
+  // reaches the store, so without this its five-minute-old checkpoint would survive to the
+  // next launch and `recover()` — which appends without re-checking `events` — would write
+  // the very session that was just ended.
+  assert.equal(store.clearCheckpoint('Rhale_oggok'), true);
+  assert.deepEqual(store.recover(), []);
+  assert.equal(store.list('Rhale_oggok').length, 0);
+
+  // Clearing one that is already gone is the outcome the caller wanted, not an error.
+  assert.equal(store.clearCheckpoint('Rhale_oggok'), false);
+});
+
 test('an unparseable checkpoint is ignored rather than blocking launch', () => {
   const dir = tmp();
   const store = new SessionStore(dir);
