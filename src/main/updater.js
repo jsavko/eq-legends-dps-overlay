@@ -22,6 +22,8 @@
  * WSL: electron-updater reaches for `electron` at load time and throws outside it.
  */
 
+import fs from 'node:fs';
+
 /** Sessions run for hours; a launch-only check would miss a release cut mid-raid. */
 export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 /** Let the tailer, windows and first snapshots settle before touching the network. */
@@ -41,6 +43,53 @@ export const RELEASES_URL = 'https://github.com/jsavko/eq-legends-dps-overlay/re
  */
 export const RELEASES_API =
   'https://api.github.com/repos/jsavko/eq-legends-dps-overlay/releases/latest';
+
+/** Past this the update log is started fresh. Bounded without rotation machinery. */
+const LOG_MAX_BYTES = 256 * 1024;
+
+/**
+ * A logger for electron-updater that writes to a file instead of a console nobody sees.
+ *
+ * electron-updater's default logger is `console`, and a packaged Windows app has no console
+ * — so everything it knows went nowhere. That included the one line that answers the
+ * question this file cannot otherwise answer:
+ *
+ *   Full: 78.3 MB, To download: 3.1 MB (4%)
+ *
+ * which is the differential downloader reporting what it actually fetched. Without it,
+ * "why was the update the full size" and "was it differential at all" are unanswerable
+ * after the fact, and the same blindness made "I don't think the updater works" impossible
+ * to settle without cutting a release to watch.
+ *
+ * Appends, and starts fresh past a quarter-megabyte so a long-running install cannot grow
+ * it without bound. Every write is wrapped: a logger that throws would take down the
+ * updater it is only supposed to describe, which is the wrong way round.
+ *
+ * @param {string} file  absolute path to write to
+ */
+export function fileLogger(file) {
+  const write = (level, args) => {
+    try {
+      const line = args
+        .map((a) => (a instanceof Error ? (a.stack ?? a.message) : typeof a === 'string' ? a : JSON.stringify(a)))
+        .join(' ');
+      let size = 0;
+      try { size = fs.statSync(file).size; } catch { /* first write */ }
+      const stamp = new Date().toISOString();
+      if (size > LOG_MAX_BYTES) fs.writeFileSync(file, `${stamp} [log restarted]\n`);
+      fs.appendFileSync(file, `${stamp} ${level} ${line}\n`);
+    } catch {
+      // A full disk, a locked file, a directory that vanished. None of them are reasons to
+      // stop updating; the log is a convenience and the updater is the feature.
+    }
+  };
+  return {
+    info: (...a) => write('info ', a),
+    warn: (...a) => write('warn ', a),
+    error: (...a) => write('error', a),
+    debug: (...a) => write('debug', a),
+  };
+}
 
 /** "v0.8.0" / "0.8.0-beta.1" -> [0, 8, 0]. Anything unparseable degrades to a zero. */
 function versionParts(v) {
@@ -141,11 +190,24 @@ export function updateMode({ isPackaged, exePath, env = {} }) {
  *   `check` runs the background updater's own check immediately, so the tray item can start
  *   a download rather than only reporting that one is available.
  */
-export async function startUpdater({ mode, toast, onUpdate }) {
-  if (mode === 'off') return { stop: () => {}, check: () => {} };
+export async function startUpdater({ mode, toast, onUpdate, logPath, version }) {
+  const log = logPath ? fileLogger(logPath) : null;
+  // Written even in `off` mode, and first: "which copy is this, and is the updater running
+  // at all" is the opening question of every update problem, and `off` is the answer that
+  // surprises people.
+  log?.info(`--- launch: v${version ?? '?'}, mode ${mode} ---`);
+
+  if (mode === 'off') {
+    log?.info('this copy does not self-update (not installed under Programs)');
+    return { stop: () => {}, check: () => {} };
+  }
 
   const { default: electronUpdater } = await import('electron-updater');
   const { autoUpdater } = electronUpdater;
+
+  // The whole reason the log exists: electron-updater's own reporting, including the
+  // differential downloader's "Full: X, To download: Y (Z%)".
+  if (log) autoUpdater.logger = log;
 
   // Where to look is baked into app-update.yml at build time from `build.publish`, so
   // there is no feed URL and no token here — the releases repo is public.
@@ -167,6 +229,17 @@ export async function startUpdater({ mode, toast, onUpdate }) {
   });
 
   if (mode === 'auto') {
+    // Bytes actually moved, recorded next to electron-updater's own differential line so
+    // "how big was the update really" has an answer after the fact rather than a guess.
+    let lastLoggedPercent = -1;
+    autoUpdater.on('download-progress', (p) => {
+      const percent = Math.floor(p.percent / 25) * 25;
+      if (percent === lastLoggedPercent) return;
+      lastLoggedPercent = percent;
+      log?.info(`download ${Math.round(p.percent)}% — ` +
+        `${(p.transferred / 1048576).toFixed(1)} of ${(p.total / 1048576).toFixed(1)} MB`);
+    });
+
     autoUpdater.on('update-downloaded', (info) => {
       onUpdate?.({ version: info.version, ready: true });
       // Deliberately a meter toast, not a cast-alert chip: the alerts window is for

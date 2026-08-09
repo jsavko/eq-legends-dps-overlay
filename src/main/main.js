@@ -42,7 +42,7 @@ import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
 import { clampHeight, clampWidth, placeWindow } from './layout.js';
 import {
   startUpdater, updateMode, fetchLatestVersion, isNewerVersion, RELEASES_URL,
-  STARTUP_DELAY_MS, CHECK_INTERVAL_MS,
+  STARTUP_DELAY_MS, CHECK_INTERVAL_MS, fileLogger,
 } from './updater.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -199,7 +199,13 @@ async function main() {
   currentUpdateMode = updateMode({
     isPackaged: app.isPackaged, exePath: process.execPath, env: process.env,
   });
-  startUpdater({ mode: currentUpdateMode, toast, onUpdate: noteUpdate })
+  startUpdater({
+    mode: currentUpdateMode,
+    toast,
+    onUpdate: noteUpdate,
+    version: app.getVersion(),
+    logPath: updateLogPath(),
+  })
     .then(({ stop, check }) => { stopUpdater = stop; backgroundUpdateCheck = check; })
     .catch((err) => { console.warn('[updater] failed to start:', err?.message ?? err); });
 
@@ -229,6 +235,23 @@ async function main() {
  * Read every time rather than cached at startup so it cannot go stale, and read from the
  * environment rather than config so it can never be left switched on by accident.
  */
+/**
+ * Where the update log lives: beside the config, in `%APPDATA%\eq-legends-dps-overlay`.
+ *
+ * Not in the install directory — that gets replaced by the very updates the log describes,
+ * which would throw away the record of the thing that just happened.
+ */
+function updateLogPath() {
+  return path.join(app.getPath('userData'), 'update.log');
+}
+
+/** The same log electron-updater writes to, so both halves of a check land in one file. */
+let updateLog = null;
+function logUpdate(message) {
+  updateLog ??= fileLogger(updateLogPath());
+  updateLog.info(message);
+}
+
 function selfVersion() {
   const override = process.env.EQL_UPDATE_TEST_VERSION;
   return override ? String(override).trim() : app.getVersion();
@@ -279,8 +302,12 @@ function reportsAsAuto() {
 async function quietUpdateCheck() {
   try {
     const latest = await fetchLatestVersion();
-    if (isNewerVersion(latest, selfVersion())) noteUpdate({ version: latest, ready: false });
+    const newer = isNewerVersion(latest, selfVersion());
+    logUpdate(`background check: latest v${latest}, running v${selfVersion()} — ` +
+      (newer ? 'newer version available' : 'up to date'));
+    if (newer) noteUpdate({ version: latest, ready: false });
   } catch (err) {
+    logUpdate(`background check failed: ${err?.message ?? err}`);
     console.warn('[updater] background check failed:', err?.message ?? err);
   }
 }

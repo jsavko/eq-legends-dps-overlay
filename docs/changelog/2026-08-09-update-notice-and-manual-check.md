@@ -116,11 +116,43 @@ rendered colour     : rgb(224, 165, 63)      -- the --ember-lit accent
 
 On `win-unpacked` — the mode where none of this previously happened at all.
 
+## The update log
+
+`%APPDATA%\eq-legends-dps-overlay\update.log`
+
+electron-updater's default logger is `console`, and a packaged Windows app has no console —
+so everything it knew went nowhere. Including the one line that answers a question nothing
+else can:
+
+```
+Full: 78.3 MB, To download: 3.1 MB (4%)
+```
+
+That is the differential downloader saying what it actually fetched. Without it, "why was
+the update the full size" and "was it differential at all" have no answer after the fact,
+and neither does "is the updater even running on this copy" — which is the question that
+started all of this.
+
+It now writes to a file beside the config, not in the install directory, because that
+directory is replaced by the very updates the log describes. Every launch opens with the
+two facts that frame every update problem:
+
+```
+2026-08-09T22:39:32.709Z info  --- launch: v0.8.1, mode off ---
+2026-08-09T22:39:32.709Z info  this copy does not self-update (not installed under Programs)
+2026-08-09T22:39:42.933Z info  background check: latest v0.8.1, running v0.8.1 — up to date
+```
+
+Download progress is logged at quarter marks with real byte counts, so the transferred size
+is recorded whether or not anyone was watching the screen. The file starts fresh past a
+quarter-megabyte, and every write is wrapped — a logger that throws would take down the
+updater it only exists to describe.
+
 ## Files
 
 | File | Change |
 |---|---|
-| `src/main/updater.js` | `RELEASES_API`, `isNewerVersion`, `fetchLatestVersion`; `startUpdater` returns `{stop, check}` and takes `onUpdate`; `update-available` now registered in both modes |
+| `src/main/updater.js` | `RELEASES_API`, `isNewerVersion`, `fetchLatestVersion`, `fileLogger`; `startUpdater` returns `{stop, check}` and takes `onUpdate`/`logPath`/`version`; `update-available` now registered in both modes; download progress logged |
 | `src/main/main.js` | update notice state, `selfVersion()` with the test override, `quietUpdateCheck`, `checkForUpdatesNow`, tray entries, `update` on the STATUS payload |
 | `src/renderer/overlay/overlay.js` | the footer notice and its tooltip |
 | `src/renderer/overlay/overlay.css` | `body[data-update="true"] #status` accent |
