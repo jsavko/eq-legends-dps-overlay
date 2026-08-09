@@ -193,8 +193,10 @@ test('the headline states progress in levels, and in percent only below one', ()
   // A segment can read past 100% when the game hands out more experience than the level
   // holds; the fraction is capped rather than carrying into the count.
   assert.equal(at(4, 137).value, '4.99');
-  // Small fractions keep two digits, so the number is read the same way every time.
+  // The fraction is zero-padded to two digits, and the factor of ten rides on it: 5% has
+  // to build "2.05", because the unpadded "2." + "5" is "2.5" — which is half a level.
   assert.equal(at(2, 5.2).value, '2.05');
+  assert.equal(at(2, 50).value, '2.50');
 });
 
 test('a session with no experience at all says so rather than showing a zero', () => {
