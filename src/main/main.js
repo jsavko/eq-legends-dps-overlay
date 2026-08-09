@@ -40,7 +40,10 @@ import {
 } from './eqconfig.js';
 import { CHANNELS, PUSH_INTERVAL_MS } from './ipc.js';
 import { clampHeight, clampWidth, placeWindow } from './layout.js';
-import { startUpdater, updateMode } from './updater.js';
+import {
+  startUpdater, updateMode, fetchLatestVersion, isNewerVersion, RELEASES_URL,
+  STARTUP_DELAY_MS, CHECK_INTERVAL_MS,
+} from './updater.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER = path.join(HERE, '..', 'renderer');
@@ -99,6 +102,24 @@ let checkpointTimer = null;
 let saveSessionBoundsTimer = null;
 let lastSessionRevision = -1;
 let stopUpdater = null;
+/** Runs the background updater's own check now. Null in `off` mode, where there is none. */
+let backgroundUpdateCheck = null;
+/** Which of the three update behaviours this copy has, decided once at startup. */
+let currentUpdateMode = 'off';
+/**
+ * The standing "there is a newer version" notice, or null.
+ *
+ * State rather than only a toast because it stays true until it is acted on. A toast is
+ * gone in twelve seconds and takes the news with it — which is most of why an update could
+ * be sitting there for a week without the player ever being told twice.
+ *
+ * @type {{version: string, ready: boolean}|null}
+ */
+let updateNotice = null;
+/** One check at a time, so a double-click on the tray item cannot start two. */
+let updateCheckBusy = false;
+/** The startup and recurring handles for the read-only check that runs in every mode. */
+const quietUpdateTimers = [];
 let lastRevision = -1;
 let lastTriggerRevision = -1;
 let overlayVisible = true;
@@ -170,10 +191,119 @@ async function main() {
 
   // Last, and never awaited: an updater that cannot start — no network, a tree without
   // the dependency installed — must not stand between the player and their overlay.
-  const mode = updateMode({ isPackaged: app.isPackaged, exePath: process.execPath, env: process.env });
-  startUpdater({ mode, toast })
-    .then((stop) => { stopUpdater = stop; })
+  currentUpdateMode = updateMode({
+    isPackaged: app.isPackaged, exePath: process.execPath, env: process.env,
+  });
+  startUpdater({ mode: currentUpdateMode, toast, onUpdate: noteUpdate })
+    .then(({ stop, check }) => { stopUpdater = stop; backgroundUpdateCheck = check; })
     .catch((err) => { console.warn('[updater] failed to start:', err?.message ?? err); });
+
+  // Runs in EVERY mode, `off` included, and the distinction it rests on is the whole point:
+  // win-unpacked is excluded from INSTALLING an update, not from knowing one exists. This
+  // only ever reads a version number, so it cannot violate that rule — and without it the
+  // footer notice would never appear on the build James actually launches, which is the one
+  // that most needs telling, since nothing else will ever mention it.
+  quietUpdateTimers.push(setTimeout(quietUpdateCheck, STARTUP_DELAY_MS));
+  quietUpdateTimers.push(setInterval(quietUpdateCheck, CHECK_INTERVAL_MS));
+}
+
+// ---------------------------------------------------------------------------
+// Updates
+// ---------------------------------------------------------------------------
+
+/**
+ * The version this copy compares itself against.
+ *
+ * `EQL_UPDATE_TEST_VERSION` overrides it, and exists because the update path is otherwise
+ * impossible to exercise without cutting a release: the newest release IS this version for
+ * everyone running the current build, so a check honestly finds nothing and there is no way
+ * to tell "working, nothing to do" from "not working". Launch with the variable set to an
+ * older number and the whole path — the check, the footer notice, the tray entry — behaves
+ * exactly as it will on the day a real release lands.
+ *
+ * Read every time rather than cached at startup so it cannot go stale, and read from the
+ * environment rather than config so it can never be left switched on by accident.
+ */
+function selfVersion() {
+  const override = process.env.EQL_UPDATE_TEST_VERSION;
+  return override ? String(override).trim() : app.getVersion();
+}
+
+/**
+ * Record that a newer version exists, and put it where it can be seen.
+ *
+ * The footer notice and the tray both re-derive from this, so the two can never disagree
+ * about whether there is an update.
+ */
+function noteUpdate({ version, ready }) {
+  // A download that has finished must not be talked back down to "available" by a later
+  // check reporting the same version — `ready` only ever moves forwards for a given one.
+  const stillReady = ready || (updateNotice?.ready === true && updateNotice.version === version);
+  updateNotice = { version, ready: stillReady };
+  pushStatus();
+  refreshTrayMenu();
+}
+
+/**
+ * Look for a newer version without saying anything unless there is one.
+ *
+ * The silent twin of `checkForUpdatesNow`. Nothing is toasted, including failures: this
+ * runs on a timer the player did not ask for, and a toast about a GitHub rate limit
+ * mid-raid is noise about something they cannot act on. It only ever raises the footer
+ * notice, and only when there is genuinely something to say.
+ */
+async function quietUpdateCheck() {
+  try {
+    const latest = await fetchLatestVersion();
+    if (isNewerVersion(latest, selfVersion())) noteUpdate({ version: latest, ready: false });
+  } catch (err) {
+    console.warn('[updater] background check failed:', err?.message ?? err);
+  }
+}
+
+/** What a newly-found version means for THIS copy, which depends on what it may do. */
+function updateFoundMessage(version) {
+  if (currentUpdateMode === 'auto') return `v${version} is out — downloading, installs when you quit`;
+  if (currentUpdateMode === 'notify') return `v${version} is out — grab it from the GitHub releases page`;
+  // 'off' is the win-unpacked and dev case. Saying "an update is available" and stopping
+  // would leave the player waiting for something that is never going to happen here.
+  return `v${version} is out — this copy does not self-update, get it from GitHub`;
+}
+
+/**
+ * Check for updates because the player asked, from the tray.
+ *
+ * Answers in every mode, including `off`, by asking GitHub directly rather than going
+ * through electron-updater — see `RELEASES_API`. Every outcome says something: the point of
+ * a button like this is to convert "I don't think it's working" into a sentence, so
+ * "you are up to date" and "the check failed" are both results, not silence.
+ */
+async function checkForUpdatesNow() {
+  if (updateCheckBusy) return;
+  updateCheckBusy = true;
+  refreshTrayMenu();
+  toast('Checking for updates…', 4000);
+
+  try {
+    const latest = await fetchLatestVersion();
+    const current = selfVersion();
+    if (isNewerVersion(latest, current)) {
+      noteUpdate({ version: latest, ready: false });
+      toast(updateFoundMessage(latest), 15_000);
+      // Let the background updater get on with the part this cannot do. In `auto` that is
+      // the download; in the other modes there is nothing to start.
+      backgroundUpdateCheck?.();
+    } else {
+      updateNotice = null;
+      pushStatus();
+      toast(`Up to date — v${current}`, 6000);
+    }
+  } catch (err) {
+    toast(`Update check failed — ${err?.message ?? err}`, 8000);
+  } finally {
+    updateCheckBusy = false;
+    refreshTrayMenu();
+  }
 }
 
 // Deliberately NOT quitting here: the tray is the app's home, and closing the settings
@@ -190,6 +320,8 @@ app.on('will-quit', () => {
   // using it for the ordinary one would mislabel every clean shutdown as a crash.
   closeSession('shutdown');
   stopUpdater?.();
+  // setTimeout and setInterval handles alike — clearInterval accepts both.
+  for (const timer of quietUpdateTimers) clearInterval(timer);
   tray?.destroy();
 });
 
@@ -986,6 +1118,27 @@ function refreshTrayMenu() {
     ...(sessionEnabled(config.all) ? [{ label: 'Session…', click: createSession }] : []),
     { label: 'Settings…', click: () => createSetup('settings') },
     { type: 'separator' },
+    // The version is the first half of the answer to "am I on the latest?", and it is the
+    // half the app can always give instantly. Disabled because it is a fact, not a control.
+    { label: `Version ${selfVersion()}`, enabled: false },
+    {
+      label: updateCheckBusy ? 'Checking…' : 'Check for updates',
+      enabled: !updateCheckBusy,
+      toolTip: currentUpdateMode === 'auto'
+        ? 'Downloads in the background and installs when you quit'
+        : 'Checks only — this copy cannot replace itself',
+      click: checkForUpdatesNow,
+    },
+    // Only once there is something to get. A permanent "Releases…" row would be one more
+    // entry in an already long menu for a page nobody needs on an ordinary night.
+    ...(updateNotice ? [{
+      label: updateNotice.ready
+        ? `v${updateNotice.version} installs when you quit`
+        : `Get v${updateNotice.version}…`,
+      enabled: !updateNotice.ready,
+      click: () => shell.openExternal(RELEASES_URL),
+    }] : []),
+    { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));
 }
@@ -1596,12 +1749,17 @@ function toast(message, ms) {
  * useful: the settings window checks the file it is about to adopt and says so
  * (`LOG_VALIDATE`, and `validate()` in the setup renderer), which is a real check made at
  * the moment of choosing and is on screen at first run.
+ *
+ * What DOES live in that footer slot now is the update notice, and it is the opposite kind
+ * of claim: it is pushed at the moment it becomes true, it stays true until acted on, and
+ * nothing on screen can contradict it. The old warning failed all three.
  */
 function pushStatus() {
   if (!overlayWindow || overlayWindow.isDestroyed() || !tailer) return;
   overlayWindow.webContents.send(CHANNELS.STATUS, {
     logPath: tailer.filePath,
     character: tailer.character,
+    update: updateNotice,
     locked: config.get('locked'),
     opacity: config.get('opacity'),
     scale: config.get('scale'),

@@ -110,19 +110,34 @@ function applyLock(locked) {
 }
 
 /**
- * Who we are following. The name, and nothing else.
+ * Who we are following, and whether there is a newer version.
  *
- * This used to append "log is stale — type /log on" when main said so. It said so from a
- * check made once, when this window was created, and never revisited — so the warning
- * outlived the condition and sat over rows of live numbers that contradicted it. The rows
- * are the honest answer to that question and they are already on screen; a footer that can
- * disagree with them earns nothing. See `pushStatus` in main for the whole reasoning.
+ * This slot used to append "log is stale — type /log on", from a check made once when the
+ * window was created and never revisited, so the warning outlived the condition and sat
+ * over rows of live numbers that contradicted it. What is here now is the opposite kind of
+ * claim: main pushes it at the moment it becomes true, it stays true until it is acted on,
+ * and nothing else on screen can disagree with it.
+ *
+ * A standing line rather than only a toast because an update stays available. The toast
+ * says it once, twelve seconds later it is gone, and a player who was mid-pull never
+ * learns; this is the same news in the one place that can afford to keep saying it.
  */
 function applyStatus(status) {
   if (!status) return;
   selfName = null;   // re-derived from the snapshot's `self` field
-  els.status.textContent = status.character;
-  els.status.title = status.logPath;
+
+  const update = status.update ?? null;
+  els.body.dataset.update = String(Boolean(update));
+  els.status.textContent = update
+    ? `${status.character} · ${update.ready
+      ? `v${update.version} installs on quit`
+      : `v${update.version} available`}`
+    : status.character;
+  // The tooltip is the one place with room for the whole path, so the update note goes
+  // beside it rather than replacing it — which log is being read stays answerable.
+  els.status.title = update
+    ? `${status.logPath}\nUpdate ${update.version} — tray → Check for updates`
+    : status.logPath;
 }
 
 // ---------------------------------------------------------------- rendering

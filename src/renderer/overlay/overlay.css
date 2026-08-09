@@ -624,6 +624,11 @@ body[data-panel="above"] #detail {
 #toast[data-wide="true"] { flex: 1 1 auto; text-align: right; }
 body:has(#toast[data-wide="true"][data-show="true"]) #status { display: none; }
 
+/* A newer version exists. Lit rather than shouted: it is news you act on between sessions,
+   never something to pull your eye off the game — which is also why it lives down here in
+   the footer and not in the alerts window. */
+body[data-update="true"] #status { color: var(--ember-lit); }
+
 /* Unlocked: make the window's edges obvious, since it can now be grabbed. */
 body:not([data-locked="true"]) #slab {
   border-color: var(--ember);
