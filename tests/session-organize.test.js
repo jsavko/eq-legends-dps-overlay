@@ -178,9 +178,13 @@ test('every category renders, empty ones included', () => {
   const bare = categories(realRecord([[0, 'You have slain a froglok shin knight!']]));
 
   assert.deepEqual(full.map((c) => c.id), bare.map((c) => c.id));
+  // Progress first, and this is load-bearing rather than cosmetic: the window selects the
+  // FIRST row on open, so this order is what you see before clicking anything. It led with
+  // Combat for a long time, which meant the detail pane opened on damage — the one question
+  // this window is not for. Kills sits after what it earned, being the means and not the end.
   assert.deepEqual(
     full.map((c) => c.id),
-    ['combat', 'kills', 'loot', 'coin', 'progress', 'faction', 'skills', 'travels'],
+    ['progress', 'loot', 'coin', 'kills', 'combat', 'faction', 'skills', 'travels'],
   );
   for (const c of bare) assert.ok(c.summary.length > 0, `${c.id} rendered an empty summary`);
   assert.equal(bare.find((c) => c.id === 'loot').summary, 'nothing recorded');
@@ -219,14 +223,17 @@ test('the combat category comes from the encounter store, not the tracker', () =
   assert.equal(combat.dps, 4000 / 120);
   assert.equal(Math.round(combat.accuracy * 100), 61);
 
+  // By id, not by position — this test is about where the number comes from, and it should
+  // not fail the next time somebody reorders the list.
   const cats = categories(record, combat);
-  assert.match(cats[0].summary, /4\.0k dealt/);
-  assert.match(cats[0].summary, /61% acc/);
+  const combatRow = cats.find((c) => c.id === 'combat');
+  assert.match(combatRow.summary, /4\.0k dealt/);
+  assert.match(combatRow.summary, /61% acc/);
 });
 
 test('a session with no fights in history says so rather than showing zeros', () => {
   const cats = categories(realRecord(), combatBetween([], T0, T0 + HOUR, { character: 'Rhale' }));
-  assert.equal(cats[0].summary, 'no fights recorded');
+  assert.equal(cats.find((c) => c.id === 'combat').summary, 'no fights recorded');
   assert.equal(detail(realRecord(), 'combat', null).lead, null);
 });
 

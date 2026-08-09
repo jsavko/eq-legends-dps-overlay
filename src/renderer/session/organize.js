@@ -106,11 +106,20 @@ export function headline(record) {
 /**
  * The middle pane: one row per category, each with a one-line summary.
  *
- * Combat is first and comes from `combat`, which the main process derives by summing the
- * encounter records that started inside this session — NOT from anything the session
- * tracker counted. The session module is a sibling of the combat parser precisely so it
- * never scores damage; a second damage pipeline here would be a second answer to one
- * question, able to disagree with the meter.
+ * **Order is the answer to "what was this night for", and Progress is first.** The list led
+ * with Combat for as long as this window has existed, which meant the detail pane opened on
+ * damage every single time — the one question this window is NOT for, since the meter and
+ * the History window both answer it better and in more detail. What a session is actually
+ * asked about is what it advanced: levels, then what it earned, and kills last because a
+ * kill count is the *means* to those rather than the point of them. The first row is also
+ * the one selected on open (see `state.category`), so this order decides what you see
+ * before you click anything.
+ *
+ * Combat still comes from `combat`, which the main process derives by summing the encounter
+ * records that started inside this session — NOT from anything the session tracker counted.
+ * The session module is a sibling of the combat parser precisely so it never scores damage;
+ * a second damage pipeline here would be a second answer to one question, able to disagree
+ * with the meter.
  *
  * Every row renders even when empty ("nothing recorded"), for the same no-reflow reason
  * the rail's deaths line does: a category that vanishes on a quiet night moves every row
@@ -126,22 +135,16 @@ export function categories(record, combat = null) {
 
   return [
     {
-      id: 'combat',
-      label: 'Combat',
-      summary: combat && combat.encounters > 0
+      id: 'progress',
+      label: 'Progress',
+      summary: seg || xp.levelsGained > 0 || aa.earned > 0
         ? [
-          `${formatCount(combat.damage)} dealt`,
-          combat.dps === null ? null : `${formatCount(combat.dps)} DPS`,
-          combat.accuracy === null ? null : `${Math.round(combat.accuracy * 100)}% acc`,
+          // Levels lead the summary as well as the list. The percentage is where you are;
+          // the level count is what the night was worth, and it is the rarer fact.
+          xp.levelsGained > 0 ? `${xp.levelsGained} level${xp.levelsGained === 1 ? '' : 's'}` : null,
+          seg ? `+${round(seg.percent, 0)}%${seg.level === null ? '' : ` at ${seg.level}`}` : null,
+          aa.earned > 0 ? `${aa.earned} AA` : null,
         ].filter(Boolean).join(' · ')
-        : 'no fights recorded',
-    },
-    {
-      id: 'kills',
-      label: 'Kills',
-      summary: (record.kills?.total ?? 0) > 0
-        ? `${record.kills.total} · ${record.kills.byCreature.length} kinds` +
-          formatRate(record.kills.perHour, '/hr', ' · ')
         : 'nothing recorded',
     },
     {
@@ -161,15 +164,23 @@ export function categories(record, combat = null) {
         : 'nothing recorded',
     },
     {
-      id: 'progress',
-      label: 'Progress',
-      summary: seg || xp.levelsGained > 0 || aa.earned > 0
-        ? [
-          seg ? `+${round(seg.percent, 0)}%${seg.level === null ? '' : ` at ${seg.level}`}` : null,
-          xp.levelsGained > 0 ? `${xp.levelsGained} level${xp.levelsGained === 1 ? '' : 's'}` : null,
-          aa.earned > 0 ? `${aa.earned} AA` : null,
-        ].filter(Boolean).join(' · ')
+      id: 'kills',
+      label: 'Kills',
+      summary: (record.kills?.total ?? 0) > 0
+        ? `${record.kills.total} · ${record.kills.byCreature.length} kinds` +
+          formatRate(record.kills.perHour, '/hr', ' · ')
         : 'nothing recorded',
+    },
+    {
+      id: 'combat',
+      label: 'Combat',
+      summary: combat && combat.encounters > 0
+        ? [
+          `${formatCount(combat.damage)} dealt`,
+          combat.dps === null ? null : `${formatCount(combat.dps)} DPS`,
+          combat.accuracy === null ? null : `${Math.round(combat.accuracy * 100)}% acc`,
+        ].filter(Boolean).join(' · ')
+        : 'no fights recorded',
     },
     {
       id: 'faction',

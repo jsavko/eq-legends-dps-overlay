@@ -32,7 +32,15 @@ const state = {
   /** The full record for `selectedId`, plus the combat block main derived for it. */
   record: null,
   combat: null,
-  category: 'combat',
+  /**
+   * Which category the detail pane is showing.
+   *
+   * Null rather than a named one on purpose: `renderSummary` falls back to the FIRST row
+   * when the selection does not exist, so the order in `categories()` decides both what the
+   * list looks like and what opens — they cannot drift apart. Naming a default here is how
+   * the window spent its life opening on Combat while Progress sat fifth.
+   */
+  category: null,
 
   chip: 'all',
   search: '',
