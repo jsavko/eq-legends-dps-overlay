@@ -129,15 +129,45 @@ function applyStatus(status) {
   const update = status.update ?? null;
   els.body.dataset.update = String(Boolean(update));
   els.status.textContent = update
-    ? `${status.character} · ${update.ready
-      ? `v${update.version} installs on quit`
-      : `v${update.version} available`}`
+    ? `${status.character} · ${updateLine(update)}`
     : status.character;
   // The tooltip is the one place with room for the whole path, so the update note goes
   // beside it rather than replacing it — which log is being read stays answerable.
   els.status.title = update
-    ? `${status.logPath}\nUpdate ${update.version} — tray → Check for updates`
+    ? `${status.logPath}\n${updateTooltip(update)}`
     : status.logPath;
+}
+
+/**
+ * What the footer says about a newer version, which depends on what this copy will DO.
+ *
+ * Three states, and the distinction between them is the point. An installed copy handles
+ * it: the update is downloading now and goes in on quit, and the player's only job is to
+ * eventually quit. A portable or unpacked copy cannot replace itself, so the same news is
+ * a job for them. Wording both as a bare "v0.9.0 available" made the installed case look
+ * as helpless as the other, and left a player waiting for an instruction that was never
+ * coming while the app was in fact already dealing with it.
+ *
+ * "installs on quit" is the part that must survive: the footer clips with an ellipsis at
+ * narrow overlay widths, so the promise comes before the progress word rather than after
+ * it, where it would be the first thing cut.
+ */
+function updateLine(update) {
+  if (!update.auto) return `v${update.version} available`;
+  return update.ready
+    ? `v${update.version} installs on quit`
+    : `v${update.version} installs on quit, downloading`;
+}
+
+/** The same thing with room to breathe, including what to do about it. */
+function updateTooltip(update) {
+  if (!update.auto) {
+    return `Version ${update.version} is out. This copy cannot update itself — ` +
+      'tray → Check for updates for the download page.';
+  }
+  return update.ready
+    ? `Version ${update.version} is downloaded and installs the next time you quit.`
+    : `Version ${update.version} is downloading now and installs the next time you quit.`;
 }
 
 // ---------------------------------------------------------------- rendering

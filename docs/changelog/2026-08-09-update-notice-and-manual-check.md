@@ -44,6 +44,23 @@ worth being explicit about: `win-unpacked` is excluded from *installing* an upda
 rule it sits beside — and without it the notice would never appear on the build most in need
 of it, since nothing else will ever mention one.
 
+### It says which kind of update it is
+
+"There is a newer version" means two different things depending on the copy, and the notice
+distinguishes them, because wording both as a bare "available" made an installed copy look
+as helpless as a portable one — leaving a player waiting for an instruction that was never
+coming while the app was already dealing with it:
+
+| Copy | Footer |
+|---|---|
+| installed, downloading | `Rhale · v0.9.0 installs on quit, downloading` |
+| installed, downloaded | `Rhale · v0.9.0 installs on quit` |
+| portable / unpacked | `Rhale · v0.9.0 available` |
+
+"installs on quit" comes before the progress word on purpose: `#status` clips with an
+ellipsis at narrow widths, so the promise has to be the part that survives. Measured in the
+live overlay at its real 360px width — all three fit with room to spare.
+
 ## The tray
 
 ```
@@ -79,6 +96,14 @@ yml. Read-only; safe to run mid-raid.
 appears, the tray entry appears, and the toast fires — the whole path, exactly as it will
 behave on release day. Read from the environment rather than config so it cannot be left
 switched on by accident.
+
+**`EQL_UPDATE_TEST_AUTO=1`** makes the notice talk like an installed copy. Deliberately
+narrower than it looks: it changes only what the footer and tray *say*, never what the
+updater *does*. The real mode still governs `startUpdater`, so an unpacked copy under this
+flag words itself as self-updating and still downloads and installs nothing. Forcing the
+real mode instead would hand `autoDownload` to a copy that must never have it and quietly
+install a second app under `Programs` — precisely the accident `updateMode` exists to
+prevent.
 
 That is how this was verified. Attaching to the running overlay's renderer over CDP with the
 override set:

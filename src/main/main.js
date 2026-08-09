@@ -113,7 +113,12 @@ let currentUpdateMode = 'off';
  * gone in twelve seconds and takes the news with it — which is most of why an update could
  * be sitting there for a week without the player ever being told twice.
  *
- * @type {{version: string, ready: boolean}|null}
+ * `auto` is carried alongside because "there is a newer version" means two different things
+ * depending on the copy: one is being handled for you and one is a job you have to do. A
+ * notice that cannot tell them apart makes an installed copy look as helpless as a portable
+ * one, which is the whole reason the modes exist.
+ *
+ * @type {{version: string, ready: boolean, auto: boolean}|null}
  */
 let updateNotice = null;
 /** One check at a time, so a double-click on the tray item cannot start two. */
@@ -239,9 +244,28 @@ function noteUpdate({ version, ready }) {
   // A download that has finished must not be talked back down to "available" by a later
   // check reporting the same version — `ready` only ever moves forwards for a given one.
   const stillReady = ready || (updateNotice?.ready === true && updateNotice.version === version);
-  updateNotice = { version, ready: stillReady };
+  updateNotice = { version, ready: stillReady, auto: reportsAsAuto() };
   pushStatus();
   refreshTrayMenu();
+}
+
+/**
+ * Should the notice SAY this copy is updating itself?
+ *
+ * `EQL_UPDATE_TEST_AUTO` forces a yes, and is deliberately narrower than it looks: it
+ * changes only what the footer and the tray say, never what the updater does. The real
+ * mode still governs `startUpdater`, so a win-unpacked copy under this flag talks like an
+ * installed one and still downloads and installs nothing — which is the entire point.
+ * Forcing the real mode instead would hand `autoDownload` to a copy that must never have
+ * it, and quietly install a second app under Programs: exactly the accident `updateMode`
+ * exists to prevent.
+ *
+ * It earns its place because the auto wording is otherwise unreachable without a genuine
+ * NSIS install plus a genuine newer release, and that is a lot of setup to read one line.
+ */
+function reportsAsAuto() {
+  if (process.env.EQL_UPDATE_TEST_AUTO) return true;
+  return currentUpdateMode === 'auto';
 }
 
 /**
@@ -1131,13 +1155,21 @@ function refreshTrayMenu() {
     },
     // Only once there is something to get. A permanent "Releases…" row would be one more
     // entry in an already long menu for a page nobody needs on an ordinary night.
-    ...(updateNotice ? [{
-      label: updateNotice.ready
-        ? `v${updateNotice.version} installs when you quit`
-        : `Get v${updateNotice.version}…`,
-      enabled: !updateNotice.ready,
-      click: () => shell.openExternal(RELEASES_URL),
-    }] : []),
+    //
+    // An installed copy gets a statement and no click: it is handling the update itself,
+    // and a row that opened a download page would be inviting the player to do by hand the
+    // thing already in progress — which is how you end up with two copies.
+    ...(updateNotice ? [updateNotice.auto
+      ? {
+        label: updateNotice.ready
+          ? `v${updateNotice.version} installs when you quit`
+          : `v${updateNotice.version} downloading — installs when you quit`,
+        enabled: false,
+      }
+      : {
+        label: `Get v${updateNotice.version}…`,
+        click: () => shell.openExternal(RELEASES_URL),
+      }] : []),
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));
