@@ -74,9 +74,44 @@ export function railSummary(entry) {
   };
 }
 
+/**
+ * The night's progress as ONE number: levels gained, and how far into the current one.
+ *
+ * This slot used to print the current segment's percentage — "+31%" — which is the least
+ * useful true statement available. A night that gained four levels and is 31% into a fifth
+ * showed "+31%", throwing away the four; and the percentage cannot be added across levels
+ * to recover them, so the discarded part was genuinely unrecoverable from what was shown.
+ *
+ * `4.31` is the whole of it: four levels, plus 31% of the one you are standing in. Below a
+ * single level there is no leading digit worth printing, so it falls back to the plain
+ * percentage — which is exactly when a percentage IS the useful form.
+ *
+ * This does not break the no-summing rule. It never adds percentages across a boundary: the
+ * integer is a COUNT of level-up lines, and the fraction belongs to one level only. The one
+ * softness worth knowing is that a session which began mid-level got part of its first
+ * level-up from experience earned before it started — `levelsGained` has always had that
+ * property, and the Progress pane is where "started mid-level" is spelled out.
+ */
+function levelProgress(xp, seg) {
+  const gained = xp.levelsGained ?? 0;
+  if (gained < 1) {
+    if (!seg) return { value: '—', unit: '' };
+    return {
+      value: `${round(seg.percent, 0)}`,
+      unit: seg.level === null ? '%' : `% at ${seg.level}`,
+    };
+  }
+  // Floored, not rounded: 4.99 must never print as "5.00" and claim a level that has not
+  // happened. Capped at 99 for the same reason — a segment can read over 100% when the game
+  // hands out a chunk of experience larger than the level it lands in.
+  const part = Math.min(99, Math.floor(seg?.percent ?? 0));
+  return { value: `${gained}.${String(part).padStart(2, '0')}`, unit: 'levels' };
+}
+
 /** The four headline numbers above the category list. */
 export function headline(record) {
   const seg = currentSegment(record);
+  const xp = record.xp ?? { levelsGained: 0 };
   return [
     {
       id: 'kills', label: 'Kills',
@@ -90,9 +125,8 @@ export function headline(record) {
       accent: true,
     },
     {
-      id: 'xp', label: 'XP',
-      value: seg ? `+${round(seg.percent, 0)}` : '—',
-      unit: seg ? `%${formatRate(seg.percentPerHour, '/hr', ' · ')}` : '',
+      id: 'levels', label: 'Levels',
+      ...levelProgress(xp, seg),
       accent: true,
     },
     {

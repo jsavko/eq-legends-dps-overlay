@@ -164,11 +164,43 @@ test('day grouping preserves the store order and names today', () => {
 
 test('the headline reads the four numbers off a real record', () => {
   const stats = headline(realRecord());
-  assert.deepEqual(stats.map((s) => s.id), ['kills', 'coin', 'xp', 'loot']);
+  assert.deepEqual(stats.map((s) => s.id), ['kills', 'coin', 'levels', 'loot']);
   assert.equal(stats[0].value, '2');
   assert.equal(stats[3].value, '1');
-  // The XP figure is the CURRENT segment's, never a session total.
-  assert.equal(stats[2].value, '+25');
+  // One level gained, 25% into the next: 1.25. The bare "+25%" this slot used to print
+  // discarded the level, and no amount of arithmetic on percentages gets it back.
+  assert.equal(stats[2].value, '1.25');
+  assert.equal(stats[2].unit, 'levels');
+});
+
+test('the headline states progress in levels, and in percent only below one', () => {
+  const at = (levelsGained, percent, level = 19) => headline({
+    xp: { levelsGained, segments: [{ level, percent, anchored: true, startTs: 0, endTs: null }] },
+  })[2];
+
+  // Four levels and 31% of a fifth. The whole of the night in one number.
+  assert.equal(at(4, 31.34).value, '4.31');
+  assert.equal(at(4, 31.34).unit, 'levels');
+
+  // Below a level there is no leading digit worth printing, and a percentage is exactly
+  // the right form — which is the case the old display was built for and the only one it
+  // ever served properly.
+  assert.equal(at(0, 31.34).value, '31');
+  assert.equal(at(0, 31.34).unit, '% at 19');
+
+  // Floored, never rounded: 4.99 must not claim a fifth level it has not reached.
+  assert.equal(at(4, 99.8).value, '4.99');
+  // A segment can read past 100% when the game hands out more experience than the level
+  // holds; the fraction is capped rather than carrying into the count.
+  assert.equal(at(4, 137).value, '4.99');
+  // Small fractions keep two digits, so the number is read the same way every time.
+  assert.equal(at(2, 5.2).value, '2.05');
+});
+
+test('a session with no experience at all says so rather than showing a zero', () => {
+  const stat = headline({ xp: { levelsGained: 0, segments: [] } })[2];
+  assert.equal(stat.value, '—');
+  assert.equal(stat.unit, '');
 });
 
 test('every category renders, empty ones included', () => {
