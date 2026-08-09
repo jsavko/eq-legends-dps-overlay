@@ -46,6 +46,44 @@ win_npm() {
   ( cd "$WIN_DIR" && cmd.exe /c "cd /d $WIN_PATH && npm.cmd $*" )
 }
 
+# electron-builder's Windows toolchain, unpacked by hand because it cannot unpack itself.
+#
+# `rcedit-x64.exe` — the tool that stamps our icon and version onto the exe — ships inside
+# electron-builder's `winCodeSign` bundle. That bundle also carries a macOS openssl build
+# whose .dylib entries are SYMLINKS, and creating a symlink on Windows needs a privilege an
+# ordinary account does not hold unless Developer Mode is on. So electron-builder downloads
+# the archive, fails to extract it, retries three times and gives up:
+#
+#   ERROR: Cannot create symbolic link : A required privilege is not held by the client.
+#
+# The build then dies. That failure is why `win.signAndEditExecutable` was false from the
+# first commit — and the cost, unnoticed for a fortnight, was that every shortcut NSIS
+# created wore the Electron logo, because an unedited exe keeps Electron's own icon.
+#
+# Extracting it ourselves with `-xr!darwin` drops the mac tree and with it every symlink.
+# Nothing we build targets macOS, so the excluded files could not be used even if they
+# unpacked. Idempotent: the archive is only fetched, and only unpacked, when the tool is
+# not already there.
+WINCODESIGN_VERSION='2.6.0'
+WINCODESIGN_URL="https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-${WINCODESIGN_VERSION}/winCodeSign-${WINCODESIGN_VERSION}.7z"
+
+ensure_wincodesign() {
+  local cache="/mnt/c/Users/$USER/AppData/Local/electron-builder/Cache/winCodeSign"
+  local dir="$cache/winCodeSign-$WINCODESIGN_VERSION"
+  [ -f "$dir/rcedit-x64.exe" ] && return 0
+
+  echo "priming electron-builder's winCodeSign tools (skipping the macOS symlinks)…"
+  mkdir -p "$cache"
+  local archive="$cache/winCodeSign-$WINCODESIGN_VERSION.7z"
+  [ -f "$archive" ] || curl -fsSL "$WINCODESIGN_URL" -o "$archive"
+
+  local win_archive="C:\\Users\\$USER\\AppData\\Local\\electron-builder\\Cache\\winCodeSign\\winCodeSign-$WINCODESIGN_VERSION.7z"
+  local win_out="C:\\Users\\$USER\\AppData\\Local\\electron-builder\\Cache\\winCodeSign\\winCodeSign-$WINCODESIGN_VERSION"
+  ( cd "$WIN_DIR" && cmd.exe /c "node_modules\\7zip-bin\\win\\x64\\7za.exe x -bso0 -bd -y -xr^!darwin $win_archive -o$win_out" )
+
+  [ -f "$dir/rcedit-x64.exe" ] || { echo "winCodeSign unpacked but rcedit is missing: $dir"; exit 1; }
+}
+
 case "${1:-start}" in
   sync)
     sync_tree
@@ -60,6 +98,7 @@ case "${1:-start}" in
   dist)
     sync_tree
     [ -d "$WIN_DIR/node_modules" ] || win_npm install
+    ensure_wincodesign
     win_npm run dist
     echo "installer + portable exe -> $WIN_PATH\\dist"
     ;;
@@ -69,6 +108,7 @@ case "${1:-start}" in
     # `gh` over here is already authenticated and pushes the same files.
     sync_tree
     [ -d "$WIN_DIR/node_modules" ] || win_npm install
+    ensure_wincodesign
 
     command -v gh >/dev/null || { echo "gh CLI is required to publish a release"; exit 1; }
     ver="$(cd "$SRC" && node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")"
