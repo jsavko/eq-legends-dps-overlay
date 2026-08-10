@@ -11,7 +11,7 @@
  */
 
 import {
-  app, BrowserWindow, globalShortcut, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage,
+  app, BrowserWindow, clipboard, globalShortcut, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage,
 } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -2398,6 +2398,26 @@ function registerIpc() {
     } catch (err) {
       return { ok: false, error: err.message };
     }
+  });
+
+  // ---------------------------------------------------------------- clipboard
+
+  /**
+   * The overlay's COPY button, landing.
+   *
+   * Main owns the write because Electron's main-process `clipboard` has none of the
+   * conditions the renderer's `navigator.clipboard` does — no focused document, no user
+   * gesture — and the overlay is a transparent, always-on-top, click-through window that
+   * satisfies neither.
+   *
+   * An empty or non-string payload writes NOTHING and says so. The clipboard already
+   * holds something the player put there, and clearing it on a button that failed to
+   * build a line is a worse outcome than the button doing nothing.
+   */
+  ipcMain.handle(CHANNELS.CLIPBOARD_COPY, (_e, text) => {
+    if (typeof text !== 'string' || text.trim() === '') return { ok: false };
+    clipboard.writeText(text);
+    return { ok: true };
   });
 
   /**

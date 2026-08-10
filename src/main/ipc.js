@@ -141,6 +141,22 @@ export const CHANNELS = {
   /** Open the Session window — the settings form's entry point to it. */
   SESSION_OPEN: 'session:open',
 
+  /**
+   * Put a finished line of text on the Windows clipboard.
+   *
+   * The renderer sends the TEXT, not a "copy the meter" intent, which is the opposite of
+   * how `TRIGGERS_SET_BUILTIN` names a row rather than a config key — and deliberately.
+   * The line has to be the rows the overlay is showing, in the order it is showing them,
+   * with the filters the current metric applies; main would have to re-derive all of
+   * that from `parser.snapshot()` and `config.metric`, and the failure mode of the two
+   * drifting apart is silent — a copied line that disagrees with the meter, discovered
+   * only once it is in guild chat. `report.js` is that logic, shared with `render()`,
+   * and it lives in the renderer because that is where the rows are.
+   *
+   * `invoke`, not a send, so the renderer can toast after the write actually happened.
+   */
+  CLIPBOARD_COPY: 'clipboard:copy',
+
   // renderer -> main (fire and forget)
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',
   /**

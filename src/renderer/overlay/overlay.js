@@ -13,6 +13,7 @@
  */
 
 import { abilityAccuracy, abilityColumns, splitShares } from './breakdown.js';
+import { METRICS, METRIC_CYCLE, chatReport, formatDuration, rowsForMetric } from './report.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -172,19 +173,6 @@ function updateTooltip(update) {
 
 // ---------------------------------------------------------------- rendering
 
-/**
- * Field names for the metric on screen.
- *
- * All three metrics are rendered by exactly the same code — only the fields it reads
- * differ. Rows are always sorted by damage on arrival, so the other views re-sort.
- */
-const METRICS = {
-  damage: { total: 'damage', rate: 'dps', rolling: 'rollingDps', share: 'share', unit: 'dps', group: 'groupDps' },
-  healing: { total: 'healing', rate: 'hps', rolling: 'rollingHps', share: 'healShare', unit: 'hps', group: 'groupHps' },
-  taken: { total: 'damageTaken', rate: 'dtps', rolling: 'rollingDtps', share: 'takenShare', unit: 'dtps', group: 'groupDtps' },
-};
-const METRIC_CYCLE = ['damage', 'healing', 'taken'];
-
 function render(snap) {
   snapshot = snap;
   selfName = snap.self;
@@ -192,16 +180,10 @@ function render(snap) {
 
   els.body.dataset.state = snap.active ? 'live' : 'idle';
 
-  let rows = snap.rows;
-  if (metric === 'healing') {
-    rows = snap.rows.filter((r) => r.heals > 0).sort((a, b) => b.healing - a.healing);
-  } else if (metric === 'taken') {
-    // Deaths keep a row visible even at 0 damage taken — dying is the one fact this
-    // view must never hide.
-    rows = snap.rows
-      .filter((r) => r.damageTaken > 0 || r.deaths > 0 || r.petDeaths > 0)
-      .sort((a, b) => b.damageTaken - a.damageTaken);
-  }
+  // Which rows this metric shows, and their order, live in report.js — the COPY button
+  // reads the same function, so the line it puts on the clipboard is the list on screen
+  // by construction rather than by two filters being kept in step.
+  const rows = rowsForMetric(snap, metric);
 
   els.body.dataset.hasRows = String(rows.length > 0);
 
@@ -954,11 +936,50 @@ function wireHover() {
 }
 
 function wireControls() {
+  $('btn-copy').addEventListener('click', copyReport);
   $('btn-metric').addEventListener('click', () => window.api.toggleMetric());
   $('btn-reset').addEventListener('click', () => window.api.resetEncounter());
   $('btn-settings').addEventListener('click', () => window.api.openSettings());
   $('btn-lock').addEventListener('click', () => window.api.toggleLock());
   $('btn-close').addEventListener('click', () => window.api.close());
+}
+
+/**
+ * The meter, as one line, on the clipboard.
+ *
+ * Copies whatever metric is on screen — the healing view copies hps, the taken view
+ * copies dtps — so the button's meaning is always the meter directly above it.
+ *
+ * The write happens in main (`clipboard.writeText`), not here. The Async Clipboard API
+ * needs a focused document and a user-gesture context, and this is a transparent,
+ * always-on-top window that spends its life unfocused and ignoring mouse input; the case
+ * where it fails is the case we ship, and it fails as a rejected promise, so the button
+ * would look like it had worked. `invoke` rather than a send for the same reason the
+ * toast comes after the await: announcing an outcome we did not observe is the thing to
+ * avoid here.
+ *
+ * With nothing to copy the clipboard is left untouched. Wiping whatever the player had
+ * copied, to replace it with an empty meter, is the worst thing a button labelled COPY
+ * could do.
+ */
+async function copyReport() {
+  const report = chatReport(snapshot, metric);
+  if (!report.text) {
+    showToast('Nothing to copy yet');
+    return;
+  }
+
+  const result = await window.api.copyText(report.text);
+  if (!result?.ok) {
+    showToast('Copy failed');
+    return;
+  }
+
+  // Dropping members is the one outcome the player must hear about out loud — the
+  // alternative is finding out from whoever they pasted it to.
+  if (report.shown < report.total) showToast(`Copied — ${report.shown} of ${report.total} fit`);
+  else if (report.stage > 0) showToast('Copied — shortened to fit chat');
+  else showToast(`Copied — ${report.total} in group`);
 }
 
 function showToast(message, ms = 2600) {
@@ -1008,13 +1029,4 @@ function formatNumber(n) {
   if (n >= 100) return String(Math.round(n));
   if (n >= 10) return n.toFixed(1);
   return n.toFixed(1);
-}
-
-function formatDuration(ms) {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const s = total % 60;
-  const m = Math.floor(total / 60) % 60;
-  const h = Math.floor(total / 3600);
-  const pad = (n) => String(n).padStart(2, '0');
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }

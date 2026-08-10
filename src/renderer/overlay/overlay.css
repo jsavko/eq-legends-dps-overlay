@@ -185,6 +185,13 @@ body[data-state="live"] #pulse {
   position: relative;
   z-index: 2;
   display: none;
+  /*
+   * Wraps rather than overflows. Six buttons outgrow a narrow overlay, and this window
+   * may never clip — the header's offsetHeight is what measureContentHeight() reads, so
+   * a wrapped second row is measured and the auto-fit grows for it with no geometry
+   * code to change.
+   */
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.3em;
   margin-bottom: 0.3em;

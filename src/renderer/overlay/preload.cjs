@@ -18,6 +18,7 @@ const CH = {
   TOGGLE_METRIC: 'overlay:toggle-metric',
   OPEN_SETTINGS: 'window:open-settings',
   CONFIG_GET: 'config:get',
+  CLIPBOARD_COPY: 'clipboard:copy',
 };
 
 const on = (channel) => (handler) =>
@@ -36,6 +37,13 @@ contextBridge.exposeInMainWorld('api', {
 
   getConfig: () => ipcRenderer.invoke(CH.CONFIG_GET),
   openSettings: () => ipcRenderer.invoke(CH.OPEN_SETTINGS),
+  /**
+   * Put a finished line on the clipboard, and say whether it landed.
+   *
+   * Main does the write: the Async Clipboard API wants a focused document and a user
+   * gesture, neither of which this always-on-top click-through window reliably has.
+   */
+  copyText: (text) => ipcRenderer.invoke(CH.CLIPBOARD_COPY, text),
 
   /** Give mouse events back to the game, or take them so a row can be hovered. */
   setIgnoreMouse: (ignore) => ipcRenderer.send(CH.SET_IGNORE_MOUSE, ignore),
