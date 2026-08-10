@@ -668,6 +668,9 @@ test('a beating taken by the pet folds into the owner, split out like pet damage
 
 test('incoming DoT ticks and damage shields score as taken', () => {
   const p = makeParser();
+  // The pull has to be opened by something other than the tick itself: an incoming DoT
+  // no longer starts a fight (see the succor test below), only joins one.
+  p.feed(`${D(18, 48, 12)} You crush a ghoul savant for 40 points of damage.`);
   p.feed(`${D(18, 48, 13)} You have taken 29 damage from Searing Arrow by a ghoul savant.`);
   p.feed(`${D(18, 48, 14)} YOU are pierced by a wan ghoul knight's thorns for 8 points of non-melee damage!`);
 
@@ -1183,6 +1186,136 @@ test('a proven player is never claimed as somebody else\'s pet', () => {
 
   assert.equal(p.roster.ownerOf('Kadomony'), null);
   assert.equal(p.snapshot().rows.some((r) => r.name === 'Kadomony'), true);
+});
+
+// ---------------------------------------------------------------------------
+// The backtick mob.
+//
+// The single-token failure above has a punctuation-shaped twin. Pets are written
+// `<Owner>`s <noun>`, and the split used to be unconditional — so `Innoruuk`s Chosen`,
+// a Plane of Hate boss, folded into a combatant called "Innoruuk", which passes for a
+// player name, which made the boss friendly. Every line went through friendly fire and
+// was dropped, and the one mechanism that corrects a bad identity refused to look at a
+// pet-shaped side. Eight minutes of fighting it scored nothing. Lines below are the
+// live session's own.
+// ---------------------------------------------------------------------------
+
+test('a mob with a backtick in its name is an enemy from the first line', () => {
+  const p = makeParser();
+  assert.equal(p.isFriendly('Innoruuk`s Chosen'), false, 'before anything has happened');
+
+  p.feed(`${D(0, 25, 42)} You slash Innoruuk\`s Chosen for 42 points of damage.`);
+
+  const snap = p.snapshot();
+  assert.equal(snap.rows.length, 1);
+  assert.equal(snap.rows[0].name, 'Rhale');
+  assert.equal(snap.rows[0].damage, 42);
+  assert.equal(snap.label, 'Innoruuk`s Chosen', 'and it is the fight, not a bystander');
+  // Crucially not folded into a phantom "Innoruuk" row.
+  assert.equal(snap.rows.some((r) => r.name === 'Innoruuk'), false);
+});
+
+test('the backtick mob hitting a member scores as damage taken', () => {
+  const p = makeParser();
+  p.feed(`${D(0, 25, 42)} You slash Innoruuk\`s Chosen for 42 points of damage.`);
+  p.feed(`${D(0, 27, 39)} Innoruuk\`s Chosen cleaves YOU for 53 points of damage.`);
+  p.feed(`${D(0, 25, 59)} Innoruuk\`s Chosen cleaves Rhale\`s warder for 123 points of damage.`);
+
+  const row = p.snapshot().rows.find((r) => r.name === 'Rhale');
+  assert.equal(row.damageTaken, 176, 'the warder\'s beating folds into its owner');
+  assert.equal(row.petDamageTaken, 123);
+  assert.equal(row.attackers[0].name, 'Innoruuk`s Chosen');
+});
+
+test('the backtick mob\'s casts raise warnings', () => {
+  const p = makeParser();
+  p.feed(`${D(0, 25, 42)} You slash Innoruuk\`s Chosen for 42 points of damage.`);
+  // Allure is a charm aimed at the group and Ensnaring Roots is the root; 105 casts
+  // like these went unwarned across the live log because the caster read as a player.
+  p.feed(`${D(0, 25, 44)} Innoruuk\`s Chosen begins casting Allure.`);
+
+  const warning = p.snapshot(T(0, 25, 44)).hostileCasts.find((c) => c.ability === 'Allure');
+  assert.equal(warning.caster, 'Innoruuk`s Chosen');
+});
+
+test('a real warder is never marked hostile by a friendly-fire line', () => {
+  const p = makeParser();
+  // Impossible line, in both directions: the mark must land on neither the warder nor
+  // its owner, because an owner with player proof is proof the pet is a pet.
+  p.feed(`${D(18, 48, 13)} Rhale\`s warder slashes Rhale for 40 points of damage.`);
+  p.feed(`${D(18, 48, 14)} Rhale slashes Rhale\`s warder for 40 points of damage.`);
+
+  assert.equal(p.roster.isHostileByAction('Rhale`s warder'), false);
+  assert.equal(p.roster.isHostileByAction('Rhale'), false);
+  assert.equal(p.isFriendly('Rhale'), true);
+  assert.equal(p.snapshot().rows.length, 0, 'and nothing is scored either way');
+});
+
+test('a lowercase-nouned mob name is corrected by proof of action', () => {
+  // The shape rule waves this one through — the noun is generic, so it reads as a pet
+  // belonging to "Dreadlord", who looks like a player. Trading a blow with a confirmed
+  // member is what puts it right, and it stays right for the session.
+  const p = makeParser();
+  assert.equal(p.isFriendly('Dreadlord'), true, 'name shape alone says player');
+
+  p.feed(`${D(0, 30, 0)} Dreadlord\`s minion crushes YOU for 61 points of damage.`);
+  assert.equal(p.roster.isHostileByAction('Dreadlord`s minion'), true);
+  // The mark goes on the minion, never on the owner it was folded into — branding
+  // "Dreadlord" an enemy off its pet's swing is exactly what must not happen.
+  assert.equal(p.roster.isHostileByAction('Dreadlord'), false);
+
+  p.feed(`${D(0, 30, 2)} Dreadlord\`s minion crushes YOU for 61 points of damage.`);
+  const row = p.snapshot().rows.find((r) => r.name === 'Rhale');
+  // Not even the first blow is lost: resolveFriendlyFire re-scores the line that
+  // taught us, which is why the correction costs nothing but the warning it missed.
+  assert.equal(row.damageTaken, 122);
+  assert.equal(row.attackers[0].name, 'Dreadlord`s minion');
+});
+
+test('a capitalized possessive still folds when the owner has player proof', () => {
+  // The case the shape rule gets wrong, answered with evidence instead. Rhale is the
+  // logging character, so `Rhale`s Warder` is a pet however the game capitalized it.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 16)} You crush a froglok shin knight for 40 points of damage.`);
+  p.feed(`${D(18, 48, 23)} Rhale\`s Warder hit a froglok shin knight for 71 points of cold damage by Blast of Frost.`);
+
+  const snap = p.snapshot();
+  assert.equal(snap.rows.length, 1, 'no row of its own');
+  assert.equal(snap.rows[0].name, 'Rhale');
+  assert.equal(snap.rows[0].petDamage, 71);
+});
+
+// ---------------------------------------------------------------------------
+// Evacuating a fight.
+// ---------------------------------------------------------------------------
+
+test('a DoT ticking after a succor opens no phantom encounter', () => {
+  const p = makeParser();
+  p.feed(`${D(0, 25, 42)} You slash Magi P\`tasa for 42 points of damage.`);
+  p.feed(`${D(0, 26, 22)} You have entered The Plane of Hate - Group 1 (Awakened).`);
+  assert.equal(p.snapshot(T(0, 26, 22)).active, false);
+
+  // The mob is in a room the group fled; its DoT keeps landing every six seconds.
+  p.feed(`${D(0, 26, 28)} Rhain has taken 124 damage from Wrath of the Elements by Magi P\`tasa.`);
+  p.feed(`${D(0, 26, 34)} Rhain has taken 124 damage from Wrath of the Elements by Magi P\`tasa.`);
+
+  const snap = p.snapshot(T(0, 26, 34));
+  assert.equal(snap.active, false, 'no fight against something nobody is fighting');
+  assert.equal(snap.label, 'Magi P`tasa', 'the CLOSED fight is still the one on screen');
+  assert.equal(snap.totalDamageTaken, 0, 'and the ticks joined nothing');
+});
+
+test('a DoT tick inside a live fight still scores and still extends it', () => {
+  const p = makeParser({ timeoutMs: 15_000 });
+  p.feed(`${D(0, 25, 42)} You slash Magi P\`tasa for 42 points of damage.`);
+  p.feed(`${D(0, 25, 52)} Rhain has taken 124 damage from Wrath of the Elements by Magi P\`tasa.`);
+
+  const snap = p.snapshot(T(0, 25, 55));
+  assert.equal(snap.active, true);
+  assert.equal(snap.totalDamageTaken, 124);
+  // 10s past the last swing: without the tick's extension this would have timed out.
+  p.tick(T(0, 26, 5));
+  assert.equal(p.snapshot(T(0, 26, 5)).active, true);
 });
 
 // ---------------------------------------------------------------------------

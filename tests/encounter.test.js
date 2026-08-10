@@ -180,6 +180,47 @@ test('an add still alive keeps the encounter open past the kill', () => {
   assert.equal(enc.closed, false);
 });
 
+test('a mob that has gone quiet stops blocking the all-slain close', () => {
+  // The mob the group evacuated away from never dies, so aliveNpcs used to keep it
+  // forever and the fight could only ever end on the idle timeout — merging every
+  // pull chained inside 15s into one eight-minute encounter.
+  const enc = new Encounter(s(0), { postKillGraceMs: 3000, npcStaleMs: 60_000 });
+  enc.engage('Magi P`tasa', 100, s(0));
+  hit(enc, 'Rhale', 100, 0);
+
+  enc.engage('an ashenbone drake', 500, s(40));
+  hit(enc, 'Rhale', 500, 40);
+  enc.npcDied('an ashenbone drake', s(42));
+  assert.equal(enc.update(s(46)), false, 'the fled mob is still inside its window');
+
+  enc.engage('an ashenbone drake', 500, s(80));
+  hit(enc, 'Rhale', 500, 80);
+  enc.npcDied('an ashenbone drake', s(82));
+  // Magi P`tasa has now been silent for 83s, so it is gone and the pull is over.
+  assert.equal(enc.update(s(83)), false, 'the post-kill grace still applies');
+  assert.equal(enc.update(s(86)), true);
+  assert.equal(enc.closeReason, 'killed');
+});
+
+test('an NPC still inside the staleness window keeps blocking the close', () => {
+  // Why the window is a full minute: a mezzed add is silent for exactly this reason,
+  // and dropping it early would close the fight on the primary's death and open a
+  // second one when the mez broke — splitting one pull in two.
+  const enc = new Encounter(s(0), { timeoutMs: 600_000, postKillGraceMs: 3000, npcStaleMs: 60_000 });
+  enc.engage('a mezzed add', 0, s(0));
+  enc.engage('froglok king', 100, s(0));
+  hit(enc, 'Rhale', 100, 0);
+  enc.npcDied('froglok king', s(2));
+
+  assert.equal(enc.update(s(50)), false);
+  assert.equal(enc.aliveNpcs.has('a mezzed add'), true, '50s of silence is still a mez');
+
+  assert.equal(enc.update(s(64)), false, 'dropped at 60s, then the usual grace');
+  assert.equal(enc.aliveNpcs.size, 0);
+  assert.equal(enc.update(s(67)), true);
+  assert.equal(enc.closeReason, 'killed');
+});
+
 test('the label is whichever mob took the most damage', () => {
   const enc = new Encounter(s(0));
   enc.engage('froglok shin knight', 50);

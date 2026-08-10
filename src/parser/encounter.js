@@ -25,6 +25,21 @@ export const DEFAULTS = {
   postKillGraceMs: 3 * SECOND,
   /** Width of the burst-DPS window shown beside the headline number. */
   rollingWindowMs: 10 * SECOND,
+  /**
+   * An engaged NPC silent in both directions for this long stops counting as alive.
+   *
+   * Mobs leave a fight without dying — the group evacuates, the mob flees, it is
+   * feared out of range — and `aliveNpcs` used to drain only through a death line, so
+   * one of those blocked the all-slain close for the rest of the encounter. The fight
+   * could then end only on the 15s idle timeout, and any pull chained inside 15s
+   * merged into it; one measured post-evac encounter ran eight minutes that way.
+   *
+   * 60s, and the floor is what sets it: it has to be longer than a mezzed add's
+   * silence, or killing the primary would close the fight and the add breaking mez
+   * would open a second one, splitting one pull in two. That is comfortably past a
+   * mez tick and still far short of the merge this exists to prevent.
+   */
+  npcStaleMs: 60 * SECOND,
 };
 
 function newCombatant(name) {
@@ -113,8 +128,13 @@ export class Encounter {
      * @type {Map<string, number>}
      */
     this.engagedNpcs = new Map();
-    /** NPCs believed to still be up; drained by npcDied. @type {Set<string>} */
-    this.aliveNpcs = new Set();
+    /**
+     * NPCs believed to still be up, mapped to when they were last part of the fight.
+     * Drained by npcDied, and by going quiet for `npcStaleMs` — a mob that left is not
+     * a mob you are still fighting.
+     * @type {Map<string, number>}
+     */
+    this.aliveNpcs = new Map();
     /** Set when the last engaged NPC dies; cleared if damage resumes. */
     this.allSlainAt = null;
     this.totalDamage = 0;
@@ -367,10 +387,20 @@ export class Encounter {
     this.deaths.push({ name, killer: killer ?? null, ts, isPet: Boolean(isPet) });
   }
 
-  /** Note that an NPC is part of this fight, for the encounter label and end detection. */
-  engage(npcName, damage = 0) {
+  /**
+   * Note that an NPC is part of this fight, for the encounter label and end detection.
+   *
+   * Every line that scores in either direction calls this first — the outgoing path
+   * with the target, the incoming path with the attacker — so the timestamp here is
+   * the whole liveness signal that `dropStaleNpcs` reads. `engagedNpcs` is never
+   * pruned by any of it: the fight must still be able to name every mob that was in
+   * it, long after the last of them is dead or gone.
+   *
+   * @param {number} [ts] when this NPC was last seen fighting; defaults to fight time
+   */
+  engage(npcName, damage = 0, ts = this.lastDamageTs) {
     this.engagedNpcs.set(npcName, (this.engagedNpcs.get(npcName) ?? 0) + damage);
-    this.aliveNpcs.add(npcName);
+    this.aliveNpcs.set(npcName, ts);
     this.allSlainAt = null;
   }
 
@@ -382,6 +412,26 @@ export class Encounter {
   }
 
   /**
+   * Forget NPCs that have been silent long enough to have left the fight.
+   *
+   * Arms the post-kill grace exactly as the last death line does, because the two are
+   * the same fact arriving by different routes: nothing the group engaged is still
+   * here. The grace period then does its usual job of waiting to be contradicted.
+   */
+  dropStaleNpcs(now) {
+    if (this.aliveNpcs.size === 0) return;
+    let dropped = false;
+    for (const [name, lastSeen] of this.aliveNpcs) {
+      if (now - lastSeen < this.opts.npcStaleMs) continue;
+      this.aliveNpcs.delete(name);
+      dropped = true;
+    }
+    if (dropped && this.aliveNpcs.size === 0 && this.allSlainAt === null) {
+      this.allSlainAt = now;
+    }
+  }
+
+  /**
    * Advance encounter time and close it if it is over.
    * @param {number} now current time in ms (log time while feeding, wall clock while idle)
    * @returns {boolean} true if the encounter closed on this call
@@ -389,6 +439,8 @@ export class Encounter {
   update(now) {
     if (this.closed) return false;
     const t = Math.max(now, this.lastDamageTs);
+
+    this.dropStaleNpcs(t);
 
     if (this.allSlainAt !== null && t - this.allSlainAt >= this.opts.postKillGraceMs) {
       this.close('killed', this.lastDamageTs);

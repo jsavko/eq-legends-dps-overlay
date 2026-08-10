@@ -161,6 +161,7 @@ export class LogParser {
       timeoutMs: options.timeoutMs ?? DEFAULTS.timeoutMs,
       postKillGraceMs: options.postKillGraceMs ?? DEFAULTS.postKillGraceMs,
       rollingWindowMs: options.rollingWindowMs ?? DEFAULTS.rollingWindowMs,
+      npcStaleMs: options.npcStaleMs ?? DEFAULTS.npcStaleMs,
     };
 
     this.onEncounterEnd = options.onEncounterEnd ?? null;
@@ -388,6 +389,14 @@ export class LogParser {
    * structural and handled by entities.js. A *named* summoned pet — "Gann" — carries
    * no such marker, so it is looked up in the roster's ownership table, which is fed
    * by the pet-calls-you-Master line and by the user's settings.
+   *
+   * This is also where the two backtick judgements entities.js cannot make get made,
+   * because they need the roster and entities.js is deliberately table-free. A
+   * capitalized possessive (`properPossessive`) folds only when the owner has real
+   * player proof, so `Rhale`s Warder` still lands on Rhale while `Innoruuk`s Chosen`
+   * stays the mob it is. And a backtick entity already proven hostile by its own
+   * actions stops folding at all — proof of what something DID outranks the shape of
+   * how it is spelled, here as everywhere else.
    */
   /**
    * @param {string} raw
@@ -399,7 +408,20 @@ export class LogParser {
    */
   resolve(raw, acting = false) {
     const entity = resolveEntity(raw, this.selfName);
-    if (entity.isPet) return entity;
+
+    if (entity.isPet) {
+      if (!this.roster.isHostileByAction(entity.display)) return entity;
+      // Caught trading blows with the group under its own name: not a pet at all,
+      // whatever its spelling, and its owner is somebody who never existed.
+      return { name: entity.display, owner: null, isPet: false, display: entity.display };
+    }
+
+    if (entity.properPossessive && !this.roster.isHostileByAction(entity.display)) {
+      const { owner } = entity.properPossessive;
+      if (this.roster.hasPlayerProof(owner)) {
+        return { name: owner, owner, isPet: true, display: entity.display };
+      }
+    }
 
     const firstSight = entity.name !== '' && !this.seenNames.has(entity.name);
     if (entity.name) this.seenNames.add(entity.name);
@@ -535,7 +557,7 @@ export class LogParser {
     if (attackerFriendly) {
       this.roster.noteFriendlyCombatant(attacker.name);
       const enc = this.ensureEncounter(event.ts);
-      enc.engage(target.name, event.amount);
+      enc.engage(target.name, event.amount, event.ts);
       enc.addDamage({
         name: attacker.name,
         amount: event.amount,
@@ -558,12 +580,26 @@ export class LogParser {
         this.resolveHostileCast(attacker.display, event.ability);
       }
 
+      // A DoT already ticking on you is not proof that a fight is on. This is the
+      // succor case: evacuate out of Plane of Hate and Wrath of the Elements keeps
+      // landing every six seconds from a mob in a room you have left, opening a fresh
+      // encounter labelled with its name and zero outgoing damage — the meter showing
+      // a fight against something the group fled and never went back to. Same
+      // principle as the fall-damage rule in handleUnattributed: damage arriving with
+      // nobody swinging at anybody does not start a pull. The outgoing side keeps its
+      // power to open one, and the asymmetry is deliberate — a DoT YOU cast is a
+      // choice you made, and is very often the first damage line of a pull.
+      //
+      // It still scores and still extends an encounter that is already running: a DoT
+      // ticking on the tank mid-fight is exactly what the damage-taken view is for.
+      if (event.source === 'dot' && (!this.current || this.current.closed)) return;
+
       // An NPC hitting us means a fight is on — and the incoming side is scored too:
       // the victim's row records who hit them and with what, which is the entire
       // "what is killing me" view. addDamageTaken also keeps the encounter clock
       // running, exactly as outgoing damage does.
       const enc = this.ensureEncounter(event.ts);
-      enc.engage(attacker.name, 0);
+      enc.engage(attacker.name, 0, event.ts);
       enc.addDamageTaken({
         name: target.name,
         // The resolved name, not the raw one, so "A froglok" and "a froglok" collapse
@@ -623,15 +659,26 @@ export class LogParser {
     return false;
   }
 
-  /** Mark whichever side of a friendly-fire line is not a confirmed member as hostile. */
+  /**
+   * Mark whichever side of a friendly-fire line is not a confirmed member as hostile.
+   *
+   * A pet resolves to its OWNER, and branding the owner an enemy on the strength of
+   * their pet's swing is exactly what must never happen — which is why this used to
+   * skip a pet-shaped side outright. That blanket skip is what left `Innoruuk`s
+   * Chosen` friendly for eight minutes with no way back: the shape rule had already
+   * decided it was somebody's pet, and the one mechanism that corrects a bad identity
+   * refused to look at it. So a pet-shaped side is now markable BY ITS DISPLAY NAME —
+   * never by its owner — and only when that owner has no player proof. A real
+   * warder's owner has proof (they talk, they group, they are the logging character),
+   * so the guard the skip existed for is still exactly as strong.
+   */
   markHostileFromDamage(attacker, target) {
     for (const [side, other] of [[attacker, target], [target, attacker]]) {
-      // A pet resolves to its OWNER, so marking here would brand the owner an enemy.
-      if (side.isPet) continue;
+      if (side.isPet && this.roster.hasPlayerProof(side.owner)) continue;
       if (!this.roster.isConfirmedMember(other.name)) continue;
       if (this.roster.isConfirmedMember(side.name)) continue;
       if (this.roster.knownPlayers.has(side.name)) continue;
-      if (this.roster.noteHostileByAction(side.name)) {
+      if (this.roster.noteHostileByAction(side.isPet ? side.display : side.name)) {
         this.revision++;
         return true;
       }
@@ -904,7 +951,7 @@ export class LogParser {
     const attribution = this.attributeNonMelee(event.ts);
     if (attribution) this.roster.noteFriendlyCombatant(attribution.name);
 
-    enc.engage(target.name, event.amount);
+    enc.engage(target.name, event.amount, event.ts);
     enc.addDamage({
       name: attribution?.name ?? UNKNOWN,
       amount: event.amount,

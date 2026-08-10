@@ -2,15 +2,31 @@
  * Entity naming: normalizing "You", resolving pets to their owner, and guessing
  * whether a name is a player or an NPC.
  *
- * The pet rule is the single biggest simplification available in EQ Legends logs:
- * pets are always written `<Owner>`s <pettype>` with a BACKTICK, e.g.
- *   Rhale`s warder      Fuaim`s warder      Someone`s pet
- * so ownership is a string split — no pet-name tracking table is needed.
- * We match the backtick generically rather than enumerating warder/pet/familiar/ward.
+ * Pets are written `<Owner>`s <pettype>` with a BACKTICK — Rhale`s warder,
+ * Fuaim`s warder, Someone`s pet — so ownership is usually a string split and no
+ * pet-name tracking table is needed. That split used to be unconditional, and
+ * that was a real bug rather than a simplification: EQ writes proper names with
+ * the same punctuation, so `Innoruuk`s Chosen` folded into a combatant called
+ * "Innoruuk", which is a single capitalized token, which looksLikePlayerName
+ * calls a player, which made an entire Plane of Hate boss FRIENDLY. Every line in
+ * either direction then read as friendly fire and was silently dropped — 409,749
+ * outgoing damage, 95,983 incoming and 105 hostile casts across the live log,
+ * scored and warned nothing at all.
+ *
+ * So the split is now two-tier, and the tiers use the game's own distinction:
+ *
+ *   lowercase noun  ->  a generic possession, i.e. a pet     (`Rhale`s warder`)
+ *   Capitalized     ->  part of a proper name, kept whole    (`Innoruuk`s Chosen`)
+ *
+ * Capitalization is a shape rule and shape rules are what produced the bug, so the
+ * attempted split is REPORTED rather than discarded: `properPossessive` hands the
+ * owner and noun to the parser, which — unlike this file — can see the roster and
+ * fold `Rhale`s Warder` into Rhale on the strength of Rhale's proven standing.
+ * Shape lives here, evidence lives there.
  */
 
-/** Backtick-possessive, e.g. "Rhale`s warder" -> owner "Rhale". */
-const PET_RE = /^(.+?)`s\s+(.+)$/;
+/** Backtick-possessive of any kind, e.g. "Rhale`s warder", "Innoruuk`s Chosen". */
+const POSSESSIVE_RE = /^(.+?)`s\s+(.+)$/;
 
 /** Leading article marks a generic NPC: "a froglok shin knight", "The Ancient One". */
 const ARTICLE_RE = /^(a|an|the)\s+/i;
@@ -37,10 +53,13 @@ export function isSelfToken(name) {
  *
  * @param {string} raw          name exactly as it appeared in the log
  * @param {string} selfName     the logging character, from the log filename
- * @returns {{ name: string, owner: string|null, isPet: boolean, display: string }}
+ * @returns {{ name: string, owner: string|null, isPet: boolean, display: string,
+ *             properPossessive?: {owner: string, noun: string} }}
  *   `name`  — canonical key: for a pet this is the OWNER, so damage folds into them
  *   `owner` — owner name when this is a pet, else null
  *   `display` — human-readable label for the original entity
+ *   `properPossessive` — the split we DECLINED to make, on a capitalized noun; the
+ *     parser may still act on it if the roster proves the owner is a real player
  */
 export function resolveEntity(raw, selfName) {
   const trimmed = String(raw).trim();
@@ -49,12 +68,25 @@ export function resolveEntity(raw, selfName) {
     return { name: selfName, owner: null, isPet: false, display: selfName };
   }
 
-  const pet = PET_RE.exec(trimmed);
-  if (pet) {
-    const ownerRaw = pet[1].trim();
+  const possessive = POSSESSIVE_RE.exec(trimmed);
+  if (possessive) {
+    const ownerRaw = possessive[1].trim();
+    const noun = possessive[2].trim();
     // "You`s pet" never occurs, but "Yourself`s" style forms are cheap to guard.
     const owner = isSelfToken(ownerRaw) ? selfName : ownerRaw;
-    return { name: owner, owner, isPet: true, display: trimmed };
+
+    // A generic noun is a possession; a proper one is part of a name. Every real pet
+    // in the live log is lowercase and every non-pet — mob or item — is capitalized.
+    if (/^[a-z]/.test(noun)) {
+      return { name: owner, owner, isPet: true, display: trimmed };
+    }
+    return {
+      name: trimmed,
+      owner: null,
+      isPet: false,
+      display: trimmed,
+      properPossessive: { owner, noun },
+    };
   }
 
   const bare = stripArticle(trimmed);

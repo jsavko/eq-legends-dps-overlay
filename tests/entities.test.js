@@ -32,6 +32,28 @@ test('matches the backtick generically, not a list of pet types', () => {
   }
 });
 
+test('a backtick in a proper NAME is not a pet possessive', () => {
+  // The Plane of Hate boss. Split unconditionally it became a combatant called
+  // "Innoruuk" — a single capitalized token, i.e. a player by the name heuristic —
+  // and eight minutes of fighting it scored nothing in either direction.
+  const e = resolveEntity('Innoruuk`s Chosen', 'Rhale');
+  assert.equal(e.isPet, false);
+  assert.equal(e.owner, null);
+  assert.equal(e.name, 'Innoruuk`s Chosen', 'the mob keeps its whole name');
+  assert.equal(e.display, 'Innoruuk`s Chosen');
+});
+
+test('the declined split is reported rather than thrown away', () => {
+  // Capitalization is a shape rule, and shape rules are what caused this bug — so the
+  // parser, which can see the roster, gets the evidence to overrule it.
+  const e = resolveEntity('Rhale`s Warder', 'Rhale');
+  assert.deepEqual(e.properPossessive, { owner: 'Rhale', noun: 'Warder' });
+  const mob = resolveEntity('Innoruuk`s Chosen', 'Rhale');
+  assert.deepEqual(mob.properPossessive, { owner: 'Innoruuk', noun: 'Chosen' });
+  // A real pet needs none of it: the split already happened.
+  assert.equal(resolveEntity('Rhale`s warder', 'Rhale').properPossessive, undefined);
+});
+
 test('collapses the two spellings of the same mob onto one key', () => {
   // EQ capitalizes the article at the start of a sentence and lowercases it mid-sentence.
   assert.equal(resolveEntity('A froglok shin knight', 'Rhale').name, 'froglok shin knight');
