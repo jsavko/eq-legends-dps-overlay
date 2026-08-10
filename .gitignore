@@ -5,3 +5,6 @@ unknown-lines.txt
 *.log.bak
 .DS_Store
 Thumbs.db
+
+# Headless renderer verification screenshots — regenerated on demand, never shipped.
+.verify/

@@ -84,6 +84,20 @@ export function pct(fraction) {
   return p < 1 ? '<1%' : `${Math.round(p)}%`;
 }
 
+/**
+ * Accuracy, which is a share but must NOT go through `pct`.
+ *
+ * `pct` turns anything at or below zero into a dash, on the reasoning that a zero share is
+ * a rounding artefact rather than news. Accuracy is the opposite: an ability that swung
+ * and never landed is a real 0% and the most worth-reading row in the table, while one
+ * that never swung has nothing to divide and is the case the dash is actually for.
+ * `abilityAccuracy` draws that line and hands null here for the second.
+ */
+export function accPct(fraction) {
+  if (fraction === null || !Number.isFinite(fraction)) return '—';
+  return `${Math.round(fraction * 100)}%`;
+}
+
 export function formatRate(n) {
   if (!Number.isFinite(n)) return '0';
   if (n >= 10_000) return `${(n / 1000).toFixed(1)}k`;

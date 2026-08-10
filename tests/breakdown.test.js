@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { abilityColumns, splitShares } from '../src/renderer/overlay/breakdown.js';
+import { abilityAccuracy, abilityColumns, splitShares } from '../src/renderer/overlay/breakdown.js';
 
 // The real case that motivated this: Rhale's 19-ability row from the live log.
 // One 24px row-height column is 456px tall.
@@ -67,4 +67,36 @@ test('splitShares is null when there is nothing to split', () => {
 test('splitShares gives a petless player 100/0, and a pet-only total 0/100', () => {
   assert.deepEqual(splitShares(5000, 0), { playerPct: 100, petPct: 0 });
   assert.deepEqual(splitShares(0, 5000), { playerPct: 0, petPct: 100 });
+});
+
+test('abilityAccuracy divides hits by swings', () => {
+  // The screenshot that started this: "Slash 2/3" is two of three swings.
+  assert.equal(abilityAccuracy(2, 1), 2 / 3);
+  assert.equal(abilityAccuracy(1, 1), 0.5);
+});
+
+test('abilityAccuracy is 1 for an ability that never missed', () => {
+  // Every spell and DoT tick lands here — they cannot miss, so the column reads 100%
+  // for a caster's whole list. Uniform, but true.
+  assert.equal(abilityAccuracy(4, 0), 1);
+});
+
+test('abilityAccuracy is a real zero when everything missed, never null', () => {
+  // The one row most worth reading in the list, and the reason this cannot reuse the
+  // share formatters — they dash out anything <= 0.
+  assert.equal(abilityAccuracy(0, 2), 0);
+});
+
+test('abilityAccuracy is null when there were no swings at all', () => {
+  // Heals, DoT ticks and taken-view rows carry no swing count; a fabricated 0% there
+  // would read as "this always whiffs".
+  assert.equal(abilityAccuracy(0, 0), null);
+});
+
+test('abilityAccuracy is null on nonsense or missing input', () => {
+  // Records written before per-ability misses existed arrive with `undefined`.
+  assert.equal(abilityAccuracy(3, undefined), null);
+  assert.equal(abilityAccuracy(undefined, 1), null);
+  assert.equal(abilityAccuracy(NaN, 2), null);
+  assert.equal(abilityAccuracy(2, -1), null);
 });

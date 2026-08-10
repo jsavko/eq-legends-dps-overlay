@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isBoss, applyFilters, groupByDay, dayLabel,
-  pct, formatRate, formatDuration,
+  pct, accPct, formatRate, formatDuration,
 } from '../src/renderer/history/organize.js';
 
 /** Local noon, so timezone offsets can never push a fixture across midnight. */
@@ -105,6 +105,15 @@ test('pct: dash at zero, floor at <1%, rounded above', () => {
   assert.equal(pct(0), '—');
   assert.equal(pct(0.004), '<1%');
   assert.equal(pct(0.42), '42%');
+});
+
+test('accPct: prints a real zero, dashes only when there is nothing to divide', () => {
+  // The whole reason accuracy cannot go through pct — an ability that swung and never
+  // landed is 0%, not a dash, and not "<1%".
+  assert.equal(accPct(0), '0%');
+  assert.equal(accPct(null), '—');
+  assert.equal(accPct(2 / 3), '67%');
+  assert.equal(accPct(1), '100%');
 });
 
 test('formatRate: decimals small, whole mid, k above ten thousand', () => {

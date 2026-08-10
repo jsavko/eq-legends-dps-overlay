@@ -514,6 +514,14 @@ body[data-panel="above"] #detail {
 }
 #d-sources b,
 #d-types b { color: var(--ink); font-weight: 500; }
+/*
+ * The same trap `#session-line[hidden]` above documents: `display: flex` beats the user
+ * agent's `[hidden] { display: none }`, so renderDetail's `dTypes.hidden = true` painted
+ * nothing at all. Once the taken view had filled this row, its resist chips stayed on
+ * screen under the damage and healing breakdowns — numbers about a fight the panel was no
+ * longer describing, which is the one thing the breakdown must never do.
+ */
+#d-types[hidden] { display: none; }
 /* The resist tag: "fire 3,231 FR" — the actionable part, so it gets the accent. */
 #d-types .resist { color: var(--ember-lit); font-weight: 500; }
 
@@ -531,19 +539,22 @@ body[data-panel="above"] #detail {
   padding: 0;
   font-size: 0.8em;
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto;
   column-gap: 0.5em;
   row-gap: 1px;
 }
 /*
  * The multi-column fallback: when one column of rows would outgrow the screen, the
- * whole four-track group is repeated per column. Items are placed EXPLICITLY by
+ * whole five-track group is repeated per column. Items are placed EXPLICITLY by
  * overlay.js (inline grid-row/grid-column) — the `1 / -1` span below would otherwise
  * stack everything back into one full-width column — and column-major, so the ranking
  * still reads top-to-bottom the way the one-column list always has.
+ *
+ * Five tracks, matching ABILITY_TRACKS in overlay.js, which strides by that number when
+ * it places a row into column n. The two cannot be allowed to drift.
  */
-#d-abilities[data-cols="2"] { grid-template-columns: repeat(2, 1fr auto auto auto); }
-#d-abilities[data-cols="3"] { grid-template-columns: repeat(3, 1fr auto auto auto); }
+#d-abilities[data-cols="2"] { grid-template-columns: repeat(2, 1fr auto auto auto auto); }
+#d-abilities[data-cols="3"] { grid-template-columns: repeat(3, 1fr auto auto auto auto); }
 /* A breath between columns, so the last number of one and the name of the next
    cannot read as one row. */
 #d-abilities li[data-col]:not([data-col="0"]) { margin-left: 0.6em; }
@@ -588,7 +599,10 @@ body[data-panel="above"] #detail {
 }
 #d-abilities .a-dmg,
 #d-abilities .a-pct,
-#d-abilities .a-hits {
+#d-abilities .a-acc,
+#d-abilities .a-over,
+#d-abilities .a-hits,
+#d-abilities .a-resist {
   position: relative;   /* above the ::before fill */
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -596,8 +610,36 @@ body[data-panel="above"] #detail {
 /* Track floors, so a column does not resize under the eye mid-fight as its widest cell
    grows — a share crossing 9% -> 10%, or damage crossing 999 -> 1,004. */
 #d-abilities .a-dmg { min-width: 3em; }
+#d-abilities .a-over { min-width: 3em; color: var(--ink-faint); }
 #d-abilities .a-pct { min-width: 2.6em; color: var(--ink-dim); }
-#d-abilities .a-hits { color: var(--ink-faint); }
+/* Accuracy and the hit count are the derived pair — which attack is whiffing, and how
+   much it swung — so they read one step behind the damage they explain. */
+#d-abilities .a-acc { min-width: 2.6em; color: var(--ink-faint); }
+#d-abilities .a-hits { min-width: 2em; color: var(--ink-faint); }
+#d-abilities .a-resist { min-width: 2.6em; color: var(--ink-faint); }
+
+/*
+ * The caption row, after the History window's `.b-table li.cols` — the same table in the
+ * other window has been headed all along, and a player should not have to learn two
+ * readings of one list.
+ *
+ * Small and letter-spaced for a reason beyond taste: these cells are grid items in the
+ * same subgrid as the numbers, so they SIZE THE TRACKS. At body size an uppercase
+ * "OVERHEAL" would be wider than any overheal figure under it and would widen that column
+ * for every row. Short labels and a small caption font are what keep the header free.
+ *
+ * No fill bar: the ::before is the ability's damage bar, and a caption has no damage.
+ */
+#d-abilities li.cols {
+  font-size: 0.72em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding-bottom: 0.2em;
+}
+#d-abilities li.cols::before { display: none; }
+#d-abilities li.cols span { text-align: right; }
+#d-abilities li.cols .c-name { text-align: left; }
 
 /* ----------------------------------------------------------------- footer */
 

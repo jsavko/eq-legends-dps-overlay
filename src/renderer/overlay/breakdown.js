@@ -48,6 +48,33 @@ export function splitShares(playerValue, petValue) {
   return { playerPct: 100 - petPct, petPct };
 }
 
+/**
+ * One ability's accuracy, as a fraction — hits over swings.
+ *
+ * Returns NULL rather than 0 when there is nothing to divide. An ability row can exist
+ * with neither a hit nor a miss against it (a heal, a DoT tick, a taken-view row carrying
+ * no swing data at all), and printing `0%` there would say "this always whiffs" about a
+ * thing that never swung. The caller shows a dash instead.
+ *
+ * A genuine zero — swung twice, landed nothing — must still come back as 0 and print as
+ * `0%`, which is why this cannot be folded into the share formatters: both `formatShare`
+ * here and `pct` in the history window turn anything <= 0 into a dash, and an ability that
+ * misses every time is the single most worth-knowing row in the list.
+ *
+ * @param {number} hits
+ * @param {number} misses
+ * @returns {number | null} 0..1, or null when there were no swings
+ */
+export function abilityAccuracy(hits, misses) {
+  // Records written before per-ability misses were tracked simply have no answer here,
+  // and neither does anything nonsensical — a dash beats a fabricated number.
+  if (!Number.isFinite(hits) || !Number.isFinite(misses)) return null;
+  if (hits < 0 || misses < 0) return null;
+  const swings = hits + misses;
+  if (swings <= 0) return null;
+  return hits / swings;
+}
+
 export function abilityColumns({ count, rowHeight, available, maxColumns = 3 }) {
   if (!Number.isFinite(count) || count <= 0) return 1;
   if (!Number.isFinite(rowHeight) || rowHeight <= 0) return 1;

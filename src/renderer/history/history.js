@@ -9,8 +9,12 @@
 
 import {
   isBoss, applyFilters, groupByDay,
-  pct, formatRate, formatDuration, timeOfDay, shortDate,
+  pct, accPct, formatRate, formatDuration, timeOfDay, shortDate,
 } from './organize.js';
+// The overlay's pure half. Both windows describe the same fight, so both derive accuracy
+// the same way — one of them knowing which attack whiffs and the other not is the kind of
+// quiet divergence that makes a player distrust the pair.
+import { abilityAccuracy } from '../overlay/breakdown.js';
 
 const $ = (id) => document.getElementById(id);
 const SKULL = '☠';
@@ -435,7 +439,9 @@ function damageBreakdown(r) {
     `${(r.procDamage ?? 0).toLocaleString()} proc`,
   ]);
   return [head, heading('Abilities'), table(
-    ['ability', 'damage', 'share', 'hits', 'crits', 'max'],
+    // Accuracy sits beside the counts it is made of. Records written before per-ability
+    // misses were tracked have no answer and print a dash rather than a flattering 100%.
+    ['ability', 'damage', 'share', 'hits', 'crits', 'acc', 'max'],
     r.abilities.map((a) => ({
       bar: a.damage,
       cells: [
@@ -444,6 +450,7 @@ function damageBreakdown(r) {
         dim(pct(r.damage > 0 ? a.damage / r.damage : 0)),
         dim(String(a.hits)),
         dim(String(a.crits)),
+        dim(accPct(abilityAccuracy(a.hits, a.misses))),
         a.max.toLocaleString(),
       ],
     }))

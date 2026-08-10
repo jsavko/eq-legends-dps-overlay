@@ -12,7 +12,7 @@
  *    every push would restart every animation and make the bars stutter.
  */
 
-import { abilityColumns, splitShares } from './breakdown.js';
+import { abilityAccuracy, abilityColumns, splitShares } from './breakdown.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -540,11 +540,19 @@ function renderDamageDetail(row) {
   // EVERY ability, never a top-N slice. The parser was credited with the damage; a
   // breakdown that hides the bottom of the list reads as damage gone missing — DoTs
   // sort low per-tick and were exactly what vanished.
+  //
+  // Accuracy and the hit count both earn a column because they answer different
+  // questions: which attack is dragging the member-level accuracy down, and how much
+  // that attack actually swung. The old `2/3` cell answered neither on its own.
   setAbilities(row.abilities, {
     value: (a) => a.damage,
-    // Of this member's own total, pet included — so the full list sums to 100% for them.
-    share: (a) => (row.damage > 0 ? a.damage / row.damage : 0),
-    detail: (a) => (a.misses > 0 ? `${a.hits}/${a.hits + a.misses}` : `${a.hits}`),
+    columns: [
+      // Of this member's own total, pet included — so the full list sums to 100% for them.
+      { label: '%dmg', className: 'a-pct', cell: (a) => formatShare(row.damage > 0 ? a.damage / row.damage : 0) },
+      { label: 'dmg', className: 'a-dmg', cell: (a) => a.damage.toLocaleString() },
+      { label: 'acc', className: 'a-acc', cell: (a) => formatAccuracy(abilityAccuracy(a.hits, a.misses)) },
+      { label: 'hits', className: 'a-hits', cell: (a) => String(a.hits) },
+    ],
   });
 }
 
@@ -569,12 +577,19 @@ function renderHealDetail(row) {
 
   setChips(row.healTargets.map((t) => [t.name, t.healing.toLocaleString()]));
 
+  // No accuracy column here: heals do not miss. The spare column goes to overhealing,
+  // which was a rider on the cast count and is a fact in its own right — the whole
+  // question this view asks is whether the heal was needed.
   setAbilities(row.healAbilities, {
     value: (a) => a.healing,
-    // Of what LANDED, matching the hps figure above it. A healer whose every point was
-    // overheal divides by zero here and gets a dash, which is the honest reading.
-    share: (a) => (row.healing > 0 ? a.healing / row.healing : 0),
-    detail: (a) => (a.overhealing > 0 ? `${a.casts} · ${a.overhealing} over` : `${a.casts}`),
+    columns: [
+      // Of what LANDED, matching the hps figure above it. A healer whose every point was
+      // overheal divides by zero here and gets a dash, which is the honest reading.
+      { label: '%heal', className: 'a-pct', cell: (a) => formatShare(row.healing > 0 ? a.healing / row.healing : 0) },
+      { label: 'healed', className: 'a-dmg', cell: (a) => a.healing.toLocaleString() },
+      { label: 'overheal', className: 'a-over', cell: (a) => a.overhealing.toLocaleString() },
+      { label: 'casts', className: 'a-hits', cell: (a) => String(a.casts) },
+    ],
   });
 }
 
@@ -600,13 +615,29 @@ function renderTakenDetail(row) {
   setChips(row.attackers.map((a) => [a.name, a.damage.toLocaleString()]));
   setTypeChips(row.takenByType ?? {});
 
+  // Incoming abilities carry no swing count of their own — misses are recorded against
+  // the member, not against the thing that swung — so there is no accuracy to show. The
+  // column goes to the resist instead, which answers "what would have helped" right on
+  // the ability that hurt, and which used to ride inside the hits cell as "17 · FR".
   setAbilities(row.takenAbilities, {
     value: (a) => a.damage,
-    share: (a) => (row.damageTaken > 0 ? a.damage / row.damageTaken : 0),
-    // The resist tag rides in the detail column: "17 · FR" answers "what would have
-    // helped" right on the ability that hurt.
-    detail: (a) => (RESIST[a.type] ? `${a.hits} · ${RESIST[a.type]}` : `${a.hits}`),
+    columns: [
+      { label: '%taken', className: 'a-pct', cell: (a) => formatShare(row.damageTaken > 0 ? a.damage / row.damageTaken : 0) },
+      { label: 'taken', className: 'a-dmg', cell: (a) => a.damage.toLocaleString() },
+      { label: 'hits', className: 'a-hits', cell: (a) => String(a.hits) },
+      { label: 'resist', className: 'a-resist', cell: (a) => resistCell(a.type) },
+    ],
   });
+}
+
+/**
+ * What resists this, as a cell. Melee is mitigated by armor rather than by a resist, and
+ * an unstated type gets a dash — the log did not say, so neither do we. Same wording as
+ * the History window's resist column, because the two describe the same fight.
+ */
+function resistCell(type) {
+  if (RESIST[type]) return RESIST[type];
+  return type === 'melee' ? 'armor' : '—';
 }
 
 /**
@@ -676,17 +707,40 @@ function setChips(pairs) {
 }
 
 /**
- * The ability list. `share` is the row's fraction of the member's own total — printed as a
- * number, NOT as the bar, which stays normalized to the member's largest ability so it keeps
- * ranking them legibly even when the top one is only a fifth of their output.
+ * The ability list: a name and FOUR labelled numbers, headed by a caption row.
+ *
+ * Every column carries exactly one fact, and that is the whole design. The fourth cell
+ * used to be a compound "detail" whose meaning moved per view and per row — `2/3` here,
+ * `3 · 120 over` there, `17 · FR` in the taken view — which is precisely why the table
+ * could not be headed: no single word captions "hits, sometimes over swings, sometimes
+ * with an overheal". A player was left to infer what the third number meant, and the
+ * sibling History window, showing the same fight, had captions all along.
+ *
+ * `value` still stands apart from the columns because it is not a column: it feeds the
+ * background bar, normalized to the member's LARGEST ability so the list ranks at a
+ * glance even when the top ability is a fifth of their output. The share of the total is
+ * a column of its own.
+ *
+ * No header over an empty list — a caption above nothing is noise, and the overlay pays
+ * for every pixel it takes from the game.
  */
-function setAbilities(list, { value, detail, share }) {
-  const best = list.length > 0 ? value(list[0]) || 1 : 1;
+function setAbilities(list, { value, columns }) {
+  if (list.length === 0) {
+    els.dAbilities.replaceChildren();
+    return;
+  }
+
+  const head = document.createElement('li');
+  head.className = 'cols';
+  head.append(headerCell('ability', 'c-name'), ...columns.map((c) => headerCell(c.label)));
+
+  const best = value(list[0]) || 1;
   els.dAbilities.replaceChildren(
+    head,
     ...list.map((a) => {
       const li = document.createElement('li');
       li.dataset.pet = String(Boolean(a.pet));   // taken abilities carry no pet flag
-      // A proc is a fact about the ability, not a fourth column: the label already
+      // A proc is a fact about the ability, not a column of its own: the label already
       // says "(pet proc)", and this only tints it so the group reads at a glance.
       if (a.proc) li.dataset.proc = '';
       else delete li.dataset.proc;
@@ -696,23 +750,37 @@ function setAbilities(list, { value, detail, share }) {
       n.className = 'a-name';
       n.textContent = a.name;
 
-      const d = document.createElement('span');
-      d.className = 'a-dmg';
-      d.textContent = value(a).toLocaleString();
-
-      const p = document.createElement('span');
-      p.className = 'a-pct';
-      p.textContent = formatShare(share(a));
-
-      const h = document.createElement('span');
-      h.className = 'a-hits';
-      h.textContent = detail(a);
-
-      li.append(n, d, p, h);
+      li.append(n, ...columns.map((c) => {
+        const s = document.createElement('span');
+        s.className = c.className;
+        s.textContent = c.cell(a);
+        return s;
+      }));
       return li;
     })
   );
 }
+
+/**
+ * One caption cell. Deliberately NOT `.a-name` on the first one: `measureWidthShortfall`
+ * queries `.a-name` to decide how much wider the window must be for every ability name to
+ * fit, and the word "ability" is not a name anybody needs read in full.
+ */
+function headerCell(label, className = '') {
+  const s = document.createElement('span');
+  if (className) s.className = className;
+  s.textContent = label;
+  return s;
+}
+
+/**
+ * How many grid tracks one rendered column of the ability list takes: the elastic name
+ * plus its four labelled values. Multi-column mode repeats the whole group, so this is
+ * also the stride between one column's first track and the next's. It MUST stay in step
+ * with the `repeat(n, 1fr auto auto auto auto)` rules in overlay.css — a mismatch there
+ * places rows into tracks that do not exist and the list silently loses its right edge.
+ */
+const ABILITY_TRACKS = 5;
 
 /**
  * Flow the ability list into as many columns as the screen forces, never fewer rows.
@@ -724,28 +792,41 @@ function setAbilities(list, { value, detail, share }) {
  * Placement must be EXPLICIT per item: the stylesheet's `li { grid-column: 1 / -1 }`
  * spans the whole grid, which in a multi-column template would stack every item back
  * into one full-width column regardless of `data-cols`. Inline styles override it.
+ *
+ * The caption row is repeated per rendered column rather than drawn once. A single header
+ * over a three-column list would caption the first column and leave the other two bare —
+ * worse than no header at all, because it reads as applying to all of them.
  */
 function layoutAbilityColumns() {
   const list = els.dAbilities;
-  const items = [...list.children];
 
   // Reset to a single column first — both the measurement baseline and the usual case.
+  // The cloned headers from the last layout go; the first one is the real one, built by
+  // setAbilities, and survives.
+  for (const clone of list.querySelectorAll('li.cols[data-clone]')) clone.remove();
+  const header = list.querySelector('li.cols');
+  const items = [...list.children].filter((li) => li !== header);
+
   list.dataset.cols = '1';
-  for (const li of items) {
+  for (const li of [header, ...items]) {
+    if (!li) continue;
     li.style.gridRow = '';
     li.style.gridColumn = '';
     delete li.dataset.col;
   }
   if (items.length < 2) return;
 
-  const rowHeight = items[0].offsetHeight + 1;   // +1: the grid's row-gap
+  const rowHeight = items[0].offsetHeight + 1;         // +1: the grid's row-gap
+  const headHeight = header ? header.offsetHeight + 1 : 0;
   // The vertical budget is the whole work area — screen.availHeight, no IPC needed —
-  // minus everything on screen that is not an ability row.
-  const nonList = measureContentHeight() - items.length * rowHeight;
+  // minus everything on screen that is not an ability row. The caption is one of those
+  // things: it sits on grid row 1 of every rendered column, so it costs its height once
+  // no matter how many columns the list ends up in, and the rows get what is left.
+  const nonList = measureContentHeight() - items.length * rowHeight - headHeight;
   const cols = abilityColumns({
     count: items.length,
     rowHeight,
-    available: screen.availHeight - nonList,
+    available: screen.availHeight - nonList - headHeight,
   });
   if (cols === 1) return;
 
@@ -753,9 +834,26 @@ function layoutAbilityColumns() {
   items.forEach((li, i) => {
     const col = Math.floor(i / rows);
     li.dataset.col = String(col);
-    li.style.gridRow = String((i % rows) + 1);
-    li.style.gridColumn = `${col * 4 + 1} / span 4`;
+    // Row 1 is the caption; the abilities start beneath it.
+    li.style.gridRow = String((i % rows) + 2);
+    li.style.gridColumn = `${col * ABILITY_TRACKS + 1} / span ${ABILITY_TRACKS}`;
   });
+
+  if (header) {
+    for (let col = 0; col < cols; col++) {
+      // Column 0 keeps the original node so nothing depends on clone order; the rest are
+      // copies, marked so the next layout can clear them.
+      const el = col === 0 ? header : header.cloneNode(true);
+      if (col > 0) {
+        el.dataset.clone = '';
+        list.append(el);
+      }
+      el.dataset.col = String(col);   // also picked up by the inter-column margin rule
+      el.style.gridRow = '1';
+      el.style.gridColumn = `${col * ABILITY_TRACKS + 1} / span ${ABILITY_TRACKS}`;
+    }
+  }
+
   list.dataset.cols = String(cols);
 }
 
@@ -888,6 +986,19 @@ function formatShare(fraction) {
   if (pct <= 0) return '—';
   if (pct < 1) return '<1%';
   return `${Math.round(pct)}%`;
+}
+
+/**
+ * An ability's accuracy, as a column.
+ *
+ * Deliberately NOT `formatShare`, which dashes out anything at or below zero: an ability
+ * that swung and never landed is a real 0% and the most worth-reading row in the list,
+ * while an ability that never swung at all has nothing to divide and gets the dash. The
+ * two look identical to a share formatter and could not be more different to a player.
+ */
+function formatAccuracy(fraction) {
+  if (fraction === null || !Number.isFinite(fraction)) return '—';
+  return `${Math.round(fraction * 100)}%`;
 }
 
 /** DPS needs three glances-worth of precision, not six digits. */
