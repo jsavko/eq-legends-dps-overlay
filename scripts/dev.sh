@@ -15,8 +15,15 @@
 #   scripts/dev.sh sync       sync only
 #   scripts/dev.sh install    sync, then force a fresh npm install
 #   scripts/dev.sh test       run the test suite in WSL (no sync needed)
+#   scripts/dev.sh pack       sync, then rebuild ONLY dist\win-unpacked — the dev copy
 #   scripts/dev.sh dist       sync, then build the Setup installer and the portable .exe
 #   scripts/dev.sh release    dist, then publish the build as a GitHub release
+#
+# `pack` is the one to reach for after an ordinary code change. The exe James launches
+# lives in dist\win-unpacked and `pack` is all it takes to refresh it; the installer and
+# the portable exe are RELEASE artifacts and only need rebuilding when a build is actually
+# being cut, which is what `dist` is for. Repacking all three for a parser fix is a minute
+# of NSIS and blockmap work that nothing reads.
 #
 set -euo pipefail
 
@@ -95,6 +102,15 @@ case "${1:-start}" in
   test)
     cd "$SRC" && npm test
     ;;
+  pack)
+    sync_tree
+    [ -d "$WIN_DIR/node_modules" ] || win_npm install
+    # Still needed: --dir skips NSIS and the portable target, but rcedit is what stamps
+    # our icon and version onto the exe, and that runs for an unpacked build too.
+    ensure_wincodesign
+    win_npm run pack
+    echo "win-unpacked -> $WIN_PATH\\dist\\win-unpacked"
+    ;;
   dist)
     sync_tree
     [ -d "$WIN_DIR/node_modules" ] || win_npm install
@@ -150,7 +166,7 @@ case "${1:-start}" in
     win_npm start
     ;;
   *)
-    echo "usage: scripts/dev.sh [sync|install|test|dist|release|start]"
+    echo "usage: scripts/dev.sh [sync|install|test|pack|dist|release|start]"
     exit 1
     ;;
 esac

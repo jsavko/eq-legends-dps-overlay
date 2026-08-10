@@ -24,14 +24,20 @@ There are three ways the app gets launched, with different staleness:
 | How | Freshness |
 |---|---|
 | `scripts/dev.sh start` | Always current — syncs, then runs from live source |
-| `C:\eqoverlay-dev\dist\win-unpacked\EQL DPS Overlay.exe` | Snapshot from the last `dev.sh dist`. **Syncing does NOT update it** — the source is baked into `app.asar` at build time |
-| `C:\eqoverlay-dev\dist\EQL-DPS-Overlay-<ver>.exe` (portable) | Same: snapshot from the last `dev.sh dist` |
+| `C:\eqoverlay-dev\dist\win-unpacked\EQL DPS Overlay.exe` | Snapshot from the last `dev.sh pack` (or `dist`). **Syncing does NOT update it** — the source is baked into `app.asar` at build time |
+| `C:\eqoverlay-dev\dist\EQL-DPS-Overlay-<ver>.exe` (portable) | Snapshot from the last `dev.sh dist` only |
 | `C:\eqoverlay-dev\dist\EQL-DPS-Overlay-Setup-<ver>.exe` (installer) | Same, and the artifact other people get — it installs to `%LOCALAPPDATA%\Programs` and self-updates from there |
 
 The user habitually launches the `win-unpacked` exe. **After any code change, run
-`scripts/dev.sh dist` or the user will see no difference.** The build fails while the
+`scripts/dev.sh pack` or the user will see no difference.** The build fails while the
 overlay is running (locked files) — quit it first (tray → Quit, or
 `taskkill.exe /IM "EQL DPS Overlay.exe" /F`).
+
+`pack` is the everyday one and rebuilds *only* `win-unpacked`. **`dist` is for cutting a
+build, not for seeing a fix** — the portable exe and the Setup installer are release
+artifacts, and regenerating NSIS output and blockmaps after a parser change is work
+nothing reads. Reach for `dist` when the user is asking for a new build (usually right
+after a version bump, usually on the way to `release`).
 
 ## Commands
 
@@ -39,6 +45,7 @@ overlay is running (locked files) — quit it first (tray → Quit, or
 npm test                        # full suite, WSL-side (node --test, no Electron needed)
 node --test tests/rules.test.js # a single test file
 scripts/dev.sh start            # sync + run the overlay on Windows from live source
+scripts/dev.sh pack             # sync + rebuild ONLY win-unpacked (the everyday one)
 scripts/dev.sh dist             # sync + rebuild the Setup installer, portable exe and win-unpacked
 scripts/dev.sh release          # dist, then publish v<package.json version> to GitHub Releases
 scripts/dev.sh sync             # sync only (does NOT update dist builds)

@@ -11,6 +11,7 @@
     "replay": "node scripts/replay.js",
     "icons": "node scripts/make-icons.js",
     "collect-unknown": "node scripts/collect-unknown.js",
+    "pack": "electron-builder --win --dir",
     "dist": "electron-builder --win --publish never"
   },
   "dependencies": {
