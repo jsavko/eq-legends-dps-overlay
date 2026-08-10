@@ -19,7 +19,7 @@
  * it does overrule a guess made from the shape of a name.
  */
 
-import { looksLikePlayerName, stripArticle } from './entities.js';
+import { looksLikePetName, looksLikePlayerName, stripArticle } from './entities.js';
 
 /**
  * How long after a summon FLAVOUR line ("Khanvikt animates an undead servant.") a
@@ -54,6 +54,23 @@ export class Roster {
     /** @type {Set<string>} names the user pinned on or off in settings */
     this.overridesOn = new Set();
     this.overridesOff = new Set();
+
+    /**
+     * The party list from settings: exactly whose rows the player wants to see.
+     *
+     * Empty means no filter at all — everyone the log produces gets a row. This
+     * replaced a "group only" switch that filtered on INFERRED membership, which
+     * failed closed and failed silently: anyone already in the group when logging
+     * began was never in `explicit`, so the first join or leave line by anybody else
+     * quietly dropped them from the view with nothing on screen to say so.
+     *
+     * Deliberately a display filter and nothing more. It is read where rows are
+     * chosen, never by `isFriendly`, so leaving someone off the list hides their row
+     * without changing a single attribution decision — turn the filter off again and
+     * the fight you are looking at is unchanged.
+     * @type {Set<string>}
+     */
+    this.partyMembers = new Set();
     /** True once an explicit group message has been seen this session. */
     this.hasExplicitData = false;
 
@@ -103,6 +120,33 @@ export class Roster {
      * stop being a mob — and is cleared only by a character switch.
      */
     this.hostileByAction = new Set();
+
+    /**
+     * Entities proven FRIENDLY by what was done to them — the mirror of the set above,
+     * and the thing that was missing when a friendly pet could be branded an enemy for
+     * a whole raid night.
+     *
+     * Hostile proof was one-sided: "it traded damage with a confirmed member" brands, and
+     * nothing ever un-brands. In Plane of Hate the mobs charm group members and EQ Legends
+     * prints NO line when a player is charmed, so a charmed member turns on the group with
+     * nothing in the log to mark the moment. A friendly water elemental took two swings at
+     * one, and that was enough: 1,362 of its damage lines and 69,394 damage were dropped
+     * for the rest of the session, with the row simply gone from the meter.
+     *
+     * Exactly one act feeds this, and it is chosen because it is a measurement rather
+     * than a guess: BEING HEALED BY A PROVEN FRIENDLY. Nobody heals an enemy. Tested
+     * against all twenty brandings in the live log it separates them 20/20 — the two
+     * wrongly-branded pets were healed by group members, every real mob never was, and
+     * the one mob that IS healed (Knight V`Tal) is healed by "a Teir`Dal ranger", which
+     * the proven-friendly guard on the healer already excludes.
+     *
+     * Deliberately NOT fed by "it damaged something we are also fighting", tempting as
+     * that looks. The Plane of Sky bees were scored as friendly right up until the moment
+     * they were branded, so any acted-friendly signal is available to a mob too — which
+     * would hand it the very immunity this set exists to grant. A heal names its TARGET,
+     * and nobody heals a bee.
+     */
+    this.friendlyByAction = new Set();
 
     /**
      * Mobs currently charmed, mapped to whoever charmed them.
@@ -321,10 +365,54 @@ export class Roster {
     return this.knownPlayers.has(name) || this.isConfirmedMember(name);
   }
 
+  /**
+   * Record that `name` is one of ours, proven by something done TO it that nobody does
+   * to an enemy. Lifts an existing brand: a name wrongly marked hostile earlier in the
+   * session comes back the moment real evidence arrives, rather than staying deleted
+   * until the player switches character.
+   *
+   * Restricted to names whose friendliness rests on nothing but their SPELLING, which
+   * is exactly the set the branding mechanism can wrongly claim: a single capitalized
+   * token (`Goneker`, `Vabann`, and every real player) or a generic possessive
+   * (`` Rhale`s warder ``). Anything carrying an article or a space was never friendly
+   * by shape and so was never at risk, and admitting it is actively dangerous — the
+   * group heals the mobs it charms, and a charmed mob given PERMANENT standing here
+   * could never be branded once the charm broke. Measured against the live log that is
+   * not hypothetical: five charmed mobs collected proof this way, one of them a
+   * loathling lich with 85,374 damage that would then have scored as the group's own.
+   *
+   * A currently-charmed mob is refused for the same reason, one step earlier. Its
+   * friendliness is already recorded, in `charmedPets`, with exactly the right lifetime.
+   *
+   * @returns {boolean} true if this changed anything
+   */
+  noteFriendlyByAction(name) {
+    const key = stripArticle(String(name ?? '').trim());
+    if (!key) return false;
+    if (!looksLikePlayerName(key) && !looksLikePetName(key)) return false;
+    if (this.charmedPets.has(key)) return false;
+    if (this.friendlyByAction.has(key)) return false;
+    this.friendlyByAction.add(key);
+    // The brand and its blacklist both go: whatever this was mistaken for, it is ours.
+    const wasBranded = this.hostileByAction.delete(key);
+    if (wasBranded) this.notPets.delete(key);
+    return true;
+  }
+
+  /** True when something an enemy is never on the receiving end of has been seen. */
+  hasFriendlyProof(name) {
+    return this.friendlyByAction.has(stripArticle(String(name ?? '').trim()));
+  }
+
   /** Record that `name` is an enemy, proven by action rather than guessed from shape. */
   noteHostileByAction(name) {
     const key = stripArticle(String(name).trim());
     if (!key || this.hasPlayerProof(key)) return false;
+    // Proof in the friendly direction outranks proof in this one, because it is the
+    // narrower claim: "a group member healed this" has one explanation, while "this
+    // exchanged damage with a group member" has two, and the second is that the member
+    // was charmed. See friendlyByAction.
+    if (this.hasFriendlyProof(key)) return false;
     if (this.hostileByAction.has(key)) return false;
     this.hostileByAction.add(key);
     this.implicit.delete(key);
@@ -371,6 +459,7 @@ export class Roster {
     this.hasExplicitData = false;
     // Everything proven by action belonged to the old character's session too.
     this.hostileByAction.clear();
+    this.friendlyByAction.clear();
     this.learnedPetOwners.clear();
     this.notPets.clear();
     this.pendingSummon = null;
@@ -473,23 +562,53 @@ export class Roster {
   }
 
   /**
-   * @param {string} name canonical combatant name (pets already folded into their owner)
-   * @param {boolean} groupOnly when true, restrict to confirmed group members
+   * Replace the party list with what settings holds.
+   *
+   * A wholesale replace, like setPetOwners, so deleting a name in settings actually
+   * deletes it rather than leaving a filter running that the player thinks they removed.
    */
-  includes(name, groupOnly) {
+  setPartyMembers(names) {
+    this.partyMembers = new Set(
+      (Array.isArray(names) ? names : [])
+        .map((n) => String(n ?? '').trim())
+        .filter(Boolean)
+    );
+  }
+
+  /** True when the player has named the people they want, so the filter is live. */
+  hasPartyList() {
+    return this.partyMembers.size > 0;
+  }
+
+  /**
+   * Should this combatant have a row?
+   *
+   * With no list, everyone does — that is the whole point of the setting being empty
+   * by default. With a list, it means the list: an exact answer the player typed and
+   * can see, rather than an inference they cannot.
+   */
+  inParty(name) {
+    if (!this.hasPartyList()) return true;
+    return this.partyMembers.has(name);
+  }
+
+  /**
+   * Is this name one of ours, in the loosest sense the roster can vouch for?
+   *
+   * Note this is an IDENTITY question, not a display one — the party list is not
+   * consulted here on purpose, so hiding a row never changes who damage is credited to.
+   *
+   * @param {string} name canonical combatant name (pets already folded into their owner)
+   */
+  includes(name) {
     if (this.overridesOff.has(name)) return false;
     if (this.overridesOn.has(name)) return true;
     if (name === this.selfName) return true;
-    // Fall back to the implicit set when the log never told us about the group,
-    // otherwise "group only" would show just the player and look broken.
-    if (groupOnly && this.hasExplicitData) return this.explicit.has(name);
     return this.implicit.has(name) || this.explicit.has(name);
   }
 
-  members(groupOnly) {
-    const source = groupOnly && this.hasExplicitData
-      ? this.explicit
-      : new Set([...this.implicit, ...this.explicit]);
+  members() {
+    const source = new Set([...this.implicit, ...this.explicit]);
     return [...source].filter((n) => !this.overridesOff.has(n)).sort();
   }
 }

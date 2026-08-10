@@ -34,7 +34,7 @@ Encounter closes (idle timeout, zone, or all-engaged-NPCs-slain + grace)
         │  NEVER on Ctrl+Shift+R reset (resets are deliberately unrecorded)
         ▼
 persistEncounter (src/main/main.js) — serializes an UNFILTERED snapshot
-        │  (no group-only narrowing; view-time filters belong to the view),
+        │  (the party list never narrows it; view-time filters belong to the view),
         │  skips encounters with zero damage in both directions,
         │  toasts on write failure rather than propagating
         ▼

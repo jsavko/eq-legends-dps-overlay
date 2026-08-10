@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { LogParser } from '../parser/index.js';
+import { nearestName } from '../parser/entities.js';
 import { Tailer, listLogs } from './tailer.js';
 import {
   ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, alertsEnabled, timersEnabled,
@@ -453,7 +454,7 @@ async function startTailing(logPath) {
 /**
  * Persist a closed encounter to the history store.
  *
- * The snapshot is built UNFILTERED — no group-only narrowing — so the record holds
+ * The snapshot is built UNFILTERED — the party list never narrows it — so the record holds
  * everything the fight contained; the history browser applies view-time filters.
  * Encounters with no damage in either direction are skipped: they are phantom opens
  * (a stray engage with nothing behind it), not fights anyone would want to review.
@@ -530,7 +531,7 @@ function syncSessionTracker() {
     // The roster's own answer, so a group member's kill counts and a passing stranger's
     // does not. Read through a getter rather than captured, because `startTailing`
     // replaces the parser wholesale on a character switch.
-    isOurs: (name) => parser?.roster?.includes(name, false) === true,
+    isOurs: (name) => parser?.roster?.includes(name) === true,
     minTs: lastRecordedSessionTs(),
     onSessionEnd: persistSession,
   });
@@ -703,7 +704,7 @@ async function importSessionLog(filePath) {
     categories: sessionCategories(config.all),
     character: logParser.selfName,
     server: logParser.server,
-    isOurs: (who) => logParser.roster.includes(who, false) === true,
+    isOurs: (who) => logParser.roster.includes(who) === true,
     onSessionEnd: (record) => {
       const { written } = sessionStore.append(record);
       if (written) imported += 1;
@@ -1837,7 +1838,7 @@ function registerIpc() {
     const after = config.set(patch);
 
     if (patch.hotkeys) registerHotkeys();
-    if (patch.groupOnly !== undefined) parser?.setGroupOnly(patch.groupOnly);
+    if (patch.partyMembers !== undefined) parser?.setPartyMembers(after.partyMembers);
     if (patch.petOwners) parser?.setPetOwners(after.petOwners);
     if (parser && (patch.combatTimeoutSec || patch.postKillGraceSec || patch.rollingWindowSec)) {
       // Encounter tuning only affects fights started from here; rewriting a running
@@ -2102,6 +2103,24 @@ function registerIpc() {
     mapped: parser?.petMappings() ?? [],
     unmapped: parser?.unmappedEntities() ?? [],
   }));
+
+  ipcMain.handle(CHANNELS.ROSTER_CHECK, (_e, names) => {
+    const typed = (Array.isArray(names) ? names : []).map((n) => String(n ?? '').trim()).filter(Boolean);
+    const here = parser?.friendlyNames() ?? [];
+    // With nobody seen yet there is nothing to check against, and calling every name
+    // unknown would be worse than saying nothing: this is a filter the player is
+    // entitled to set up before the pull, on a log that has not been read.
+    if (here.length === 0) return { checked: false, unknown: [] };
+
+    const known = new Set(here.map((n) => n.toLowerCase()));
+    const unknown = typed
+      .filter((n) => !known.has(n.toLowerCase()))
+      // A suggestion, never a correction. `nearestName` returns null on a tie for exactly
+      // this reason — offering a coin flip would invite the player to accept the wrong
+      // person, which is the failure being guarded against.
+      .map((n) => ({ typed: n, near: nearestName(n, here) }));
+    return { checked: true, unknown };
+  });
 
   ipcMain.handle(CHANNELS.LOGS_LIST, async (_e, dir) => {
     const target = dir || config.get('logDir') || DEFAULT_LOG_DIR;

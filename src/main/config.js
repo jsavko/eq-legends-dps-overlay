@@ -27,8 +27,19 @@ export const DEFAULTS = {
   postKillGraceSec: 3,
   rollingWindowSec: 10,
 
-  /** Show only confirmed group members, versus every player the log sees. */
-  groupOnly: false,
+  /**
+   * Exactly whose rows to show, or empty for everyone the log sees.
+   *
+   * Empty is the default and means no filter at all. This replaced a `groupOnly`
+   * switch that filtered on membership the parser had INFERRED from group join and
+   * leave lines — which fails closed and fails silently, because anyone already in the
+   * group when logging began is never in that set, and the first join or leave line by
+   * anybody else dropped them from the view with nothing on screen to say why.
+   *
+   * A list the player typed can be read, checked and corrected. An inference cannot.
+   * @type {string[]}
+   */
+  partyMembers: [],
   /** Fold pet damage into the owner's row (v1 always does; false is not yet wired). */
   mergePets: true,
 
@@ -394,7 +405,10 @@ export class ConfigStore {
   load() {
     try {
       const raw = fs.readFileSync(this.file, 'utf8');
-      this.data = merge(DEFAULTS, migrateTimers(migrateAlerts(JSON.parse(raw))));
+      this.data = merge(
+        DEFAULTS,
+        migrateParty(migrateTimers(migrateAlerts(JSON.parse(raw)))),
+      );
     } catch {
       // Missing or corrupt config is not an error — the defaults are the answer, and
       // a corrupt file gets overwritten on the next save rather than blocking startup.
@@ -435,7 +449,7 @@ export class ConfigStore {
       timeoutMs: this.data.combatTimeoutSec * 1000,
       postKillGraceMs: this.data.postKillGraceSec * 1000,
       rollingWindowMs: this.data.rollingWindowSec * 1000,
-      groupOnly: this.data.groupOnly,
+      partyMembers: this.data.partyMembers,
       petOwners: this.data.petOwners,
     };
   }
@@ -500,12 +514,32 @@ function migrateTimers(raw) {
 }
 
 /**
+ * Drop the old `groupOnly` switch, which the party list replaced.
+ *
+ * A stored `true` migrates to an EMPTY list — showing more, not less. There is nothing
+ * honest to migrate it to: the names it was hiding came from what the parser inferred
+ * about the group at the time, and that set does not exist until the log is read, so
+ * writing anything into the list here would be inventing a party the player never typed.
+ * Showing everyone is also the safe direction to be wrong in, and it is visible: a row
+ * that appears can be filtered out in one line of settings, whereas the failure this
+ * whole change exists to fix is a row that is missing and says nothing.
+ */
+function migrateParty(raw) {
+  if (!raw || typeof raw !== 'object' || !('groupOnly' in raw)) return raw;
+  const { groupOnly, ...rest } = raw;
+  return rest;
+}
+
+/**
  * Keys whose object value is replaced wholesale rather than merged.
  *
  * petOwners is a complete mapping, not a set of tweaks: merging it would make a
  * deleted pet entry impossible to remove, since the old key would survive every save.
+ * partyMembers is an array and so is replaced by `merge` anyway; it is named here for
+ * the reader, because the reason is the same one and the consequence of getting it
+ * wrong is worse — a name that could not be deleted is a person permanently hidden.
  */
-const REPLACE_KEYS = new Set(['petOwners']);
+const REPLACE_KEYS = new Set(['petOwners', 'partyMembers']);
 
 /** Merge `patch` over `base`, recursing one level into plain objects. */
 function merge(base, patch) {

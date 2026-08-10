@@ -71,7 +71,7 @@ const tracker = new SessionTracker({
   server: parser.server,
   // The roster's own answer, which is the entire point of running a parser alongside:
   // a group member's kill is ours and a passing stranger's is not.
-  isOurs: (name) => parser.roster.includes(name, false),
+  isOurs: (name) => parser.roster.includes(name),
   onSessionEnd: (record) => finished.push(record),
 });
 

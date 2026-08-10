@@ -185,6 +185,30 @@ test('heals parse as effective (potential) (sample)', () => {
   assert.equal(d.potential, 2);
 });
 
+test('a heal with no spell named still parses (live log)', () => {
+  // 4,715 of these in the live log, matching nothing and scored nowhere, which reads
+  // as a healer contributing less than they did.
+  const a = m('You healed Rhale for 92 hit points.');
+  assert.equal(a.kind, 'heal');
+  assert.equal(a.attacker, 'You');
+  assert.equal(a.target, 'Rhale');
+  assert.equal(a.effective, 92);
+  assert.equal(a.potential, 92);
+  // What produced it is not stated and not guessable, so it is labelled the way
+  // unattributed damage already is rather than credited to whatever was last cast.
+  assert.equal(a.ability, 'Unknown');
+
+  const b = m('Rhazendude healed Vaezerk for 67 hit points.');
+  assert.equal(b.target, 'Vaezerk');
+  assert.equal(b.effective, 67);
+
+  const c = m('You healed Rhale`s warder for 69 hit points.');
+  assert.equal(c.target, 'Rhale`s warder');
+
+  // And it does not steal a line that DOES name its spell — that one keeps its name.
+  assert.equal(m('Emalina healed Rhain for 119 (139) hit points by Bravery.').ability, 'Bravery');
+});
+
 test('chat is matched first so quoted combat text is never scored', () => {
   // This is the whole reason the chat rule sits at the top of the table. A channel
   // line is typed as player-proof rather than plain chat — see the test below — but
@@ -365,6 +389,33 @@ test('damage-shield verbs that state an element carry it as the type', () => {
   const thorns = m('Rhain is pierced by a wan ghoul knight\'s thorns for 8 points of non-melee damage.');
   assert.equal(thorns.damageType, null);
   assert.equal(thorns.attacker, 'a wan ghoul knight');
+
+  // 225 lines in the live log. "frost" is the shield's own name, not a stated element,
+  // so this one joins "pierced" in being honestly untyped.
+  const tormented = m('A fire giant warrior is tormented by Kadomony\'s frost for 12 points of non-melee damage.');
+  assert.equal(tormented.kind, 'damage');
+  assert.equal(tormented.attacker, 'Kadomony');
+  assert.equal(tormented.amount, 12);
+  assert.equal(tormented.damageType, null);
+});
+
+test('reave is an attack verb (live log)', () => {
+  // 1,374 hits and 1,264 misses across eight players went unparsed without this.
+  const hit = m('Glorb reaves a spite golem for 24 points of damage.');
+  assert.equal(hit.kind, 'damage');
+  assert.equal(hit.source, 'melee');
+  assert.equal(hit.attacker, 'Glorb');
+  assert.equal(hit.target, 'a spite golem');
+  assert.equal(hit.amount, 24);
+
+  const miss = m('Rhain tries to reave Innoruuk`s Chosen, but misses!');
+  assert.equal(miss.kind, 'miss');
+  assert.equal(miss.attacker, 'Rhain');
+  assert.equal(miss.target, 'Innoruuk`s Chosen');
+
+  const avoided = m('Syphon tries to reave Cleric of Innoruuk, but Cleric of Innoruuk dodges!');
+  assert.equal(avoided.kind, 'miss');
+  assert.equal(avoided.avoidance, 'dodge');
 });
 
 test('an interrupted NPC cast names caster and spell (sample)', () => {

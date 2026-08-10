@@ -76,13 +76,6 @@
       </div>
 
       <div class="row checkbox">
-        <input id="group-only" type="checkbox" />
-        <label for="group-only">Show only my group
-          <span class="unit">otherwise every player the log sees appears</span>
-        </label>
-      </div>
-
-      <div class="row checkbox">
         <input id="auto-switch" type="checkbox" />
         <label for="auto-switch">Follow character switches automatically</label>
       </div>
@@ -169,6 +162,19 @@
         <button id="open-session" class="secondary">Session…</button>
         <span id="session-summary" class="unit"></span>
       </div>
+
+      <h2>Party list</h2>
+      <p class="hint no-top">
+        Leave this empty and everyone the log sees gets a row — that is the default and
+        it is what you want almost always. Fill it in only to watch specific people, one
+        name per line, and the meter shows exactly those names and nobody else, including
+        you unless you list yourself. It hides rows and nothing more: the numbers on the
+        ones you keep are identical either way, so turning it off again shows the same
+        fight you were already looking at.
+      </p>
+      <textarea id="party-members" rows="4" spellcheck="false"
+                placeholder="empty — showing everyone in the log"></textarea>
+      <p class="hint" id="party-status"></p>
 
       <h2>Named pets</h2>
       <p class="hint no-top">

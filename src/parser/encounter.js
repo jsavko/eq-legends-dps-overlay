@@ -634,7 +634,7 @@ export class Encounter {
       groupHps: shownHealing / durationSec,
       totalDamageTaken: shownTaken,
       groupDtps: shownTaken / durationSec,
-      // Filtered the same way as the rows, so a group-only view never names outsiders.
+      // Filtered the same way as the rows, so a narrowed view never names outsiders.
       deaths: this.deaths.filter((d) => shownNames.has(d.name)),
       rows,
     };

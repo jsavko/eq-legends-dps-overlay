@@ -44,6 +44,7 @@ async function init() {
   await loadDirectory(state.config.logDir);
   if (state.selected) await validate(state.selected);
   await renderPets();
+  await renderPartyStatus();
   await renderTriggerSummary();
   await renderSessionSummary();
   await renderLoggingState();
@@ -108,8 +109,8 @@ function fillForm(cfg) {
   $('scale').value = cfg.scale;
   $('timeout').value = cfg.combatTimeoutSec;
   $('grace').value = cfg.postKillGraceSec;
-  $('group-only').checked = cfg.groupOnly;
   $('auto-switch').checked = cfg.autoSwitchCharacter;
+  $('party-members').value = (cfg.partyMembers ?? []).join('\n');
   $('pet-owners').value = formatPetOwners(cfg.petOwners);
 
   const session = cfg.session ?? {};
@@ -233,6 +234,10 @@ function syncOutputs() {
 function wireEvents() {
   $('opacity').addEventListener('input', syncOutputs);
   $('scale').addEventListener('input', syncOutputs);
+
+  // On input rather than on save: a typo is worth catching while the cursor is still
+  // in the box, not after the meter has been quietly hiding somebody for a raid.
+  $('party-members').addEventListener('input', renderPartyStatus);
 
   $('open-triggers').addEventListener('click', () => window.api.openTriggers());
   $('open-session').addEventListener('click', () => window.api.openSession());
@@ -399,8 +404,8 @@ async function save() {
     scale: Number($('scale').value),
     combatTimeoutSec: Number($('timeout').value),
     postKillGraceSec: Number($('grace').value),
-    groupOnly: $('group-only').checked,
     autoSwitchCharacter: $('auto-switch').checked,
+    partyMembers: parsePartyMembers($('party-members').value),
     // The alert and timer switches are deliberately absent: they belong to the Triggers
     // window now, and a form that still wrote them would clobber whatever was set there
     // the next time somebody pressed Save on an unrelated setting.
@@ -432,6 +437,60 @@ async function save() {
 }
 
 /** { Gann: 'Rhain' } -> "Gann = Rhain" */
+/**
+ * One name per line, blanks dropped. Never rejects: a half-typed line must not block
+ * saving the rest of the form, exactly as the pet box does not.
+ */
+function parsePartyMembers(text) {
+  return String(text ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Say what the party list is doing, and flag a name that matches nobody here.
+ *
+ * The empty state is the important half. An empty box with no caption reads as a broken
+ * field, and this one is the default and the right answer for nearly everybody — so it
+ * says outright that everyone is showing rather than leaving the player to guess.
+ *
+ * The other half is the typo. A misspelt name in a filter does not fail, it hides a
+ * person and says nothing, which is precisely the class of bug this whole feature was
+ * built in response to. So an unrecognised name is called out, with the nearest actual
+ * combatant offered when there is an obvious one — offered, never applied. Auto-correct
+ * would risk swapping in the wrong person, and `handlePetCommand` refuses for the same
+ * reason. A name nobody here answers to is still legal: they may simply not have acted
+ * yet, and this is a filter the player is entitled to set up before the pull.
+ */
+async function renderPartyStatus() {
+  const el = $('party-status');
+  const box = $('party-members');
+  if (!el || !box) return;
+
+  const names = parsePartyMembers(box.value);
+  if (names.length === 0) {
+    el.textContent = 'Empty — everyone the log sees gets a row.';
+    return;
+  }
+
+  const showing = `Showing ${names.length} name${names.length === 1 ? '' : 's'}, and nobody else.`;
+
+  let verdict = { checked: false, unknown: [] };
+  try {
+    verdict = await window.api.rosterCheck(names);
+  } catch {
+    // No parser yet (first-run setup, before a log is chosen).
+  }
+  if (!verdict.checked || verdict.unknown.length === 0) {
+    el.textContent = showing;
+    return;
+  }
+
+  const notes = verdict.unknown.map((u) => (u.near ? `${u.typed} — did you mean ${u.near}?` : u.typed));
+  el.textContent = `${showing} Not seen yet: ${notes.join('; ')}`;
+}
+
 function formatPetOwners(mapping) {
   return Object.entries(mapping ?? {})
     .map(([pet, owner]) => `${pet} = ${owner}`)

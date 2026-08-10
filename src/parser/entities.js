@@ -110,6 +110,20 @@ export function looksLikePlayerName(name) {
   return /^[A-Z][a-z]+$/.test(trimmed);
 }
 
+/**
+ * True for the generic-possession form — `` Rhale`s warder ``, `` Beebee`s pet `` — the
+ * spelling this file reads as a pet rather than as part of a proper name.
+ *
+ * Same two-tier test `resolveEntity` applies, exported because the roster needs to ask
+ * the question about a bare name with no resolution attached: `` Innoruuk`s Chosen ``
+ * carries the same punctuation and is a Plane of Hate boss, so the lowercase noun is
+ * the whole distinction and it must not be restated anywhere else.
+ */
+export function looksLikePetName(name) {
+  const m = POSSESSIVE_RE.exec(String(name ?? '').trim());
+  return Boolean(m) && /^[a-z]/.test(m[2].trim());
+}
+
 /** Edit distance, capped: anything past `max` is reported as `max + 1` and stops early. */
 function editDistance(a, b, max) {
   if (Math.abs(a.length - b.length) > max) return max + 1;

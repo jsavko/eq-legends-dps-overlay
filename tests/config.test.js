@@ -28,12 +28,12 @@ test('settings round-trip through disk', () => {
   const dir = tmpdir();
   const a = new ConfigStore(dir);
   a.load();
-  a.set({ opacity: 0.5, groupOnly: true });
+  a.set({ opacity: 0.5, partyMembers: ['Rhain', 'Emalina'] });
 
   const b = new ConfigStore(dir);
   b.load();
   assert.equal(b.get('opacity'), 0.5);
-  assert.equal(b.get('groupOnly'), true);
+  assert.deepEqual(b.get('partyMembers'), ['Rhain', 'Emalina']);
   assert.equal(b.get('scale'), DEFAULTS.scale, 'untouched keys keep their defaults');
 });
 
@@ -103,13 +103,16 @@ test('isConfigured requires the log file to still exist', () => {
 test('parserOptions converts seconds to the milliseconds the parser wants', () => {
   const store = new ConfigStore(tmpdir());
   store.load();
-  store.set({ combatTimeoutSec: 20, postKillGraceSec: 4, rollingWindowSec: 6, groupOnly: true });
+  store.set({
+    combatTimeoutSec: 20, postKillGraceSec: 4, rollingWindowSec: 6,
+    partyMembers: ['Rhain'],
+  });
 
   assert.deepEqual(store.parserOptions(), {
     timeoutMs: 20_000,
     postKillGraceMs: 4_000,
     rollingWindowMs: 6_000,
-    groupOnly: true,
+    partyMembers: ['Rhain'],
     petOwners: {},
   });
 });
@@ -208,6 +211,22 @@ test('an old "alerts off" config keeps meaning no alerts at all', () => {
   assert.equal(store.get('triggerTimers'), false);
   assert.equal(alertsEnabled(store.all), false);
   assert.equal(timersEnabled(store.all), false, 'and no timer window springs up either');
+});
+
+test('the retired group-only switch migrates to an empty party list', () => {
+  const dir = tmpdir();
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ groupOnly: true, opacity: 0.7 }));
+
+  const store = new ConfigStore(dir);
+  store.load();
+  assert.equal('groupOnly' in store.all, false, 'the retired key does not survive a load');
+  // Empty, i.e. showing everyone. There is nothing honest to migrate it to: the names
+  // it was hiding came from what the parser inferred about the group at the time, and
+  // that set does not exist until a log is read. Showing more is also the safe direction
+  // to be wrong in — an extra row is one line of settings away from gone, whereas the
+  // missing row this whole change exists to fix said nothing at all.
+  assert.deepEqual(store.get('partyMembers'), []);
+  assert.equal(store.get('opacity'), 0.7, 'the rest of the config is untouched');
 });
 
 test('a config already carrying the new keys is left exactly as written', () => {

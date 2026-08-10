@@ -141,7 +141,7 @@ export class LogParser {
    * @param {Object} [options]
    * @param {string} [options.selfName]     logging character; or pass logFilename
    * @param {string} [options.logFilename]  e.g. "eqlog_Rhale_oggok.txt"
-   * @param {boolean} [options.groupOnly]   restrict rows to confirmed group members
+   * @param {string[]} [options.partyMembers] exactly whose rows to show; empty shows all
    * @param {number} [options.timeoutMs]    encounter idle timeout
    * @param {() => number} [options.clock]  time source; replay overrides this
    * @param {(enc: Encounter) => void} [options.onEncounterEnd]
@@ -155,7 +155,6 @@ export class LogParser {
 
     this.selfName = options.selfName ?? fromFile?.character ?? 'You';
     this.server = fromFile?.server ?? null;
-    this.groupOnly = options.groupOnly ?? false;
     this.clock = options.clock ?? (() => Date.now());
     this.encounterOptions = {
       timeoutMs: options.timeoutMs ?? DEFAULTS.timeoutMs,
@@ -167,6 +166,7 @@ export class LogParser {
     this.onEncounterEnd = options.onEncounterEnd ?? null;
     this.roster = new Roster(this.selfName);
     this.roster.setPetOwners(options.petOwners);
+    this.roster.setPartyMembers(options.partyMembers);
     /** @type {Encounter|null} */
     this.current = null;
     /** @type {Encounter|null} the last finished fight, kept on screen after combat */
@@ -253,8 +253,15 @@ export class LogParser {
     }
   }
 
-  setGroupOnly(groupOnly) {
-    this.groupOnly = groupOnly;
+  /**
+   * Apply the party list from settings.
+   *
+   * Unlike setPetOwners this IS retroactive, and safely so: it only decides which of
+   * the rows already computed get shown, so applying it to the fight on screen changes
+   * nothing about the numbers in it.
+   */
+  setPartyMembers(names) {
+    this.roster.setPartyMembers(names);
     this.revision++;
   }
 
@@ -452,6 +459,13 @@ export class LogParser {
     if (this.roster.overridesOn.has(name)) return true;
     if (this.roster.isConfirmedMember(name)) return true;
 
+    // Proof in the friendly direction sits with the proof in the hostile one, ABOVE
+    // both behaviour checks below. A group member gets charmed with no log line to
+    // announce it, the group's own pets swing at them, and that read as proof the pet
+    // was an enemy — permanently. Being healed by a proven friendly is the answer,
+    // because nobody heals an enemy. See Roster#friendlyByAction.
+    if (this.roster.hasFriendlyProof(name)) return true;
+
     // Behaviour outranks name shape. An entity the group is currently fighting is an
     // enemy however player-shaped its name is — the same reasoning isHostileCaster has
     // always used, which isFriendly simply never learned — and so is one caught
@@ -462,9 +476,9 @@ export class LogParser {
     // A name the game called an NPC is not a player, whatever its shape. This keeps a
     // single-word named mob ("Zevrex") from being mistaken for a group member.
     if (this.roster.knownNpcs.has(name) && !this.roster.knownPlayers.has(name)) {
-      return this.roster.includes(name, false);
+      return this.roster.includes(name);
     }
-    return this.roster.includes(name, false) || looksLikePlayerName(name);
+    return this.roster.includes(name) || looksLikePlayerName(name);
   }
 
   /**
@@ -482,7 +496,7 @@ export class LogParser {
   isProvenFriendly(name) {
     if (name === UNKNOWN) return false;
     if (!this.isFriendly(name)) return false;
-    return this.roster.includes(name, false) || this.roster.knownPlayers.has(name);
+    return this.roster.includes(name) || this.roster.knownPlayers.has(name);
   }
 
   /**
@@ -543,6 +557,19 @@ export class LogParser {
     const targetFriendly = this.isFriendly(target.name);
 
     if (attackerFriendly && targetFriendly) {
+      // Self-damage is not friendly fire and never was: "Venun hit Venun for 1924 points
+      // of unresistable damage by Cannibalization I." is a shaman buying mana with life,
+      // 18 times and 20,965 points of it in the live log. It is not group DPS and it is
+      // nobody's mistake, so it is dropped here rather than sent through machinery that
+      // exists to work out which of two entities was misread.
+      //
+      // Tested on the DISPLAY names with both sides required to be non-pets, never on
+      // the resolved ones. A pet resolves to its owner, so "A tal ghoul wizard slashes
+      // YOU" from a charmed mob has attacker.name === target.name === Rhale while being
+      // the exact opposite of self-damage — it is the charm-break signal, and swallowing
+      // it here would leave the mob charmed and the hit unscored.
+      if (!attacker.isPet && !target.isPet && attacker.display === target.display) return;
+
       // One of the two is misclassified — friendlies do not damage each other. Work
       // through the possibilities in order of how much the log proves, and re-score
       // the line the moment one of them resolves.
@@ -550,12 +577,19 @@ export class LogParser {
         this.handleDamage(event);
         return;
       }
-      // Otherwise this is a mis-parse; scoring it would inflate someone's DPS.
+      // Nothing about either identity was wrong, which leaves the third explanation:
+      // a group member has been turned against us. Raise it as a member state and drop
+      // the line — see noteMemberTurned for why this runs last.
+      this.noteMemberTurned(event, attacker, target);
       return;
     }
 
     if (attackerFriendly) {
       this.roster.noteFriendlyCombatant(attacker.name);
+      // Swinging at the mob is the group member back on our side, and it is the only
+      // end-signal a charm has: EQ Legends prints nothing when a player is charmed and
+      // nothing when the charm breaks. The 30s cap in pruneCcStates is the backstop.
+      this.endCcState(attacker.display, 'charm');
       const enc = this.ensureEncounter(event.ts);
       enc.engage(target.name, event.amount, event.ts);
       enc.addDamage({
@@ -636,6 +670,45 @@ export class LogParser {
     if (this.breakCharm(event)) return true;
     if (this.breakWeakPetBinding(attacker, target)) return true;
     return this.markHostileFromDamage(attacker, target);
+  }
+
+  /**
+   * Nobody's identity was wrong, so a group member has been charmed.
+   *
+   * EQ Legends announces a charmed MOB ("a tal ghoul wizard has been charmed.") and says
+   * nothing whatsoever when it takes a PLAYER — 35 charm lines in the live log, every one
+   * of them a mob, none a player. James knows and typed it mid-pull: "i hate that if i
+   * get charmed it destorys my pet". So the only evidence is the impossible line itself,
+   * which is the same reasoning breakCharm already runs in the opposite direction.
+   *
+   * Two guards make this an inference rather than a guess, and they are why this runs
+   * LAST, after every identity fix has declined:
+   *
+   *   - the other side must carry FRIENDLY PROOF, so we know it is not simply an enemy
+   *     with a player-shaped name. Without this the rule is a catastrophe: "Bzzazzt hit
+   *     you for 100 points of poison damage" would read as YOU being charmed rather than
+   *     as a Plane of Sky bee, and the mechanism that fix depends on would never fire.
+   *   - that side must NOT itself be a confirmed member, because then both sides are
+   *     equally accounted for and naming one of them is a coin flip. Two group members
+   *     trading blows says one of them turned and the log does not say which; the honest
+   *     answer is to raise nothing.
+   *
+   * Nothing is scored either way. A charmed member's swings are not group damage, and
+   * recording them as damage TAKEN would fill the victim's "what is killing me" list
+   * with the name of a friend. The chip is what explains the missing number.
+   *
+   * @returns {boolean} true if a member state was raised
+   */
+  noteMemberTurned(event, attacker, target) {
+    for (const [side, other] of [[attacker, target], [target, attacker]]) {
+      const proofName = side.isPet ? side.display : side.name;
+      if (this.roster.isConfirmedMember(side.name)) continue;
+      if (!this.roster.hasFriendlyProof(proofName)) continue;
+      if (!this.roster.isConfirmedMember(other.name)) continue;
+      this.startCcState(other.display, 'charm', event.ts);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -816,7 +889,7 @@ export class LogParser {
    * Anything already owned by somebody is dropped: a pet is not a candidate to own a pet.
    */
   friendlyNames() {
-    const out = new Set([this.selfName, ...this.roster.members(false), ...this.roster.knownPlayers]);
+    const out = new Set([this.selfName, ...this.roster.members(), ...this.roster.knownPlayers]);
     for (const name of out) {
       if (this.roster.ownerOf(name)) out.delete(name);
     }
@@ -825,7 +898,7 @@ export class LogParser {
 
   /** @returns {string|null} the friendly this typed name IS, fixing capitalization only */
   matchFriendly(typed) {
-    if (this.roster.hasPlayerProof(typed) || this.roster.includes(typed, false)) return typed;
+    if (this.roster.hasPlayerProof(typed) || this.roster.includes(typed)) return typed;
     const lower = typed.toLowerCase();
     return this.friendlyNames().find((n) => n.toLowerCase() === lower) ?? null;
   }
@@ -1239,15 +1312,32 @@ export class LogParser {
    * down with it. It also never extends one, for the same reason.
    */
   handleHeal(event) {
-    if (!this.current || this.current.closed) return;
-
+    // Resolved BEFORE the encounter guard, unlike everything else here, because the
+    // roster learns from a heal whether or not a fight is running. Between pulls is
+    // when the group tops itself up, and it is exactly when the pets get healed — the
+    // evidence that stops one being branded an enemy later (see noteFriendlyByAction).
+    // It also lets a pet announce itself out of combat, which resolve() has always
+    // claimed a healing pet may do ("Gann healed himself for 57 hit points by Center.").
     const healer = this.resolve(event.attacker, true);
     if (!this.isFriendly(healer.name) && !this.isUnownedPet(healer.name)) return;
 
     // "Gann healed himself", "Emalina healed herself" — the reflexive is the healer.
     const target = REFLEXIVE_RE.test(event.target)
-      ? { name: healer.name, display: healer.display }
+      ? { name: healer.name, display: healer.display, isPet: healer.isPet }
       : this.resolve(event.target);
+
+    // Nobody heals an enemy — so a heal from someone with real standing is proof about
+    // its TARGET that no mob can manufacture. PROVEN friendly, not merely friendly: a
+    // mob healing a mob is the ordinary case ("Bonefire healed orc legionnaire for 20
+    // hit points by Courage.") and proves nothing about anybody. Keyed the same way a
+    // branding is, by display for a pet and by name otherwise, so the two sets talk
+    // about the same thing.
+    if (this.isProvenFriendly(healer.name)) {
+      const key = target.isPet ? target.display : target.name;
+      if (this.roster.noteFriendlyByAction(key)) this.revision++;
+    }
+
+    if (!this.current || this.current.closed) return;
 
     this.roster.noteFriendlyCombatant(healer.name);
     this.current.addHeal({
@@ -1548,10 +1638,14 @@ export class LogParser {
     }
 
     // Rows only ever exist for combatants that damage was credited to, and damage is
-    // only credited to friendlies, so "show everyone" needs no filter at all. The
-    // roster is consulted purely to narrow that set down to the group.
-    const include = (name) =>
-      !this.groupOnly || name === UNKNOWN || this.roster.includes(name, true);
+    // only credited to friendlies, so "show everyone" needs no filter at all — which is
+    // exactly what an empty party list gets you, and what the default is. A non-empty
+    // one is the player naming who they want, so it is applied literally.
+    //
+    // UNKNOWN is exempt whatever the list says. It is a real bucket of real damage that
+    // could not be attributed to anybody, so hiding it would not tidy the meter, it
+    // would make the group total quietly disagree with the rows above it.
+    const include = (name) => name === UNKNOWN || this.roster.inParty(name);
     const snap = enc.snapshot(now, { includeNames: include });
     return {
       ...snap,

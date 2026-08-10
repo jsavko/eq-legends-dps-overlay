@@ -185,9 +185,17 @@ screen saying so.
 
 **`src/renderer/setup/`** — first-run setup and the settings form. Cool slate palette;
 the overlay, alerts, timers, history and triggers windows share the warm parchment palette
-instead. It owns *how the overlay behaves* — log file, appearance, pets, hotkeys — and
+instead. It owns *how the overlay behaves* — log file, appearance, party list, pets, hotkeys — and
 deliberately no longer writes any alert or timer key, since a Save here would otherwise
 clobber whatever the Triggers window had just set.
+
+The **party list** is the only thing that hides a row, and it hides rows *only*: empty (the
+default) shows everyone the log produces, and a filled-in list shows exactly those names.
+It replaced a `groupOnly` switch that filtered on membership the parser had INFERRED from
+group join/leave lines — which fails closed and fails silently, since anyone already in the
+group when logging began is never in `explicit`. `roster.inParty()` is read where rows are
+chosen and never by `isFriendly`, so hiding somebody changes no attribution: clear the list
+and it is the same fight with more rows.
 
 ## Invariants that are easy to break
 
@@ -237,6 +245,18 @@ clobber whatever the Triggers window had just set.
   the most plausible player. Overhealing is exact (EQ prints `effective (potential)`),
   never estimated. Damage with no stated type stays "untyped" — a spell-name→school
   lookup table would be guessing and was deliberately not built.
+- **Hostility is proven, and so is friendliness.** `hostileByAction` brands an entity that
+  traded damage with a confirmed member, and it lasts the session. That is only safe
+  because `friendlyByAction` can block and revoke it: Plane of Hate charms group members
+  with NO log line either way, so the group's own pets swing at them, and one such swing
+  used to delete a friendly for the rest of the night (a water elemental, 69,394 damage,
+  gone from the meter). The one act that proves friendliness is **being healed by a proven
+  friendly** — nobody heals an enemy, and it separates the live log's twenty brandings
+  20/20. Two things it must never become: fed by "it damaged something we are also
+  fighting" (the Sky bees are scored friendly right up until they are branded, so a mob has
+  that signal too), or granted to a name carrying an article or a space (the group heals
+  the mobs it charms, and permanent standing would outlive the charm). See
+  `docs/changelog/2026-08-10-a-charmed-friend-is-still-a-friend.md`.
 - **No native modules, ever.** A native dependency would need a win32 build under
   Windows npm AND a linux build for the WSL test suite — this is why history is JSONL
   and not SQLite. Pure-JS runtime dependencies are allowed but stay rare; the only one

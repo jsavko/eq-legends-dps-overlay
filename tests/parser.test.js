@@ -193,18 +193,34 @@ test('reset clears everything', () => {
   assert.equal(p.snapshot().idle, true);
 });
 
-test('group-only mode hides players outside the group', () => {
-  const p = makeParser({ groupOnly: true });
+test('with no party list, everyone the log sees gets a row', () => {
+  const p = makeParser();
+  // A group line used to be the trigger for the old filter: `hasExplicitData` flipped
+  // true and everyone who predated it silently vanished. It must now change nothing.
   p.feed(`${D(18, 47, 0)} Rhain has joined the group.`);
   p.feed(`${D(18, 48, 15)} You crush a froglok shin knight for 40 points of damage.`);
   p.feed(`${D(18, 48, 15)} Rhain smites a froglok shin knight for 11 points of damage.`);
   p.feed(`${D(18, 48, 15)} Passerby smites a froglok shin knight for 500 points of damage.`);
 
-  const names = p.snapshot().rows.map((r) => r.name);
-  assert.deepEqual(names.sort(), ['Rhain', 'Rhale']);
+  const names = p.snapshot().rows.map((r) => r.name).sort();
+  assert.deepEqual(names, ['Passerby', 'Rhain', 'Rhale']);
+});
 
-  p.setGroupOnly(false);
-  assert.equal(p.snapshot().rows.length, 3);
+test('a party list is applied literally, and only to the rows', () => {
+  const p = makeParser({ partyMembers: ['Rhale', 'Rhain'] });
+  p.feed(`${D(18, 48, 15)} You crush a froglok shin knight for 40 points of damage.`);
+  p.feed(`${D(18, 48, 15)} Rhain smites a froglok shin knight for 11 points of damage.`);
+  p.feed(`${D(18, 48, 15)} Passerby smites a froglok shin knight for 500 points of damage.`);
+
+  assert.deepEqual(p.snapshot().rows.map((r) => r.name).sort(), ['Rhain', 'Rhale']);
+
+  // Nothing about the fight changed — only which of its rows were drawn. Clearing the
+  // list shows the same numbers that were being computed all along.
+  p.setPartyMembers([]);
+  const all = p.snapshot().rows;
+  assert.equal(all.length, 3);
+  assert.equal(all.find((r) => r.name === 'Passerby').damage, 500);
+  assert.equal(all.find((r) => r.name === 'Rhain').damage, 11);
 });
 
 // ---------------------------------------------------------------------------
@@ -298,7 +314,7 @@ test('a named pet keeps its own row until it is mapped', () => {
 });
 
 test('"Targeted (NPC)" keeps a named pet out of the group roster', () => {
-  const p = makeParser({ groupOnly: true });
+  const p = makeParser();
   p.feed(`${D(18, 47, 0)} Rhain has joined the group.`);
   p.feed(`${D(18, 54, 5)} Targeted (NPC): Gann`);
   p.feed(`${D(18, 54, 16)} You crush a froglok shin knight for 40 points of damage.`);
@@ -306,8 +322,10 @@ test('"Targeted (NPC)" keeps a named pet out of the group roster', () => {
   p.feed(`${D(18, 54, 16)} Gann slashes a froglok shin knight for 12 points of damage.`);
 
   assert.equal(p.roster.knownNpcs.has('Gann'), true);
-  assert.equal(p.roster.includes('Gann', true), false);
-  assert.deepEqual(p.snapshot().rows.map((r) => r.name).sort(), ['Rhain', 'Rhale']);
+  assert.equal(p.roster.includes('Gann'), false, 'not a member, whatever its name looks like');
+  // It still gets a row: it is fighting our mob and its damage is real group damage,
+  // so dropping it would make the group total quietly wrong. See isUnownedPet.
+  assert.deepEqual(p.snapshot().rows.map((r) => r.name).sort(), ['Gann', 'Rhain', 'Rhale']);
 });
 
 test('"Targeted (Player)" confirms a real player', () => {
@@ -1161,6 +1179,130 @@ test('a charmed mob turning on the group is a charm break, not a fresh enemy', (
   assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
   assert.equal(p.roster.isHostileByAction('tal ghoul wizard'), false);
   assert.equal(p.snapshot().rows.find((r) => r.name === 'Rhale').damageTaken, 30);
+});
+
+// ---------------------------------------------------------------------------
+// A charmed group member, and the friendly it used to delete.
+//
+// Plane of Hate charms group members and EQ Legends prints NOTHING when it takes a
+// player — 35 charm lines in the live log, all mobs, none a player. So a member turns
+// on the group with no marker, the group's own pets swing at them, and that read as
+// proof the pet was an enemy. Permanently: Goneker, a water elemental, lost 1,362
+// damage lines and 69,394 damage for the rest of that session, its row simply gone.
+//
+// Every line below is from the live log at [Sat Aug 08 00:31:47 2026].
+// ---------------------------------------------------------------------------
+
+/** The live Goneker setup: a group with Syphon in it, and a healed friendly pet. */
+function charmScene({ heal = true } = {}) {
+  const p = makeParser();
+  p.feed(`${D(0, 31, 40)} Syphon has joined the group.`);
+  // Taneldar earns standing the ordinary way, by damaging the mob the group is on.
+  p.feed(`${D(0, 31, 41)} Taneldar slashes Cleric of Innoruuk for 30 points of damage.`);
+  p.feed(`${D(0, 31, 42)} Goneker cleaves Cleric of Innoruuk for 70 points of damage.`);
+  if (heal) p.feed(`${D(0, 31, 43)} Taneldar healed Goneker for 255 hit points by Skin like Nature.`);
+  return p;
+}
+
+test('a friendly pet that swings at a charmed member keeps its row', () => {
+  const p = charmScene();
+  assert.equal(p.roster.hasFriendlyProof('Goneker'), true, 'a group member healed it');
+
+  // Syphon is charmed. Nothing in the log says so; these two lines are all there is.
+  p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
+  p.feed(`${D(0, 31, 47)} Goneker is pierced by Syphon's thorns for 24 points of non-melee damage.`);
+
+  assert.equal(p.roster.isHostileByAction('Goneker'), false, 'never branded');
+  assert.equal(p.isFriendly('Goneker'), true);
+
+  // And it keeps scoring, which is the whole point — this is the damage that vanished.
+  p.feed(`${D(0, 31, 48)} Goneker backstabs Cleric of Innoruuk for 102 points of damage.`);
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Goneker').damage, 172);
+});
+
+test('the impossible line is read as the member being charmed, and says so on screen', () => {
+  const p = charmScene();
+  p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
+
+  const effects = p.snapshot(T(0, 31, 47)).memberEffects;
+  assert.deepEqual(effects.map((e) => [e.who, e.effect]), [['Syphon', 'charm']]);
+
+  // Neither side is scored. A charmed member's swings are not group damage, and filing
+  // them as damage taken would put a friend's name in the victim's "what is killing me".
+  const rows = p.snapshot().rows;
+  assert.equal(rows.find((r) => r.name === 'Syphon'), undefined);
+  assert.equal(rows.find((r) => r.name === 'Goneker').damage, 70);
+});
+
+test('swinging at the mob again is what ends the charm state', () => {
+  const p = charmScene();
+  p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
+  assert.equal(p.snapshot(T(0, 31, 47)).memberEffects.length, 1);
+
+  p.feed(`${D(0, 31, 55)} Syphon bashes Cleric of Innoruuk for 40 points of damage.`);
+  assert.deepEqual(p.snapshot(T(0, 31, 55)).memberEffects, []);
+});
+
+test('without the heal, the same sequence still brands — the proof is what changed', () => {
+  const p = charmScene({ heal: false });
+  assert.equal(p.roster.hasFriendlyProof('Goneker'), false);
+
+  p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
+  assert.equal(p.roster.isHostileByAction('Goneker'), true);
+  // ...and no charm is claimed, because with Goneker unaccounted for the honest reading
+  // is that IT was the enemy. Naming a member charmed on this evidence alone is what
+  // would have destroyed the Plane of Sky fix.
+  assert.deepEqual(p.snapshot(T(0, 31, 47)).memberEffects, []);
+});
+
+test('a mob healing a mob is not friendly proof, so the brand still lands', () => {
+  const p = makeParser();
+  p.feed(`${D(15, 13, 50)} You slash Knight V\`Tal for 40 points of damage.`);
+  // The one branded name in the live log that IS healed — by "a Teir`Dal ranger".
+  p.feed(`${D(15, 13, 51)} a Teir\`Dal ranger healed Knight V\`Tal for 175 hit points by Healing.`);
+  assert.equal(p.roster.hasFriendlyProof('Knight V`Tal'), false);
+
+  p.feed(`${D(15, 50, 51)} Knight V\`Tal hit you for 14 points of magic damage by Lifespike.`);
+  assert.equal(p.isFriendly('Knight V`Tal'), false);
+});
+
+test('a heal revokes a branding made before the evidence arrived', () => {
+  const p = charmScene({ heal: false });
+  p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
+  assert.equal(p.roster.isHostileByAction('Goneker'), true);
+  assert.equal(p.isFriendly('Goneker'), false);
+
+  p.feed(`${D(0, 31, 50)} Taneldar healed Goneker for 255 hit points by Skin like Nature.`);
+  assert.equal(p.roster.isHostileByAction('Goneker'), false);
+  assert.equal(p.isFriendly('Goneker'), true);
+
+  p.feed(`${D(0, 31, 51)} Goneker backstabs Cleric of Innoruuk for 102 points of damage.`);
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Goneker').damage, 172);
+});
+
+test('a healed bee is still a bee — nobody healed one, and nobody does', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 44, 0)} Khanvikt has joined the group.`);
+  // The group heals itself all through the fight; none of it touches the bees.
+  p.feed(`${D(10, 44, 1)} Emalina healed Khanvikt for 119 hit points by Bravery.`);
+  p.feed(`${D(10, 44, 2)} Bzzazzt stings Khanvikt for 47 points of damage.`);
+
+  assert.equal(p.isFriendly('Bzzazzt'), false);
+  assert.equal(p.roster.isHostileByAction('Bzzazzt'), true);
+  assert.deepEqual(p.snapshot(T(10, 44, 2)).memberEffects, []);
+});
+
+test('self-damage is dropped without disturbing anybody\'s identity', () => {
+  const p = makeParser();
+  p.feed(`${D(22, 45, 56)} Venun slashes a revultant rat for 45 points of damage.`);
+  // A shaman buying mana with life: 18 lines and 20,965 points in the live log.
+  p.feed(`${D(22, 45, 57)} Venun hit Venun for 1924 points of unresistable damage by Cannibalization I.`);
+
+  assert.equal(p.roster.isHostileByAction('Venun'), false);
+  assert.equal(p.isFriendly('Venun'), true);
+  const venun = p.snapshot().rows.find((r) => r.name === 'Venun');
+  assert.equal(venun.damage, 45, 'not counted as DPS');
+  assert.equal(venun.damageTaken, 0, 'and not counted against them either');
 });
 
 test('channel chat is player proof; a summon call-out is not', () => {

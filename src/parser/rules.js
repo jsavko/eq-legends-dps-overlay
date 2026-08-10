@@ -35,6 +35,10 @@ export const ATTACK_VERBS = [
   'frenzies on', 'frenzy on',
   'backstabs', 'backstab',
   'smashes', 'smash',   // evil eyes; surfaced by collect-unknown against the live log
+  // 2,638 swings in the live log went unparsed for want of this one: 1,374 hits and
+  // 1,264 misses across eight different players (Glorb 536, Rhain 416, Syphon 112,
+  // Ribbers 100, …). Nothing about it is exotic — it simply was not in the sample.
+  'reaves', 'reave',
   // standard EverQuest attack verbs not present in the sample
   'bites', 'bite',
   'claws', 'claw',
@@ -382,8 +386,12 @@ export const RULES = [
     // The VERB is the log stating the shield's element — "burned by" is fire, "frozen
     // by" is cold — so it is captured and mapped, which is reading the line, not
     // guessing. "pierced"/"struck" name no element and map to nothing.
+    // "tormented" joins the list on the same evidence as the rest: 225 lines in the live
+    // log ("A fire giant warrior is tormented by Kadomony's frost for 12 points of
+    // non-melee damage."). It names no element — "frost" is the shield's own name, not a
+    // damage type the line states — so it maps to nothing and stays honestly untyped.
     id: 'damage-shield',
-    re: /^(.+?) (?:is|are) (pierced|burned|frozen|struck|singed|shocked) by (.+?) for (\d+) points? of non-melee damage[.!]$/,
+    re: /^(.+?) (?:is|are) (pierced|burned|frozen|struck|singed|shocked|tormented) by (.+?) for (\d+) points? of non-melee damage[.!]$/,
     make: (m) => ({
       kind: 'damage',
       source: 'ds',
@@ -708,6 +716,34 @@ export const RULES = [
       potential: m[5] === undefined ? Number(m[4]) : Number(m[5]),
       ability: m[6],
       mods: parseMods(m[7]),
+    }),
+  },
+  {
+    // (confirmed) "You healed Rhale for 92 hit points."
+    // (confirmed) "Rhazendude healed Vaezerk for 67 hit points."
+    // (confirmed) "You healed Rhale`s warder for 69 hit points."
+    //
+    // The same line as above with the "by <Spell>" clause absent — 4,715 of them in the
+    // live log, matching no rule and scored nowhere, which is a healer's contribution
+    // quietly reading low. What produced them is not stated and is not guessable from
+    // the line, so the ability is labelled the way unattributed damage already is
+    // rather than credited to whatever the healer last cast.
+    //
+    // Cannot swallow the rule above it: that one ends "hit points by Bravery." and this
+    // one requires the period immediately after "hit points".
+    id: 'heal-no-spell',
+    re: new RegExp(
+      '^(.+?) healed (.+?)( over time)? for (\\d+)(?: \\((\\d+)\\))? hit points\\.' + MODS + '$'
+    ),
+    make: (m) => ({
+      kind: 'heal',
+      attacker: m[1],
+      target: m[2],
+      overTime: Boolean(m[3]),
+      effective: Number(m[4]),
+      potential: m[5] === undefined ? Number(m[4]) : Number(m[5]),
+      ability: 'Unknown',
+      mods: parseMods(m[6]),
     }),
   },
 

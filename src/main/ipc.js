@@ -67,6 +67,20 @@ export const CHANNELS = {
   PETS_STATE: 'pets:state',
 
   /**
+   * Check the typed party list against who the parser has actually seen.
+   *
+   * A verdict rather than a name dump, for the same reason `LOGS_VALIDATE` is: the
+   * judgement belongs next to the thing that can make it. `nearestName` lives in the
+   * parser, no renderer reaches into `src/parser`, and duplicating an edit-distance
+   * routine into a settings form to avoid one IPC call would be the worse trade.
+   *
+   * The check exists because a mistyped name in a filter is invisible in exactly the way
+   * this whole feature was built to prevent: the list dutifully hides a person who is
+   * right there, and nothing on screen says so.
+   */
+  ROSTER_CHECK: 'roster:check',
+
+  /**
    * Trigger packs, for the settings window.
    *
    * `TRIGGERS_IMPORT` opens a file dialog and returns the import REPORT — what arrived,
