@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { SESSION_CATEGORIES } from '../session/rules.js';
+import { storeKey } from './history.js';
 
 /** Where the Daybreak launcher installs EverQuest Legends by default. */
 export const DEFAULT_LOG_DIR =
@@ -28,18 +29,22 @@ export const DEFAULTS = {
   rollingWindowSec: 10,
 
   /**
-   * Exactly whose rows to show, or empty for everyone the log sees.
+   * Exactly whose rows to show, PER CHARACTER, or empty for everyone the log sees.
    *
-   * Empty is the default and means no filter at all. This replaced a `groupOnly`
-   * switch that filtered on membership the parser had INFERRED from group join and
-   * leave lines — which fails closed and fails silently, because anyone already in the
-   * group when logging began is never in that set, and the first join or leave line by
-   * anybody else dropped them from the view with nothing on screen to say why.
+   * Keyed `<Character>_<server>`, the same key the history and session stores use, because
+   * the answer is genuinely per character: the alt you take into a public zone wants a
+   * different list from the one your main raids with, and a global list would silently
+   * apply one to the other.
    *
-   * A list the player typed can be read, checked and corrected. An inference cannot.
-   * @type {string[]}
+   * An empty entry — or a character with no entry — means no filter at all, which is the
+   * default. This replaced a `groupOnly` switch that filtered on membership the parser had
+   * INFERRED from group join and leave lines, and which failed closed and silently: anyone
+   * already in the group when logging began was never in that set, so the first join or
+   * leave line by anybody else dropped them from the view with nothing on screen to say
+   * why. A list the player picked can be read, checked and corrected. An inference cannot.
+   * @type {Object<string, string[]>}
    */
-  partyMembers: [],
+  partyMembers: {},
   /** Fold pet damage into the owner's row (v1 always does; false is not yet wired). */
   mergePets: true,
 
@@ -449,7 +454,6 @@ export class ConfigStore {
       timeoutMs: this.data.combatTimeoutSec * 1000,
       postKillGraceMs: this.data.postKillGraceSec * 1000,
       rollingWindowMs: this.data.rollingWindowSec * 1000,
-      partyMembers: this.data.partyMembers,
       petOwners: this.data.petOwners,
     };
   }
@@ -514,6 +518,20 @@ function migrateTimers(raw) {
 }
 
 /**
+ * The party list a given character is filtered by, or [] for "show everyone".
+ *
+ * A free function rather than a method so the renderer and the tests can ask the same
+ * question without a store — and so the "no entry means no filter" rule lives in exactly
+ * one place instead of at every call site.
+ */
+export function partyListFor(config, character, server) {
+  const map = config?.partyMembers;
+  if (!map || Array.isArray(map)) return [];
+  const list = map[storeKey(character, server)];
+  return Array.isArray(list) ? list.filter(Boolean) : [];
+}
+
+/**
  * Drop the old `groupOnly` switch, which the party list replaced.
  *
  * A stored `true` migrates to an EMPTY list — showing more, not less. There is nothing
@@ -525,8 +543,14 @@ function migrateTimers(raw) {
  * whole change exists to fix is a row that is missing and says nothing.
  */
 function migrateParty(raw) {
-  if (!raw || typeof raw !== 'object' || !('groupOnly' in raw)) return raw;
+  if (!raw || typeof raw !== 'object') return raw;
   const { groupOnly, ...rest } = raw;
+  // The list was global for one day before it became per character. An array cannot be
+  // migrated honestly — there is nobody to attribute it to, since the config does not
+  // record which character was logged in when it was typed — so it becomes no filter at
+  // all. Showing more is the safe direction, and it is the direction the empty default
+  // already points.
+  if (Array.isArray(rest.partyMembers)) rest.partyMembers = {};
   return rest;
 }
 

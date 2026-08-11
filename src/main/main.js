@@ -21,7 +21,7 @@ import { LogParser } from '../parser/index.js';
 import { nearestName } from '../parser/entities.js';
 import { Tailer, listLogs } from './tailer.js';
 import {
-  ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, alertsEnabled, timersEnabled,
+  ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, alertsEnabled, timersEnabled, partyListFor,
   ALERT_PRESETS, warnKeyFor, presetOf, sessionEnabled, sessionCategories,
 } from './config.js';
 import { EncounterStore, RECORD_VERSION, storeKey, combatBetween } from './history.js';
@@ -381,6 +381,18 @@ app.on('will-quit', () => {
 // Parser + tailer
 // ---------------------------------------------------------------------------
 
+/**
+ * Point the parser at the list belonging to whoever is logged in.
+ *
+ * Called on every route by which the answer can change — a new tail, a character switch,
+ * a settings save — rather than being read once at construction, because the character
+ * is not known until the filename is parsed and can change under a running app.
+ */
+function applyPartyList() {
+  if (!parser) return;
+  parser.setPartyMembers(partyListFor(config.all, parser.selfName, parser.server));
+}
+
 async function startTailing(logPath) {
   tailer?.stop();
 
@@ -397,6 +409,7 @@ async function startTailing(logPath) {
   });
 
   triggers?.setCharacter(parser.selfName);
+  applyPartyList();
   syncSessionTracker();
 
   tailer.on('lines', (lines) => {
@@ -422,6 +435,9 @@ async function startTailing(logPath) {
     // A different character means a different group and a different set of totals.
     parser.setLogFilename(path.basename(to));
     parser.reset();
+    // A different character has a different party list, and applying the old one would
+    // filter the new character's meter by names from somebody else's group.
+    applyPartyList();
     // Every `{C}` in every pattern has to be resubstituted — which is exactly why the
     // token survives into the stored pattern instead of being baked in at import.
     triggers?.reset();
@@ -1838,7 +1854,7 @@ function registerIpc() {
     const after = config.set(patch);
 
     if (patch.hotkeys) registerHotkeys();
-    if (patch.partyMembers !== undefined) parser?.setPartyMembers(after.partyMembers);
+    if (patch.partyMembers !== undefined) applyPartyList();
     if (patch.petOwners) parser?.setPetOwners(after.petOwners);
     if (parser && (patch.combatTimeoutSec || patch.postKillGraceSec || patch.rollingWindowSec)) {
       // Encounter tuning only affects fights started from here; rewriting a running
@@ -2104,22 +2120,50 @@ function registerIpc() {
     unmapped: parser?.unmappedEntities() ?? [],
   }));
 
-  ipcMain.handle(CHANNELS.ROSTER_CHECK, (_e, names) => {
-    const typed = (Array.isArray(names) ? names : []).map((n) => String(n ?? '').trim()).filter(Boolean);
-    const here = parser?.friendlyNames() ?? [];
-    // With nobody seen yet there is nothing to check against, and calling every name
-    // unknown would be worse than saying nothing: this is a filter the player is
-    // entitled to set up before the pull, on a log that has not been read.
-    if (here.length === 0) return { checked: false, unknown: [] };
+  ipcMain.handle(CHANNELS.ROSTER_STATE, () => {
+    if (!parser) return { ok: false, character: null, key: null, seen: [], group: [], tracked: [] };
+    const enc = parser.current ?? parser.last;
+    const damageOf = (name) => enc?.combatants.get(name)?.damage ?? 0;
+    // Everyone the parser counts as one of us, with just enough beside each name to tell
+    // people apart in a public zone — whether they are you, whether the game said they
+    // are in your group, and what they have actually done.
+    const seen = parser.friendlyNames()
+      .map((name) => ({
+        name,
+        self: name === parser.selfName,
+        inGroup: parser.roster.explicit.has(name),
+        damage: damageOf(name),
+      }))
+      .sort((a, b) => Number(b.self) - Number(a.self)
+        || Number(b.inGroup) - Number(a.inGroup)
+        || b.damage - a.damage
+        || a.name.localeCompare(b.name));
+    return {
+      ok: true,
+      character: parser.selfName,
+      server: parser.server,
+      key: storeKey(parser.selfName, parser.server),
+      seen,
+      group: [...parser.roster.explicit],
+      tracked: [...parser.roster.partyMembers],
+    };
+  });
 
-    const known = new Set(here.map((n) => n.toLowerCase()));
-    const unknown = typed
-      .filter((n) => !known.has(n.toLowerCase()))
-      // A suggestion, never a correction. `nearestName` returns null on a tie for exactly
-      // this reason — offering a coin flip would invite the player to accept the wrong
-      // person, which is the failure being guarded against.
-      .map((n) => ({ typed: n, near: nearestName(n, here) }));
-    return { checked: true, unknown };
+  // "Not a pet" from the settings picker. The parser already has this gesture — it is
+  // what `pet <name> = clear` does in chat — and it must blacklist rather than merely
+  // forget, or the next summon nearby re-learns the same wrong answer a minute later.
+  ipcMain.handle(CHANNELS.PETS_NOT_A_PET, (_e, name) => {
+    const pet = String(name ?? '').trim();
+    if (!parser || !pet) return { ok: false };
+    parser.roster.petOwners.delete(pet);
+    parser.roster.unbindPet(pet, { includeStrong: true });
+    parser.roster.notPets.add(pet);
+    parser.revision++;
+    const owners = { ...config.get('petOwners') };
+    delete owners[pet];
+    config.set({ petOwners: owners });
+    parser.setPetOwners(owners);
+    return { ok: true, petOwners: owners };
   });
 
   ipcMain.handle(CHANNELS.LOGS_LIST, async (_e, dir) => {

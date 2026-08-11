@@ -995,7 +995,10 @@ export class LogParser {
       if (this.roster.ownerOf(name) || this.roster.hasPlayerProof(name)) continue;
       if (!this.isEnemy(name)) out.add(name);
     }
-    return [...out].sort();
+    // A summoned pet's generated name is player-SHAPED. Anything carrying an article or a
+    // space is a mob you happened to target and never a candidate for an owner — offering
+    // "a sonic bat" as something to map is asking a question with no right answer.
+    return [...out].filter((n) => !looksLikeMobName(n)).sort();
   }
 
   /** Every pet mapping in force, configured and learned alike. */

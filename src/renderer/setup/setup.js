@@ -22,6 +22,17 @@ const state = {
   dir: null,
   selected: null,      // absolute path of the chosen log
   validation: null,
+  /** Which rail entry is showing. Purely local — never persisted. */
+  page: 'log',
+  /** What the parser knows about who is here, refreshed when a picker needs it. */
+  roster: { ok: false, key: null, seen: [], group: [], character: null },
+  /** The tracked set for THIS character, as a Set for cheap toggling. */
+  party: new Set(),
+  /** Pet pickers: what needs an owner, and the current left/right selection. */
+  pets: { mapped: [], unmapped: [] },
+  petPick: null,
+  ownerPick: null,
+  petOwners: {},
 };
 
 const isSettings = window.api.mode === 'settings';
@@ -33,18 +44,20 @@ async function init() {
   state.selected = state.config.logPath ?? null;
 
   if (isSettings) {
-    $('title').textContent = 'Overlay settings';
-    $('subtitle').textContent = 'Changes apply immediately.';
+    $('title').textContent = 'Log file';
+    $('subtitle').textContent = 'Which character the overlay is following.';
     $('save').textContent = 'Save and close';
   }
 
   fillForm(state.config);
   wireEvents();
+  showPage(isSettings ? 'log' : 'log');
 
   await loadDirectory(state.config.logDir);
   if (state.selected) await validate(state.selected);
+  await refreshRoster();
   await renderPets();
-  await renderPartyStatus();
+  renderParty();
   await renderTriggerSummary();
   await renderSessionSummary();
   await renderLoggingState();
@@ -52,55 +65,257 @@ async function init() {
 }
 
 /**
- * What the parser currently knows about pets.
+ * Show one rail page. Nothing here is persisted: which topic you last looked at is not a
+ * preference, and restoring it would open settings somewhere other than where a first-run
+ * player needs to be.
+ */
+function showPage(page) {
+  state.page = page;
+  for (const b of document.querySelectorAll('#rail button')) {
+    b.setAttribute('aria-selected', String(b.dataset.page === page));
+  }
+  for (const a of document.querySelectorAll('#detail article')) {
+    a.hidden = a.dataset.page !== page;
+  }
+  // Scrolled back to the top, because the pane is shared: landing halfway down a page
+  // because the previous one was long reads as a rendering fault.
+  $('detail').scrollTop = 0;
+}
+
+/**
+ * Ask the parser who is here.
  *
- * The `Pet = Owner` box has existed since the first version and never told anyone
- * which names needed an entry — you had to already know the answer, which made the
- * setting unusable in practice. This shows both halves: what the log has worked out on
- * its own, and the names still sitting in the honest "unknown" state, each one a click
- * away from a line in the box above.
+ * Failure is silent and leaves the pickers empty, which is the honest state during
+ * first-run setup: no log has been chosen, so there is no parser and nobody is here yet.
+ */
+async function refreshRoster() {
+  try {
+    state.roster = await window.api.rosterState();
+  } catch {
+    state.roster = { ok: false, key: null, seen: [], group: [], character: null };
+  }
+  // The stored list is per character; the picker only ever edits the current one.
+  const stored = state.roster.key ? state.config.partyMembers?.[state.roster.key] : null;
+  state.party = new Set(Array.isArray(stored) ? stored.filter(Boolean) : []);
+}
+
+/** A row in one of the pickers. */
+function nameRow({ name, on, meta, why, selected, cls }) {
+  const li = document.createElement('li');
+  li.dataset.name = name;
+  if (on !== undefined) li.dataset.on = on ? '1' : '0';
+  if (selected !== undefined) li.setAttribute('aria-selected', String(selected));
+  if (cls) li.className = cls;
+
+  if (on !== undefined) {
+    const box = document.createElement('span');
+    box.className = 'box';
+    box.textContent = on ? '\u2713' : '';
+    li.append(box);
+  }
+
+  const who = document.createElement('span');
+  who.className = 'who';
+  who.textContent = name;
+  if (why) {
+    const w = document.createElement('span');
+    w.className = 'why';
+    w.textContent = why;
+    who.append(w);
+  }
+  li.append(who);
+
+  if (meta) {
+    const m = document.createElement('span');
+    m.className = 'meta';
+    m.textContent = meta;
+    li.append(m);
+  }
+  return li;
+}
+
+function emptyRow(text) {
+  const li = document.createElement('li');
+  li.className = 'empty';
+  li.textContent = text;
+  return li;
+}
+
+// ------------------------------------------------------------------- who's tracked
+
+/**
+ * The party picker.
+ *
+ * A picker rather than a text box because a mistyped name in a filter does not fail — it
+ * hides a person who is right there and says nothing, which is the exact failure this
+ * feature was built in response to. A name you clicked cannot be misspelt. The free-text
+ * box stays for somebody who has not acted yet and so is not in the list.
+ */
+function renderParty() {
+  const seenEl = $('party-seen');
+  const pickedEl = $('party-picked');
+  if (!seenEl || !pickedEl) return;
+
+  const q = ($('party-search').value || '').trim().toLowerCase();
+  const seen = state.roster.seen.filter((p) => p.name.toLowerCase().includes(q));
+
+  seenEl.replaceChildren(...(seen.length
+    ? seen.map((p) => nameRow({
+      name: p.name,
+      on: state.party.has(p.name),
+      meta: p.self ? 'you' : (p.inGroup ? 'group' : (p.damage > 0 ? `${Math.round(p.damage)} dmg` : '')),
+    }))
+    : [emptyRow(state.roster.ok ? 'Nobody has acted yet.' : 'No log is being followed yet.')]));
+
+  // Names in the list but not seen — typed by hand, or somebody who has since gone quiet.
+  const known = new Set(state.roster.seen.map((p) => p.name));
+  const tracked = [...state.party].sort((a, b) => a.localeCompare(b));
+  pickedEl.replaceChildren(...(tracked.length
+    ? tracked.map((n) => nameRow({
+      name: n,
+      on: true,
+      meta: known.has(n) ? 'remove' : 'not seen yet',
+      cls: 'picked',
+    }))
+    : [emptyRow('Nobody picked — every player the log sees gets a row.')]));
+
+  const n = state.party.size;
+  $('party-count').textContent = String(n);
+  $('party-of').textContent = state.roster.seen.length
+    ? `of ${state.roster.seen.length} seen this session`
+    : 'of nobody seen yet';
+
+  const pill = $('party-pill');
+  pill.textContent = n ? 'Filtering' : 'Showing everyone';
+  pill.dataset.tone = n ? 'some' : 'all';
+
+  const tag = $('tag-party');
+  if (tag) tag.textContent = n ? `${n} of ${state.roster.seen.length || n}` : '';
+
+  $('party-status').textContent = n
+    ? `The meter will show ${tracked.join(', ')} and nobody else.`
+    : 'The meter will show every player the log sees.';
+}
+
+function toggleParty(name) {
+  if (state.party.has(name)) state.party.delete(name);
+  else state.party.add(name);
+  renderParty();
+}
+
+// ----------------------------------------------------------------------------- pets
+
+/**
+ * What the parser currently knows about pets, as two lists rather than a text box.
+ *
+ * The `Pet = Owner` box never told anyone WHICH names needed an entry — you had to
+ * already know the answer, which made the setting unusable in practice — and it made the
+ * one dangerous typo easy: get the pet name wrong and the mapping matches nothing, get
+ * the OWNER wrong and real damage folds into somebody who does not exist.
  */
 async function renderPets() {
-  const learnedEl = $('pets-learned');
-  const list = $('pets-unmapped');
-  if (!learnedEl || !list) return;
-
-  let pets = { mapped: [], unmapped: [] };
   try {
-    pets = await window.api.petsState();
+    state.pets = await window.api.petsState();
   } catch {
-    // No parser yet (first-run setup, before a log is chosen) — an empty list is right.
+    state.pets = { mapped: [], unmapped: [] };
   }
 
-  const learned = pets.mapped.filter((m) => m.weak || !state.config.petOwners?.[m.pet]);
-  learnedEl.textContent = learned.length
-    ? `Worked out from the log: ${learned.map((m) => `${m.pet} = ${m.owner}`).join(', ')}.`
-    : 'Nothing has been worked out from the log yet.';
+  const configured = new Set(Object.keys(state.petOwners));
+  const waiting = state.pets.unmapped.filter((n) => !configured.has(n));
+  if (state.petPick && !waiting.includes(state.petPick)) state.petPick = null;
+  if (!state.petPick && waiting.length) state.petPick = waiting[0];
 
-  const already = new Set(Object.keys(state.config.petOwners ?? {}));
-  const names = pets.unmapped.filter((n) => !already.has(n));
-  list.replaceChildren(...names.map((name) => {
-    const li = document.createElement('li');
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = name;
-    btn.addEventListener('click', () => {
-      const box = $('pet-owners');
-      const lines = box.value.split('\n').filter((l) => l.trim());
-      if (!lines.some((l) => l.split('=')[0].trim() === name)) lines.push(`${name} = `);
-      box.value = lines.join('\n');
-      box.focus();
-      box.setSelectionRange(box.value.length, box.value.length);
+  const damageOf = (n) => state.roster.seen.find((p) => p.name === n)?.damage ?? 0;
+  $('pets-unmapped').replaceChildren(...(waiting.length
+    ? waiting.map((n) => nameRow({
+      name: n,
+      selected: n === state.petPick,
+      why: damageOf(n) > 0 ? `${Math.round(damageOf(n))} damage this fight` : 'fighting alongside you',
+    }))
+    : [emptyRow('Nothing is waiting for an owner.')]));
+
+  const q = ($('pets-search').value || '').trim().toLowerCase();
+  // A pet cannot own a pet, and neither can the name we are currently mapping.
+  const owners = state.roster.seen
+    .filter((p) => p.name !== state.petPick && !waiting.includes(p.name))
+    .filter((p) => p.name.toLowerCase().includes(q));
+  $('pets-owners').replaceChildren(...(owners.length
+    ? owners.map((p) => nameRow({
+      name: p.name,
+      on: p.name === state.ownerPick,
+      meta: p.self ? 'you' : (p.inGroup ? 'group' : ''),
+    }))
+    : [emptyRow('Nobody to pick from yet.')]));
+
+  renderPetsInForce();
+
+  $('pets-count').textContent = String(waiting.length);
+  const pill = $('pets-pill');
+  pill.textContent = waiting.length ? `${waiting.length} unmapped` : 'all mapped';
+  pill.dataset.tone = waiting.length ? 'some' : 'all';
+  const tag = $('tag-pets');
+  if (tag) tag.textContent = waiting.length ? `${waiting.length} new` : '';
+
+  $('pets-assign').disabled = !(state.petPick && state.ownerPick);
+  $('pets-notpet').disabled = !state.petPick;
+  $('pets-explain').textContent = !state.petPick
+    ? 'Nothing is waiting. A pet that needs an owner will appear here on its own.'
+    : state.ownerPick
+      ? `${state.petPick}'s damage will fold into ${state.ownerPick}'s row from the next fight.`
+      : `${state.petPick} is getting its own row. Pick its owner on the right.`;
+}
+
+/**
+ * Every mapping currently applied, each labelled with where it came from.
+ *
+ * The provenance is the part the text box could not show: a mapping the log worked out
+ * on its own reads very differently from one you typed, and a WEAK one — bound from cast
+ * adjacency rather than a flavour line naming the owner — is the one worth checking.
+ */
+function renderPetsInForce() {
+  // `petMappings` reports the learned bindings AND the saved ones, because the in-game
+  // command writes what it learns straight to settings — so "is it in config" does not
+  // by itself mean the player typed it. A binding the log worked out on its own is one
+  // the log can correct; one that only exists in settings is not, and a WEAK one, bound
+  // from cast adjacency rather than a line naming the owner, is the one worth checking.
+  const learned = new Map(state.pets.mapped.map((m) => [m.pet, m]));
+  const rows = [];
+  for (const [pet, owner] of Object.entries(state.petOwners)) {
+    const m = learned.get(pet);
+    rows.push({
+      pet,
+      owner,
+      src: !m || m.owner !== owner ? 'you set this'
+        : m.weak ? 'from the log · weak' : 'from the log',
     });
-    li.append(btn);
-    return li;
-  }));
-  if (names.length === 0) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = 'none';
-    list.append(li);
   }
+  for (const m of state.pets.mapped) {
+    if (state.petOwners[m.pet]) continue;
+    rows.push({ pet: m.pet, owner: m.owner, src: m.weak ? 'from the log · weak' : 'from the log' });
+  }
+  rows.sort((a, b) => a.pet.localeCompare(b.pet));
+
+  $('pets-inforce').replaceChildren(...(rows.length
+    ? rows.map((r) => {
+      const li = document.createElement('li');
+      li.dataset.name = r.pet;
+      const who = document.createElement('span');
+      who.className = 'who';
+      who.append(`${r.pet} = `);
+      const b = document.createElement('b');
+      b.textContent = r.owner;
+      who.append(b);
+      const src = document.createElement('span');
+      src.className = 'meta';
+      src.textContent = r.src;
+      const rm = document.createElement('span');
+      rm.className = 'rm';
+      rm.dataset.remove = r.pet;
+      rm.textContent = 'remove';
+      li.append(who, src, rm);
+      return li;
+    })
+    : [emptyRow('No pet is mapped to anybody yet.')]));
 }
 
 function fillForm(cfg) {
@@ -110,8 +325,7 @@ function fillForm(cfg) {
   $('timeout').value = cfg.combatTimeoutSec;
   $('grace').value = cfg.postKillGraceSec;
   $('auto-switch').checked = cfg.autoSwitchCharacter;
-  $('party-members').value = (cfg.partyMembers ?? []).join('\n');
-  $('pet-owners').value = formatPetOwners(cfg.petOwners);
+  state.petOwners = { ...(cfg.petOwners ?? {}) };
 
   const session = cfg.session ?? {};
   $('session-enabled').checked = session.enabled === true;
@@ -235,9 +449,80 @@ function wireEvents() {
   $('opacity').addEventListener('input', syncOutputs);
   $('scale').addEventListener('input', syncOutputs);
 
-  // On input rather than on save: a typo is worth catching while the cursor is still
-  // in the box, not after the meter has been quietly hiding somebody for a raid.
-  $('party-members').addEventListener('input', renderPartyStatus);
+  $('rail').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-page]');
+    if (!b) return;
+    showPage(b.dataset.page);
+    // Refreshed on entry rather than polled: who is here changes constantly during a
+    // raid, and a picker showing the roster as it was when settings opened would offer
+    // names that have left and hide the person who just walked up.
+    if (b.dataset.page === 'party') refreshRoster().then(renderParty);
+    if (b.dataset.page === 'pets') refreshRoster().then(renderPets);
+  });
+
+  $('party-search').addEventListener('input', renderParty);
+  $('party-seen').addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-name]');
+    if (li) toggleParty(li.dataset.name);
+  });
+  $('party-picked').addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-name]');
+    if (li) { state.party.delete(li.dataset.name); renderParty(); }
+  });
+  $('party-all').addEventListener('click', () => { state.party.clear(); renderParty(); });
+  // A seed, not a filter of its own: it fills the list from what the game said about your
+  // group, and every name in it is then yours to remove. That is the difference between
+  // this and the `groupOnly` switch it replaced, which decided and never showed its work.
+  $('party-group').addEventListener('click', () => {
+    state.party = new Set(state.roster.group);
+    renderParty();
+  });
+  $('party-add').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const name = e.target.value.trim();
+    if (name) state.party.add(name);
+    e.target.value = '';
+    renderParty();
+  });
+
+  $('pets-unmapped').addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-name]');
+    if (!li) return;
+    state.petPick = li.dataset.name;
+    renderPets();
+  });
+  $('pets-search').addEventListener('input', renderPets);
+  $('pets-owners').addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-name]');
+    if (!li) return;
+    state.ownerPick = state.ownerPick === li.dataset.name ? null : li.dataset.name;
+    renderPets();
+  });
+  $('pets-assign').addEventListener('click', () => {
+    if (!state.petPick || !state.ownerPick) return;
+    state.petOwners[state.petPick] = state.ownerPick;
+    state.petPick = null;
+    state.ownerPick = null;
+    renderPets();
+  });
+  $('pets-notpet').addEventListener('click', async () => {
+    const pet = state.petPick;
+    if (!pet) return;
+    delete state.petOwners[pet];
+    state.petPick = null;
+    // Straight through rather than waiting for Save: this one is a blacklist in the
+    // running parser, and a summon firing nearby before you press Save would re-learn
+    // the very binding you just rejected.
+    try { await window.api.notAPet(pet); } catch { /* no parser yet */ }
+    await renderPets();
+  });
+  $('pets-inforce').addEventListener('click', async (e) => {
+    const pet = e.target.dataset?.remove;
+    if (!pet) return;
+    delete state.petOwners[pet];
+    try { await window.api.notAPet(pet); } catch { /* no parser yet */ }
+    await renderPets();
+  });
 
   $('open-triggers').addEventListener('click', () => window.api.openTriggers());
   $('open-session').addEventListener('click', () => window.api.openSession());
@@ -405,11 +690,16 @@ async function save() {
     combatTimeoutSec: Number($('timeout').value),
     postKillGraceSec: Number($('grace').value),
     autoSwitchCharacter: $('auto-switch').checked,
-    partyMembers: parsePartyMembers($('party-members').value),
+    // Merged over what is stored, never replacing it: the picker only ever edits the
+    // character currently logged in, and writing the whole map would wipe every other
+    // character's list on every Save.
+    partyMembers: state.roster.key
+      ? { ...(state.config.partyMembers ?? {}), [state.roster.key]: [...state.party] }
+      : (state.config.partyMembers ?? {}),
     // The alert and timer switches are deliberately absent: they belong to the Triggers
     // window now, and a form that still wrote them would clobber whatever was set there
     // the next time somebody pressed Save on an unrelated setting.
-    petOwners: parsePetOwners($('pet-owners').value),
+    petOwners: { ...state.petOwners },
     // Written whole, because this form is the only screen that owns them — unlike the
     // alert switches above, which moved out precisely so a Save here would stop clobbering
     // what the Triggers window had just set.
@@ -437,82 +727,9 @@ async function save() {
 }
 
 /** { Gann: 'Rhain' } -> "Gann = Rhain" */
-/**
- * One name per line, blanks dropped. Never rejects: a half-typed line must not block
- * saving the rest of the form, exactly as the pet box does not.
- */
-function parsePartyMembers(text) {
-  return String(text ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
 
-/**
- * Say what the party list is doing, and flag a name that matches nobody here.
- *
- * The empty state is the important half. An empty box with no caption reads as a broken
- * field, and this one is the default and the right answer for nearly everybody — so it
- * says outright that everyone is showing rather than leaving the player to guess.
- *
- * The other half is the typo. A misspelt name in a filter does not fail, it hides a
- * person and says nothing, which is precisely the class of bug this whole feature was
- * built in response to. So an unrecognised name is called out, with the nearest actual
- * combatant offered when there is an obvious one — offered, never applied. Auto-correct
- * would risk swapping in the wrong person, and `handlePetCommand` refuses for the same
- * reason. A name nobody here answers to is still legal: they may simply not have acted
- * yet, and this is a filter the player is entitled to set up before the pull.
- */
-async function renderPartyStatus() {
-  const el = $('party-status');
-  const box = $('party-members');
-  if (!el || !box) return;
 
-  const names = parsePartyMembers(box.value);
-  if (names.length === 0) {
-    el.textContent = 'Empty — everyone the log sees gets a row.';
-    return;
-  }
 
-  const showing = `Showing ${names.length} name${names.length === 1 ? '' : 's'}, and nobody else.`;
-
-  let verdict = { checked: false, unknown: [] };
-  try {
-    verdict = await window.api.rosterCheck(names);
-  } catch {
-    // No parser yet (first-run setup, before a log is chosen).
-  }
-  if (!verdict.checked || verdict.unknown.length === 0) {
-    el.textContent = showing;
-    return;
-  }
-
-  const notes = verdict.unknown.map((u) => (u.near ? `${u.typed} — did you mean ${u.near}?` : u.typed));
-  el.textContent = `${showing} Not seen yet: ${notes.join('; ')}`;
-}
-
-function formatPetOwners(mapping) {
-  return Object.entries(mapping ?? {})
-    .map(([pet, owner]) => `${pet} = ${owner}`)
-    .join('\n');
-}
-
-/**
- * "Gann = Rhain" -> { Gann: 'Rhain' }
- * Blank lines and lines with no "=" are skipped rather than rejected, so a half-typed
- * line never blocks saving the rest of the settings.
- */
-function parsePetOwners(text) {
-  const out = {};
-  for (const line of String(text).split('\n')) {
-    const [pet, owner] = line.split('=');
-    if (!owner) continue;
-    const p = pet.trim();
-    const o = owner.trim();
-    if (p && o) out[p] = o;
-  }
-  return out;
-}
 
 function setStatus(el, text, cls) {
   el.textContent = text;

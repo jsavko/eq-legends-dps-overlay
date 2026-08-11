@@ -67,18 +67,27 @@ export const CHANNELS = {
   PETS_STATE: 'pets:state',
 
   /**
-   * Check the typed party list against who the parser has actually seen.
+   * Everyone the parser counts as one of us, for the two pickers in settings.
    *
-   * A verdict rather than a name dump, for the same reason `LOGS_VALIDATE` is: the
-   * judgement belongs next to the thing that can make it. `nearestName` lives in the
-   * parser, no renderer reaches into `src/parser`, and duplicating an edit-distance
-   * routine into a settings form to avoid one IPC call would be the worse trade.
+   * Names with enough beside each to tell people apart in a public zone — whether it is
+   * you, whether the game said they are in your group, and what they have actually done
+   * this fight — plus the character key, because the party list is per character.
    *
-   * The check exists because a mistyped name in a filter is invisible in exactly the way
-   * this whole feature was built to prevent: the list dutifully hides a person who is
-   * right there, and nothing on screen says so.
+   * A picker rather than a text box is the whole point. A mistyped name in a filter does
+   * not fail, it hides a person who is right there and says nothing; a mistyped pet OWNER
+   * folds real damage into somebody who does not exist. Neither can happen to a name you
+   * clicked, so this channel is what makes the typo impossible rather than merely caught.
    */
-  ROSTER_CHECK: 'roster:check',
+  ROSTER_STATE: 'roster:state',
+
+  /**
+   * Blacklist a name the settings picker says is not a pet.
+   *
+   * The same gesture `pet <name> = clear` already performs in chat, and it blacklists
+   * rather than merely forgetting: without that the next summon that fires nearby
+   * re-learns the same wrong answer a minute later.
+   */
+  PETS_NOT_A_PET: 'pets:not-a-pet',
 
   /**
    * Trigger packs, for the settings window.

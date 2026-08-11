@@ -7,7 +7,7 @@ import {
   ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled, timersEnabled,
   ALERT_CATEGORIES, ALERT_PRESETS, TIMER_KEYS, WARN_GROUPS, WARN_KEYS,
   warnKeyFor, warnGroupOn, presetOf,
-  SESSION_CATEGORIES, sessionEnabled, sessionLineEnabled, sessionCategories,
+  SESSION_CATEGORIES, sessionEnabled, sessionLineEnabled, sessionCategories, partyListFor,
 } from '../src/main/config.js';
 import { GROUPS, UNKNOWN_GROUP } from '../src/parser/spellwatch.js';
 import { SESSION_RULES } from '../src/session/rules.js';
@@ -28,12 +28,12 @@ test('settings round-trip through disk', () => {
   const dir = tmpdir();
   const a = new ConfigStore(dir);
   a.load();
-  a.set({ opacity: 0.5, partyMembers: ['Rhain', 'Emalina'] });
+  a.set({ opacity: 0.5, partyMembers: { Rhale_oggok: ['Rhain', 'Emalina'] } });
 
   const b = new ConfigStore(dir);
   b.load();
   assert.equal(b.get('opacity'), 0.5);
-  assert.deepEqual(b.get('partyMembers'), ['Rhain', 'Emalina']);
+  assert.deepEqual(b.get('partyMembers'), { Rhale_oggok: ['Rhain', 'Emalina'] });
   assert.equal(b.get('scale'), DEFAULTS.scale, 'untouched keys keep their defaults');
 });
 
@@ -103,16 +103,14 @@ test('isConfigured requires the log file to still exist', () => {
 test('parserOptions converts seconds to the milliseconds the parser wants', () => {
   const store = new ConfigStore(tmpdir());
   store.load();
-  store.set({
-    combatTimeoutSec: 20, postKillGraceSec: 4, rollingWindowSec: 6,
-    partyMembers: ['Rhain'],
-  });
+  store.set({ combatTimeoutSec: 20, postKillGraceSec: 4, rollingWindowSec: 6 });
 
+  // The party list is deliberately NOT here: it is per character, and the character is
+  // not known until the log filename is parsed. main applies it separately.
   assert.deepEqual(store.parserOptions(), {
     timeoutMs: 20_000,
     postKillGraceMs: 4_000,
     rollingWindowMs: 6_000,
-    partyMembers: ['Rhain'],
     petOwners: {},
   });
 });
@@ -213,7 +211,7 @@ test('an old "alerts off" config keeps meaning no alerts at all', () => {
   assert.equal(timersEnabled(store.all), false, 'and no timer window springs up either');
 });
 
-test('the retired group-only switch migrates to an empty party list', () => {
+test('the retired group-only switch migrates to no filter at all', () => {
   const dir = tmpdir();
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ groupOnly: true, opacity: 0.7 }));
 
@@ -225,8 +223,32 @@ test('the retired group-only switch migrates to an empty party list', () => {
   // that set does not exist until a log is read. Showing more is also the safe direction
   // to be wrong in — an extra row is one line of settings away from gone, whereas the
   // missing row this whole change exists to fix said nothing at all.
-  assert.deepEqual(store.get('partyMembers'), []);
+  assert.deepEqual(store.get('partyMembers'), {});
   assert.equal(store.get('opacity'), 0.7, 'the rest of the config is untouched');
+});
+
+test('a party list written while it was global cannot be attributed, so it clears', () => {
+  const dir = tmpdir();
+  fs.writeFileSync(path.join(dir, 'config.json'),
+    JSON.stringify({ partyMembers: ['Rhain', 'Emalina'] }));
+
+  const store = new ConfigStore(dir);
+  store.load();
+  // The config never recorded WHICH character was logged in when those names were typed,
+  // so there is nobody to hand them to. Showing everyone is the safe direction.
+  assert.deepEqual(store.get('partyMembers'), {});
+});
+
+test('the party list is per character, and one character cannot filter another', () => {
+  const store = new ConfigStore(tmpdir());
+  store.load();
+  store.set({ partyMembers: { Rhale_oggok: ['Rhain'], Fuaim_oggok: [] } });
+
+  assert.deepEqual(partyListFor(store.all, 'Rhale', 'oggok'), ['Rhain']);
+  assert.deepEqual(partyListFor(store.all, 'Fuaim', 'oggok'), [], 'empty means no filter');
+  assert.deepEqual(partyListFor(store.all, 'Nobody', 'oggok'), [], 'and so does absent');
+  // A stale global array must never be read as one character's list.
+  assert.deepEqual(partyListFor({ partyMembers: ['Rhain'] }, 'Rhale', 'oggok'), []);
 });
 
 test('a config already carrying the new keys is left exactly as written', () => {
