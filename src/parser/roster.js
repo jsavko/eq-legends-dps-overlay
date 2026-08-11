@@ -1,22 +1,31 @@
 /**
- * Who counts as "us".
+ * What the session has learned about who is who, carried between fights.
  *
- * Three sources feed this, because only one of them is guaranteed to exist:
+ * Read this alongside the note at the top of index.js: **the roster no longer decides
+ * whose damage counts.** The fight decides that — anyone who hits the mob we are
+ * fighting is contributing, whoever they are — and this file exists only to SEED that
+ * decision on the first line of a pull, and to answer identity questions the fight
+ * cannot (whose pet is that, who did the player pin, who is the logging character).
  *
- *  1. EXPLICIT — group join/leave/disband messages and /who output. Authoritative.
- *     The Phase 0 sample contained none, so the wording was long recorded as
- *     unverified; it is CONFIRMED now — 21 join/leave lines and 16 self forms appear
- *     in the live log, worded exactly as rules.js already had them.
- *  2. PROOF BY ACTION — things only a player can do (talk in a channel) and things
- *     only an enemy can do (damage a confirmed group member, or be attacked by one).
- *     Behaviour outranks name shape in both directions.
- *  3. IMPLICIT — anyone who damages an NPC and whose name looks like a player name.
- *     Always available, and it is what makes the overlay populate out of the box.
+ * That demotion is the whole point. When membership gated scoring, one wrong answer
+ * deleted a person for a session; now the worst a wrong answer does is put a row in
+ * the wrong column of one fight, and the next line usually corrects it.
  *
- * Explicit membership always wins over the implicit heuristic: if the log ever says
- * someone left the group, no amount of swinging puts them back in it. Proof by action
- * sits between the two — it cannot overrule the game stating membership outright, but
- * it does overrule a guess made from the shape of a name.
+ * Four sources, in descending order of how much they prove:
+ *
+ *  1. FACTS — the logging character (from the filename) and the party list the player
+ *     typed in settings. Not inferred from anything.
+ *  2. EXPLICIT — group join/leave/disband messages, /who output, "Targeted (Player)"
+ *     and "Targeted (NPC)". The game stating it outright. Confirmed wording: 21
+ *     join/leave lines and 16 self forms appear in the live log.
+ *  3. PLAYER PROOF — speaking on a channel, which no mob and no pet does.
+ *  4. IMPLICIT — anyone who has damaged something we were fighting, whose name looks
+ *     like a player's. Always available, and what makes the overlay populate out of
+ *     the box on the very first pull.
+ *
+ * Note what is NOT here any more: a hostile-by-action brand. It existed because name
+ * shape read Plane of Sky bees as players, and it was removed because the fight answers
+ * that question without asking about names at all.
  */
 
 import { looksLikePetName, looksLikePlayerName, stripArticle } from './entities.js';
@@ -65,7 +74,7 @@ export class Roster {
      * quietly dropped them from the view with nothing on screen to say so.
      *
      * Deliberately a display filter and nothing more. It is read where rows are
-     * chosen, never by `isFriendly`, so leaving someone off the list hides their row
+     * chosen and by nothing in the scoring path, so leaving someone off hides their row
      * without changing a single attribution decision — turn the filter off again and
      * the fight you are looking at is unchanged.
      * @type {Set<string>}
@@ -101,52 +110,6 @@ export class Roster {
     this.knownPlayers = new Set();
     /** Names the game called out as NPCs — includes every summoned pet. */
     this.knownNpcs = new Set();
-
-    /**
-     * Entities proven hostile by what they did, whatever their name looks like.
-     *
-     * `looksLikePlayerName` is a guess about spelling, and on the Plane of Sky it is
-     * simply wrong: the bees are called Bzzazzt, Bazzt and Bzzzt — single capitalized
-     * tokens, no article — so the parser read an entire raid zone as friendly, scored
-     * none of the damage done to them and raised none of the 639 Deadly Poison
-     * warnings that killed the group. Two actions land a name in here, both of them
-     * positive proof rather than inference from absence:
-     *
-     *   - it damaged a CONFIRMED group member (explicit roster or self)
-     *   - a confirmed group member damaged IT
-     *
-     * Confirmed membership only, deliberately: keying off the implicit set would let
-     * one bad guess cascade into a second. The mark lasts the session — a mob does not
-     * stop being a mob — and is cleared only by a character switch.
-     */
-    this.hostileByAction = new Set();
-
-    /**
-     * Entities proven FRIENDLY by what was done to them — the mirror of the set above,
-     * and the thing that was missing when a friendly pet could be branded an enemy for
-     * a whole raid night.
-     *
-     * Hostile proof was one-sided: "it traded damage with a confirmed member" brands, and
-     * nothing ever un-brands. In Plane of Hate the mobs charm group members and EQ Legends
-     * prints NO line when a player is charmed, so a charmed member turns on the group with
-     * nothing in the log to mark the moment. A friendly water elemental took two swings at
-     * one, and that was enough: 1,362 of its damage lines and 69,394 damage were dropped
-     * for the rest of the session, with the row simply gone from the meter.
-     *
-     * Exactly one act feeds this, and it is chosen because it is a measurement rather
-     * than a guess: BEING HEALED BY A PROVEN FRIENDLY. Nobody heals an enemy. Tested
-     * against all twenty brandings in the live log it separates them 20/20 — the two
-     * wrongly-branded pets were healed by group members, every real mob never was, and
-     * the one mob that IS healed (Knight V`Tal) is healed by "a Teir`Dal ranger", which
-     * the proven-friendly guard on the healer already excludes.
-     *
-     * Deliberately NOT fed by "it damaged something we are also fighting", tempting as
-     * that looks. The Plane of Sky bees were scored as friendly right up until the moment
-     * they were branded, so any acted-friendly signal is available to a mob too — which
-     * would hand it the very immunity this set exists to grant. A heal names its TARGET,
-     * and nobody heals a bee.
-     */
-    this.friendlyByAction = new Set();
 
     /**
      * Mobs currently charmed, mapped to whoever charmed them.
@@ -264,7 +227,6 @@ export class Roster {
     if (!key || !ownerName || key === ownerName) return null;
     if (this.notPets.has(key)) return null;
     if (this.hasPlayerProof(key)) return null;
-    if (this.hostileByAction.has(key)) return null;
     if (this.petOwners.has(key)) return null;   // configuration and the Master line win
 
     const existing = this.learnedPetOwners.get(key);
@@ -366,67 +328,6 @@ export class Roster {
   }
 
   /**
-   * Record that `name` is one of ours, proven by something done TO it that nobody does
-   * to an enemy. Lifts an existing brand: a name wrongly marked hostile earlier in the
-   * session comes back the moment real evidence arrives, rather than staying deleted
-   * until the player switches character.
-   *
-   * Restricted to names whose friendliness rests on nothing but their SPELLING, which
-   * is exactly the set the branding mechanism can wrongly claim: a single capitalized
-   * token (`Goneker`, `Vabann`, and every real player) or a generic possessive
-   * (`` Rhale`s warder ``). Anything carrying an article or a space was never friendly
-   * by shape and so was never at risk, and admitting it is actively dangerous — the
-   * group heals the mobs it charms, and a charmed mob given PERMANENT standing here
-   * could never be branded once the charm broke. Measured against the live log that is
-   * not hypothetical: five charmed mobs collected proof this way, one of them a
-   * loathling lich with 85,374 damage that would then have scored as the group's own.
-   *
-   * A currently-charmed mob is refused for the same reason, one step earlier. Its
-   * friendliness is already recorded, in `charmedPets`, with exactly the right lifetime.
-   *
-   * @returns {boolean} true if this changed anything
-   */
-  noteFriendlyByAction(name) {
-    const key = stripArticle(String(name ?? '').trim());
-    if (!key) return false;
-    if (!looksLikePlayerName(key) && !looksLikePetName(key)) return false;
-    if (this.charmedPets.has(key)) return false;
-    if (this.friendlyByAction.has(key)) return false;
-    this.friendlyByAction.add(key);
-    // The brand and its blacklist both go: whatever this was mistaken for, it is ours.
-    const wasBranded = this.hostileByAction.delete(key);
-    if (wasBranded) this.notPets.delete(key);
-    return true;
-  }
-
-  /** True when something an enemy is never on the receiving end of has been seen. */
-  hasFriendlyProof(name) {
-    return this.friendlyByAction.has(stripArticle(String(name ?? '').trim()));
-  }
-
-  /** Record that `name` is an enemy, proven by action rather than guessed from shape. */
-  noteHostileByAction(name) {
-    const key = stripArticle(String(name).trim());
-    if (!key || this.hasPlayerProof(key)) return false;
-    // Proof in the friendly direction outranks proof in this one, because it is the
-    // narrower claim: "a group member healed this" has one explanation, while "this
-    // exchanged damage with a group member" has two, and the second is that the member
-    // was charmed. See friendlyByAction.
-    if (this.hasFriendlyProof(key)) return false;
-    if (this.hostileByAction.has(key)) return false;
-    this.hostileByAction.add(key);
-    this.implicit.delete(key);
-    // Whatever we thought it was a pet of, it is not — and must never be again.
-    this.learnedPetOwners.delete(key);
-    this.notPets.add(key);
-    return true;
-  }
-
-  isHostileByAction(name) {
-    return this.hostileByAction.has(stripArticle(String(name).trim()));
-  }
-
-  /**
    * Mark a name as a proven player. Guarded on shape so that a mob shouting — or a
    * multi-word name arriving from a malformed chat line — can never land here and
    * quietly turn an NPC into a group member.
@@ -437,9 +338,8 @@ export class Roster {
     if (this.knownPlayers.has(key)) return false;
     this.knownPlayers.add(key);
     this.knownNpcs.delete(key);
-    // A proven player is nobody's pet and nobody's enemy.
+    // A proven player is nobody's pet.
     this.learnedPetOwners.delete(key);
-    this.hostileByAction.delete(key);
     return true;
   }
 
@@ -457,9 +357,7 @@ export class Roster {
     this.explicit = new Set(name ? [name] : []);
     this.implicit = new Set(name ? [name] : []);
     this.hasExplicitData = false;
-    // Everything proven by action belonged to the old character's session too.
-    this.hostileByAction.clear();
-    this.friendlyByAction.clear();
+    // Everything learned by watching belonged to the old character's session too.
     this.learnedPetOwners.clear();
     this.notPets.clear();
     this.pendingSummon = null;
@@ -540,8 +438,6 @@ export class Roster {
     if (this.knownNpcs.has(name)) return;   // a pet or a mob, never a group member
     if (this.petOwners.has(name)) return;
     if (this.learnedPetOwners.has(name)) return;
-    // Proof of hostility outranks the name-shape guess this method is built on.
-    if (this.hostileByAction.has(name)) return;
     if (this.knownPlayers.has(name) || looksLikePlayerName(name)) this.implicit.add(name);
   }
 

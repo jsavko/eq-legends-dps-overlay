@@ -7,11 +7,39 @@
  *   const parser = new LogParser({ selfName: 'Rhale' });
  *   parser.feed('[Fri Jul 31 18:48:15 2026] Rhain smites a froglok for 11 points of damage.');
  *   parser.snapshot();   // -> { active, label, groupDps, rows: [...] }
+ *
+ * ---------------------------------------------------------------------------
+ * THE AXIS: the fight decides who counts, not the roster.
+ *
+ * Damage landing on the mob this encounter is against counts, whoever landed it. Damage
+ * coming from that mob is damage somebody took, whoever they are. There is no friend
+ * test anywhere in the scoring path.
+ *
+ * It used to be the other way round — everything ran through an `isFriendly` built on
+ * roster membership and the shape of a name — and that axis was simply wrong. It asked
+ * a question the log frequently cannot answer, and every wrong answer cost a whole
+ * person: a water elemental that swung once at a charmed group member was branded an
+ * enemy and lost 1,362 damage lines and 69,394 damage for the rest of the session, its
+ * row just gone from the meter. Answering it right was no better a plan than answering
+ * it wrong, because the question was never the one that mattered.
+ *
+ * What survives of "who is who" is `standing()`, and it seeds only: it decides which end
+ * of the FIRST damage line of a pull is the enemy, after which `Encounter#engagedNpcs`
+ * is the authority. That is a cheap thing to get wrong — a column for one fight, usually
+ * corrected by the next line — where the old design's mistakes were permanent.
+ *
+ * Two consequences that look surprising and are correct:
+ *   - a charmed mob helping kill the boss gets its own row. Its charmer often cannot be
+ *     identified, and the honest options were "show it as itself" or "throw away 84,676
+ *     damage", which is what the live log measured.
+ *   - a charmed member's swings land in the victim's damage-taken and in nobody's DPS,
+ *     because that column measures damage done to the enemy.
+ * ---------------------------------------------------------------------------
  */
 
 import { parseTimestamp } from './timestamp.js';
 import { matchRule, spellStem } from './rules.js';
-import { resolveEntity, looksLikePlayerName, nearestName, stripArticle } from './entities.js';
+import { resolveEntity, looksLikeMobName, looksLikePlayerName, nearestName, stripArticle } from './entities.js';
 import { Roster, parseLogFilename } from './roster.js';
 import { Encounter, DEFAULTS } from './encounter.js';
 import { classify, UNKNOWN_GROUP } from './spellwatch.js';
@@ -416,14 +444,9 @@ export class LogParser {
   resolve(raw, acting = false) {
     const entity = resolveEntity(raw, this.selfName);
 
-    if (entity.isPet) {
-      if (!this.roster.isHostileByAction(entity.display)) return entity;
-      // Caught trading blows with the group under its own name: not a pet at all,
-      // whatever its spelling, and its owner is somebody who never existed.
-      return { name: entity.display, owner: null, isPet: false, display: entity.display };
-    }
+    if (entity.isPet) return entity;
 
-    if (entity.properPossessive && !this.roster.isHostileByAction(entity.display)) {
+    if (entity.properPossessive) {
       const { owner } = entity.properPossessive;
       if (this.roster.hasPlayerProof(owner)) {
         return { name: owner, owner, isPet: true, display: entity.display };
@@ -442,60 +465,90 @@ export class LogParser {
   }
 
   /**
-   * A name we are willing to show as a damage-dealing row.
+   * Is this entity one the fight has already placed on the enemy side?
    *
-   * The order below is the order of how much the log actually proves. Membership the
-   * game stated outright comes first; then behaviour, which is fact; and only last the
-   * shape of the name, which is a guess. That last step is what read the whole Plane
-   * of Sky bee island as friendly — "Bzzazzt" is a single capitalized token with no
-   * article, so it passed for a player, and the parser scored no damage in either
-   * direction and raised none of the 639 Deadly Poison warnings that killed the group.
+   * `engagedNpcs` is the fight's enemy set and the axis everything else turns on. It is
+   * per-encounter on purpose: "enemy" is a fact about a pull, not a permanent property
+   * of a name, and the previous design's session-long brand is what deleted people.
    */
-  isFriendly(name) {
-    if (name === UNKNOWN) return true;
+  isEnemy(name) {
+    const enc = this.current;
+    return Boolean(enc && !enc.closed && enc.engagedNpcs.has(name));
+  }
 
-    // The user's own pin, and the game stating membership, outrank everything below.
-    if (this.roster.overridesOff.has(name)) return false;
-    if (this.roster.overridesOn.has(name)) return true;
-    if (this.roster.isConfirmedMember(name)) return true;
+  /**
+   * Which side an entity is on going INTO a line, from everything except the line
+   * itself. Used only to work out what a fight is against when the fight does not
+   * already know — never to decide whether damage counts.
+   *
+   * Ordered by how much each source proves, facts first. The last step deliberately
+   * answers only one way: an article or a space means a mob, while a bare capitalized
+   * token means NOTHING. "Bzzazzt" is a Plane of Sky bee spelled exactly like a player,
+   * and it was reading that shape as friendly that once made a whole raid zone score
+   * nothing at all. Unanswered is a legitimate result here; the fight resolves it on
+   * the next line, usually the one where the logging character swings.
+   *
+   * @returns {'ours'|'enemy'|null}
+   */
+  standing(name) {
+    if (name === UNKNOWN) return null;
 
-    // Proof in the friendly direction sits with the proof in the hostile one, ABOVE
-    // both behaviour checks below. A group member gets charmed with no log line to
-    // announce it, the group's own pets swing at them, and that read as proof the pet
-    // was an enemy — permanently. Being healed by a proven friendly is the answer,
-    // because nobody heals an enemy. See Roster#friendlyByAction.
-    if (this.roster.hasFriendlyProof(name)) return true;
+    // Facts: who is logged in, and who the player named in settings.
+    if (name === this.selfName) return 'ours';
+    if (this.roster.partyMembers.has(name)) return 'ours';
+    if (this.roster.overridesOff.has(name)) return 'enemy';
+    if (this.roster.overridesOn.has(name)) return 'ours';
 
-    // Behaviour outranks name shape. An entity the group is currently fighting is an
-    // enemy however player-shaped its name is — the same reasoning isHostileCaster has
-    // always used, which isFriendly simply never learned — and so is one caught
-    // trading damage with a confirmed member.
-    if (this.roster.isHostileByAction(name)) return false;
-    if (this.current && !this.current.closed && this.current.engagedNpcs.has(name)) return false;
+    // The game stating it outright, then things only a player does.
+    if (this.roster.isConfirmedMember(name)) return 'ours';
+    if (this.roster.knownPlayers.has(name)) return 'ours';
+    if (this.roster.knownNpcs.has(name)) return 'enemy';
 
-    // A name the game called an NPC is not a player, whatever its shape. This keeps a
-    // single-word named mob ("Zevrex") from being mistaken for a group member.
-    if (this.roster.knownNpcs.has(name) && !this.roster.knownPlayers.has(name)) {
-      return this.roster.includes(name);
-    }
-    return this.roster.includes(name) || looksLikePlayerName(name);
+    // Somebody's pet or charmed mob resolves to its owner, so this is really a question
+    // about the owner — but a name still carrying a mapping is ours by construction.
+    if (this.roster.ownerOf(name)) return 'ours';
+
+    // Fought alongside us before, this session. Weakest of the lot and the only one
+    // that is a guess, which is why it sits last among the affirmative answers.
+    if (this.roster.implicit.has(name)) return 'ours';
+
+    return looksLikeMobName(name) ? 'enemy' : null;
+  }
+
+  /**
+   * The same question asked of a RESOLVED entity rather than a bare name, which is what
+   * every caller actually has and is not the same question at all.
+   *
+   * A pet resolves to its owner, so asking `standing(entity.name)` about `` X`s minion ``
+   * asks about X. Two cases that breaks, both of them real:
+   *
+   *   - a charmed mob resolves to its CHARMER, who may be a shaman nobody has seen
+   *     swing yet. The mob is ours for as long as the charm lasts and that fact is
+   *     recorded against the mob's own name, so it has to be read from the display.
+   *   - `` Dreadlord`s minion `` is a mob spelled exactly like a pet, and "Dreadlord" is
+   *     an owner nobody has ever heard of. A pet is only as ours as its owner is, so an
+   *     owner with no standing yields a pet with no standing — which is what lets the
+   *     hit it just landed on the logging character read as incoming.
+   *
+   * @returns {'ours'|'enemy'|null}
+   */
+  standingOf(entity) {
+    if (this.roster.isCharmed(entity.display)) return 'ours';
+    if (entity.isPet) return this.standing(entity.owner);
+    return this.standing(entity.name);
   }
 
   /**
    * A friendly with standing beyond the spelling of their name.
    *
-   * This is the third state the identity work needed. An article-less single token
-   * that nobody has proven anything about is UNKNOWN — not a player — and while it
-   * still gets its own visible row (dropping its damage would make the group total
-   * quietly wrong, and requiring proof before showing ANYTHING is what made the
-   * "target everything first" approach unusable), it is not trusted to explain stray
-   * damage or to have summoned a pet. Standing means one of: the user pinned it, it is
-   * the logging character, the log said it joined the group, it spoke on a channel,
-   * or it has actually damaged an NPC.
+   * Used for the things that must never be handed to a stranger: owning a summoned pet,
+   * and explaining unattributed damage. An article-less single token nobody has proven
+   * anything about still gets a row — it is in the fight, so it counts — but it is not
+   * trusted to have summoned anything.
    */
   isProvenFriendly(name) {
     if (name === UNKNOWN) return false;
-    if (!this.isFriendly(name)) return false;
+    if (this.isEnemy(name)) return false;
     return this.roster.includes(name) || this.roster.knownPlayers.has(name);
   }
 
@@ -514,7 +567,7 @@ export class LogParser {
     // carrying an article or a space is a mob and was never in question.
     if (!looksLikePlayerName(name)) return null;
     if (this.roster.hasPlayerProof(name)) return null;
-    if (this.roster.isHostileByAction(name)) return null;
+    if (this.isEnemy(name)) return null;
 
     const pending = this.roster.takePendingSummon(this.lastTs);
     if (!pending) return null;
@@ -532,178 +585,161 @@ export class LogParser {
   }
 
   /**
-   * A summoned pet whose owner we have not been told.
+   * Score a damage line.
    *
-   * Once the game says `Targeted (NPC): Gann`, Gann is known not to be a player — but
-   * it is still hitting the mob the group is fighting, and that damage is real group
-   * damage. Discarding it would make the group total quietly wrong; giving it a row
-   * keeps the number honest and makes it obvious that the pet needs mapping.
+   * THE RULE: damage landing on the mob this fight is against counts, whoever landed
+   * it. Damage coming FROM that mob is damage somebody took, whoever they are. Nothing
+   * here asks whether an attacker is a friend, because that question was never the one
+   * that mattered and answering it wrong deleted people — a water elemental lost 69,394
+   * damage and its whole row for swinging once at a charmed group member.
    *
-   * The guard against scoring an actual enemy is that a mob the group is fighting is
-   * already in the encounter's engaged list, and never reaches this test.
+   * Read the branches as a single sentence: is either end of this line the enemy we are
+   * already fighting? If not, does anything we know say which end WOULD be? If not
+   * either, then both ends are ours and one of them has been turned.
    */
-  isUnownedPet(name) {
-    if (!this.roster.knownNpcs.has(name)) return false;
-    if (this.roster.knownPlayers.has(name)) return false;
-    if (this.current && !this.current.closed && this.current.engagedNpcs.has(name)) return false;
-    return true;
-  }
-
   handleDamage(event) {
     const attacker = this.resolve(event.attacker, true);
     const target = this.resolve(event.target);
+    const enc = this.current && !this.current.closed ? this.current : null;
 
-    const attackerFriendly = this.isFriendly(attacker.name) || this.isUnownedPet(attacker.name);
-    const targetFriendly = this.isFriendly(target.name);
+    // Self-damage is not an exchange between two entities and never was: "Venun hit
+    // Venun for 1924 points of unresistable damage by Cannibalization I." is a shaman
+    // buying mana with life, 18 times and 20,965 points of it in the live log.
+    //
+    // Tested on the DISPLAY names with both sides required to be non-pets, never on the
+    // resolved ones. A pet resolves to its owner, so "A tal ghoul wizard slashes YOU"
+    // from a charmed mob has the same resolved name on both sides while being the exact
+    // opposite of self-damage — it is the charm-break signal.
+    if (!attacker.isPet && !target.isPet && attacker.display === target.display) return;
 
-    if (attackerFriendly && targetFriendly) {
-      // Self-damage is not friendly fire and never was: "Venun hit Venun for 1924 points
-      // of unresistable damage by Cannibalization I." is a shaman buying mana with life,
-      // 18 times and 20,965 points of it in the live log. It is not group DPS and it is
-      // nobody's mistake, so it is dropped here rather than sent through machinery that
-      // exists to work out which of two entities was misread.
-      //
-      // Tested on the DISPLAY names with both sides required to be non-pets, never on
-      // the resolved ones. A pet resolves to its owner, so "A tal ghoul wizard slashes
-      // YOU" from a charmed mob has attacker.name === target.name === Rhale while being
-      // the exact opposite of self-damage — it is the charm-break signal, and swallowing
-      // it here would leave the mob charmed and the hit unscored.
-      if (!attacker.isPet && !target.isPet && attacker.display === target.display) return;
-
-      // One of the two is misclassified — friendlies do not damage each other. Work
-      // through the possibilities in order of how much the log proves, and re-score
-      // the line the moment one of them resolves.
-      if (this.resolveFriendlyFire(event, attacker, target)) {
-        this.handleDamage(event);
-        return;
-      }
-      // Nothing about either identity was wrong, which leaves the third explanation:
-      // a group member has been turned against us. Raise it as a member state and drop
-      // the line — see noteMemberTurned for why this runs last.
-      this.noteMemberTurned(event, attacker, target);
+    // 1. It landed on the mob we are fighting. That is a contribution to this kill and
+    //    it counts, with no test of any kind on who threw it: the group's charmed pet,
+    //    a raid-mate two groups over, another mob that happens to hate this one. In the
+    //    live log this single branch is 3,486 lines and 219,010 damage that used to be
+    //    discarded, 84,676 of it from one charmed loathling lich whose charmer the
+    //    parser simply could not identify.
+    if (enc?.engagedNpcs.has(target.name)) {
+      this.creditDamage(event, attacker, target, enc);
       return;
     }
 
-    if (attackerFriendly) {
-      this.roster.noteFriendlyCombatant(attacker.name);
-      // Swinging at the mob is the group member back on our side, and it is the only
-      // end-signal a charm has: EQ Legends prints nothing when a player is charmed and
-      // nothing when the charm breaks. The 30s cap in pruneCcStates is the backstop.
-      this.endCcState(attacker.display, 'charm');
-      const enc = this.ensureEncounter(event.ts);
-      enc.engage(target.name, event.amount, event.ts);
-      enc.addDamage({
-        name: attacker.name,
-        amount: event.amount,
-        ts: event.ts,
-        source: event.source,
-        ability: event.ability,
-        isPet: attacker.isPet,
-        crit: event.mods?.includes('critical') ?? false,
-        proc: this.isProc(attacker, event),
-      });
-      this.revision++;
+    const a = this.standingOf(attacker);
+    const t = this.standingOf(target);
+
+    // 2. It came from the mob we are fighting, so somebody took it — unless that
+    //    somebody is another mob. Our boss swinging at a wandering skeleton is not
+    //    damage anybody on our side took, and giving the skeleton a row would put a
+    //    stranger's health bar in the "what is killing me" view.
+    if (enc?.engagedNpcs.has(attacker.name) && t !== 'enemy' && !this.isEnemy(target.name)) {
+      this.creditDamageTaken(event, attacker, target, enc);
       return;
     }
 
-    if (targetFriendly) {
-      // The spell landed, so the cast it was warning about is over. Spells only: a
-      // melee swing carries the ability "Hit", which keys no warning and must never
-      // be allowed to clear one.
-      if (event.source === 'spell') {
-        this.resolveHostileCast(attacker.display, event.ability);
-      }
-
-      // A DoT already ticking on you is not proof that a fight is on. This is the
-      // succor case: evacuate out of Plane of Hate and Wrath of the Elements keeps
-      // landing every six seconds from a mob in a room you have left, opening a fresh
-      // encounter labelled with its name and zero outgoing damage — the meter showing
-      // a fight against something the group fled and never went back to. Same
-      // principle as the fall-damage rule in handleUnattributed: damage arriving with
-      // nobody swinging at anybody does not start a pull. The outgoing side keeps its
-      // power to open one, and the asymmetry is deliberate — a DoT YOU cast is a
-      // choice you made, and is very often the first damage line of a pull.
-      //
-      // It still scores and still extends an encounter that is already running: a DoT
-      // ticking on the tank mid-fight is exactly what the damage-taken view is for.
-      if (event.source === 'dot' && (!this.current || this.current.closed)) return;
-
-      // An NPC hitting us means a fight is on — and the incoming side is scored too:
-      // the victim's row records who hit them and with what, which is the entire
-      // "what is killing me" view. addDamageTaken also keeps the encounter clock
-      // running, exactly as outgoing damage does.
-      const enc = this.ensureEncounter(event.ts);
-      enc.engage(attacker.name, 0, event.ts);
-      enc.addDamageTaken({
-        name: target.name,
-        // The resolved name, not the raw one, so "A froglok" and "a froglok" collapse
-        // to one attacker entry — and an enemy pet reads as the pet, not its owner.
-        attacker: attacker.isPet ? attacker.display : attacker.name,
-        amount: event.amount,
-        ts: event.ts,
-        ability: event.ability,
-        isPet: target.isPet,
-        // Melee is typed as such (armor mitigates it); spells carry the element the
-        // line stated; anything else is honestly untyped, never guessed.
-        type: event.source === 'melee' ? 'melee' : event.damageType ?? null,
-      });
-      this.revision++;
+    // 3. Neither end is a known enemy yet. Work out which end WOULD be, from standing
+    //    alone, and let that open or extend the fight. Two mobs going at each other is
+    //    not our fight in either direction and must never open one — a froglok killing
+    //    a mummy across the room would otherwise start an encounter and score it.
+    if (a === 'enemy' && t === 'enemy') return;
+    if (t === 'enemy' || (a === 'ours' && t !== 'ours')) {
+      this.creditDamage(event, attacker, target, this.ensureEncounter(event.ts));
+      return;
     }
+    if (a === 'enemy' || (t === 'ours' && a !== 'ours')) {
+      // A DoT already ticking on you is not proof that a fight is on. This is the succor
+      // case: evacuate out of Plane of Hate and Wrath of the Elements keeps landing every
+      // six seconds from a mob in a room you have left, opening a fresh encounter
+      // labelled with its name and zero outgoing damage. Damage arriving with nobody
+      // swinging at anybody does not start a pull; the outgoing side keeps its power to
+      // open one, because a DoT YOU cast is a choice you made.
+      if (event.source === 'dot' && !enc) return;
+      this.creditDamageTaken(event, attacker, target, this.ensureEncounter(event.ts));
+      return;
+    }
+
+    // 4. Both ends are ours, which cannot be true of a damage line — unless one of them
+    //    has been turned against the other. First check whether it is an identity we got
+    //    wrong and can fix, in which case the line deserves a fresh reading.
+    if (this.breakCharm(event)) { this.handleDamage(event); return; }
+    if (this.breakWeakPetBinding(attacker, target)) { this.handleDamage(event); return; }
+
+    // Nothing was wrong about who they are: somebody is charmed. Score it against the
+    // victim — "if I get charmed and start attacking a player it's fine for me to show
+    // up in their damage logs" — and say so on screen, since EQ Legends prints nothing
+    // when a player is charmed and nothing when it breaks. It gets no DPS credit,
+    // because the DPS column measures damage done to the enemy and this was not.
+    if (!enc) return;
+    this.noteMemberTurned(event, attacker, target);
+    this.creditDamageTaken(event, attacker, target, enc, { engageAttacker: false });
+  }
+
+  /** Credit a hit on the enemy to whoever landed it. */
+  creditDamage(event, attacker, target, enc) {
+    this.roster.noteFriendlyCombatant(attacker.name);
+    // Swinging at the mob is a charmed member back on our side, and it is the only
+    // end-signal a charm has. The 30s cap in pruneCcStates is the backstop.
+    this.endCcState(attacker.display, 'charm');
+    enc.engage(target.name, event.amount, event.ts);
+    enc.addDamage({
+      name: attacker.name,
+      amount: event.amount,
+      ts: event.ts,
+      source: event.source,
+      ability: event.ability,
+      isPet: attacker.isPet,
+      crit: event.mods?.includes('critical') ?? false,
+      proc: this.isProc(attacker, event),
+    });
+    this.revision++;
   }
 
   /**
-   * Both sides of a damage line read as friendly, which cannot be true. Work out
-   * which reading was wrong, in order of how much the log actually proves.
+   * Credit a hit taken to whoever took it, naming what hit them.
    *
-   *   1. A charm broke. A charmed mob resolves to its owner and so IS friendly right
-   *      up until the break, which EQ Legends announces with no line whatsoever.
-   *   2. A pet binding made from bare cast adjacency was wrong. That guess is the
-   *      cheapest thing on the table, so it is what gives way first — an entity
-   *      trading blows with the group was never anybody's pet.
-   *   3. One side is an enemy whose name merely looks like a player's. Whichever side
-   *      is NOT a confirmed group member is the enemy. Confirmed membership only, on
-   *      purpose: keying off the implicit set would let one bad guess cascade.
-   *
-   * @returns {boolean} true when something changed and the line deserves a re-score
+   * `engageAttacker` is false for the one case where the attacker is NOT a mob: a
+   * charmed group member swinging at their own side. Engaging them would put a friend
+   * in the fight's enemy set, which is how the fight names itself, decides when it is
+   * over, and classifies every later line — one charmed cleric would become "the mob".
    */
-  resolveFriendlyFire(event, attacker, target) {
-    if (this.breakCharm(event)) return true;
-    if (this.breakWeakPetBinding(attacker, target)) return true;
-    return this.markHostileFromDamage(attacker, target);
+  creditDamageTaken(event, attacker, target, enc, { engageAttacker = true } = {}) {
+    // The spell landed, so the cast it was warning about is over. Spells only: a melee
+    // swing carries the ability "Hit", which keys no warning and must never clear one.
+    if (event.source === 'spell') this.resolveHostileCast(attacker.display, event.ability);
+
+    if (engageAttacker) enc.engage(attacker.name, 0, event.ts);
+    enc.addDamageTaken({
+      name: target.name,
+      // The resolved name, not the raw one, so "A froglok" and "a froglok" collapse to
+      // one attacker entry — and an enemy pet reads as the pet, not its owner.
+      attacker: attacker.isPet ? attacker.display : attacker.name,
+      amount: event.amount,
+      ts: event.ts,
+      ability: event.ability,
+      isPet: target.isPet,
+      // Melee is typed as such (armor mitigates it); spells carry the element the line
+      // stated; anything else is honestly untyped, never guessed.
+      type: event.source === 'melee' ? 'melee' : event.damageType ?? null,
+    });
+    this.revision++;
   }
 
   /**
-   * Nobody's identity was wrong, so a group member has been charmed.
+   * Both ends of a damage line are ours, so a group member has been charmed.
    *
    * EQ Legends announces a charmed MOB ("a tal ghoul wizard has been charmed.") and says
    * nothing whatsoever when it takes a PLAYER — 35 charm lines in the live log, every one
    * of them a mob, none a player. James knows and typed it mid-pull: "i hate that if i
    * get charmed it destorys my pet". So the only evidence is the impossible line itself,
-   * which is the same reasoning breakCharm already runs in the opposite direction.
+   * which is the same reasoning breakCharm runs in the opposite direction.
    *
-   * Two guards make this an inference rather than a guess, and they are why this runs
-   * LAST, after every identity fix has declined:
-   *
-   *   - the other side must carry FRIENDLY PROOF, so we know it is not simply an enemy
-   *     with a player-shaped name. Without this the rule is a catastrophe: "Bzzazzt hit
-   *     you for 100 points of poison damage" would read as YOU being charmed rather than
-   *     as a Plane of Sky bee, and the mechanism that fix depends on would never fire.
-   *   - that side must NOT itself be a confirmed member, because then both sides are
-   *     equally accounted for and naming one of them is a coin flip. Two group members
-   *     trading blows says one of them turned and the log does not say which; the honest
-   *     answer is to raise nothing.
-   *
-   * Nothing is scored either way. A charmed member's swings are not group damage, and
-   * recording them as damage TAKEN would fill the victim's "what is killing me" list
-   * with the name of a friend. The chip is what explains the missing number.
+   * Names the member only when it can tell which one: the other end must not itself be a
+   * confirmed member, because two group members trading blows says one of them turned
+   * and the log does not say which. That is a coin flip and the honest answer is silence.
    *
    * @returns {boolean} true if a member state was raised
    */
   noteMemberTurned(event, attacker, target) {
     for (const [side, other] of [[attacker, target], [target, attacker]]) {
-      const proofName = side.isPet ? side.display : side.name;
       if (this.roster.isConfirmedMember(side.name)) continue;
-      if (!this.roster.hasFriendlyProof(proofName)) continue;
       if (!this.roster.isConfirmedMember(other.name)) continue;
       this.startCcState(other.display, 'charm', event.ts);
       return true;
@@ -725,33 +761,6 @@ export class LogParser {
       if (!side.isPet || !side.owner) continue;
       if (!this.roster.isWeaklyBoundPet(side.display)) continue;
       if (this.roster.unbindPet(side.display)) {
-        this.revision++;
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Mark whichever side of a friendly-fire line is not a confirmed member as hostile.
-   *
-   * A pet resolves to its OWNER, and branding the owner an enemy on the strength of
-   * their pet's swing is exactly what must never happen — which is why this used to
-   * skip a pet-shaped side outright. That blanket skip is what left `Innoruuk`s
-   * Chosen` friendly for eight minutes with no way back: the shape rule had already
-   * decided it was somebody's pet, and the one mechanism that corrects a bad identity
-   * refused to look at it. So a pet-shaped side is now markable BY ITS DISPLAY NAME —
-   * never by its owner — and only when that owner has no player proof. A real
-   * warder's owner has proof (they talk, they group, they are the logging character),
-   * so the guard the skip existed for is still exactly as strong.
-   */
-  markHostileFromDamage(attacker, target) {
-    for (const [side, other] of [[attacker, target], [target, attacker]]) {
-      if (side.isPet && this.roster.hasPlayerProof(side.owner)) continue;
-      if (!this.roster.isConfirmedMember(other.name)) continue;
-      if (this.roster.isConfirmedMember(side.name)) continue;
-      if (this.roster.knownPlayers.has(side.name)) continue;
-      if (this.roster.noteHostileByAction(side.isPet ? side.display : side.name)) {
         this.revision++;
         return true;
       }
@@ -932,15 +941,14 @@ export class LogParser {
       if (name === this.selfName) continue;
       if (this.roster.hasPlayerProof(name)) continue;
       if (this.roster.ownerOf(name)) continue;
-      if (this.roster.isHostileByAction(name)) continue;
+      if (this.isEnemy(name)) continue;
       out.add(name);
     }
     // Anything the game itself called an NPC while it was fighting for us is a pet by
     // definition — this is the `Targeted (NPC): Gann` case, which is as sure as it gets.
     for (const name of this.roster.knownNpcs) {
       if (this.roster.ownerOf(name) || this.roster.hasPlayerProof(name)) continue;
-      if (this.roster.isHostileByAction(name)) continue;
-      if (this.isUnownedPet(name)) out.add(name);
+      if (!this.isEnemy(name)) out.add(name);
     }
     return [...out].sort();
   }
@@ -1018,7 +1026,7 @@ export class LogParser {
    */
   handleUnattributed(event) {
     const target = this.resolve(event.target);
-    if (this.isFriendly(target.name)) return;
+    if (this.standing(target.name) !== 'enemy' && !this.isEnemy(target.name)) return;
 
     const enc = this.ensureEncounter(event.ts);
     const attribution = this.attributeNonMelee(event.ts);
@@ -1079,10 +1087,13 @@ export class LogParser {
    * closes it within the first swing of every real pull.
    */
   isHostileCaster(name) {
-    if (this.current && !this.current.closed && this.current.engagedNpcs.has(name)) return true;
-    if (this.isFriendly(name)) return false;
-    if (this.isUnownedPet(name)) return false;
-    return true;
+    if (this.isEnemy(name)) return true;
+    // Anything with standing on our side, and anything merely SHAPED like a player or a
+    // pet, is left alone. That second half is the documented price below: a single-token
+    // named mob casting before anyone has engaged it raises nothing, which is what keeps
+    // a random passer-by out of the alert window.
+    if (this.standing(name) === 'ours') return false;
+    return looksLikeMobName(name);
   }
 
   /**
@@ -1217,8 +1228,10 @@ export class LogParser {
     if (!event.ability) return;
     const attacker = this.resolve(event.attacker);
     const target = this.resolve(event.target);
-    if (!this.isFriendly(target.name)) return;
-    if (this.isFriendly(attacker.name)) return;
+    // Incoming only: the mob shrugging off OURS says nothing about what it is doing
+    // to us. "Ours" is anything the fight has not placed on the enemy side.
+    if (this.isEnemy(target.name) || this.standing(target.name) === 'enemy') return;
+    if (!this.isEnemy(attacker.name) && this.standing(attacker.name) !== 'enemy') return;
 
     this.resolveHostileCast(attacker.display, event.ability);
   }
@@ -1272,8 +1285,12 @@ export class LogParser {
   handleMiss(event) {
     const attacker = this.resolve(event.attacker, true);
     const target = this.resolve(event.target);
-    const attackerFriendly = this.isFriendly(attacker.name);
-    const targetFriendly = this.isFriendly(target.name);
+    // The same axis handleDamage uses: a swing AT the mob we are fighting is an attack,
+    // a swing FROM it is one somebody avoided.
+    const attackerFriendly = this.isEnemy(target.name)
+      || (!this.isEnemy(attacker.name) && this.standing(target.name) === 'enemy');
+    const targetFriendly = this.isEnemy(attacker.name)
+      || (!this.isEnemy(target.name) && this.standing(attacker.name) === 'enemy');
 
     // A miss alone does not start a fight — otherwise a stray swing at a passing mob
     // opens an encounter with 0 damage and an ever-growing duration.
@@ -1312,32 +1329,23 @@ export class LogParser {
    * down with it. It also never extends one, for the same reason.
    */
   handleHeal(event) {
-    // Resolved BEFORE the encounter guard, unlike everything else here, because the
-    // roster learns from a heal whether or not a fight is running. Between pulls is
-    // when the group tops itself up, and it is exactly when the pets get healed — the
-    // evidence that stops one being branded an enemy later (see noteFriendlyByAction).
-    // It also lets a pet announce itself out of combat, which resolve() has always
-    // claimed a healing pet may do ("Gann healed himself for 57 hit points by Center.").
+    // Resolved before the encounter guard so a pet can announce itself out of combat,
+    // which resolve() has always claimed a healing pet may do ("Gann healed himself for
+    // 57 hit points by Center.") but the guard used to prevent.
     const healer = this.resolve(event.attacker, true);
-    if (!this.isFriendly(healer.name) && !this.isUnownedPet(healer.name)) return;
 
     // "Gann healed himself", "Emalina healed herself" — the reflexive is the healer.
     const target = REFLEXIVE_RE.test(event.target)
       ? { name: healer.name, display: healer.display, isPet: healer.isPet }
       : this.resolve(event.target);
 
-    // Nobody heals an enemy — so a heal from someone with real standing is proof about
-    // its TARGET that no mob can manufacture. PROVEN friendly, not merely friendly: a
-    // mob healing a mob is the ordinary case ("Bonefire healed orc legionnaire for 20
-    // hit points by Courage.") and proves nothing about anybody. Keyed the same way a
-    // branding is, by display for a pet and by name otherwise, so the two sets talk
-    // about the same thing.
-    if (this.isProvenFriendly(healer.name)) {
-      const key = target.isPet ? target.display : target.name;
-      if (this.roster.noteFriendlyByAction(key)) this.revision++;
-    }
-
     if (!this.current || this.current.closed) return;
+
+    // The mirror of the damage rule: damage counts when it lands on the enemy, so a heal
+    // counts when it lands on OUR side. That is one test on the target rather than a
+    // friend test on the healer, and it drops exactly the right thing — "Bonefire healed
+    // orc legionnaire for 20 hit points by Courage." is an orc topping up an orc.
+    if (this.isEnemy(target.name)) return;
 
     this.roster.noteFriendlyCombatant(healer.name);
     this.current.addHeal({
@@ -1372,7 +1380,7 @@ export class LogParser {
     // it becomes a member-state alert instead. The isPet exclusion keeps an already-
     // charmed mob (which resolves to its friendly owner) on the mob path, where a
     // re-charm re-attributes it rather than raising a false member alert.
-    if (!who.isPet && this.isFriendly(who.name)) {
+    if (!who.isPet && !this.isEnemy(who.name) && this.standing(who.name) !== 'enemy') {
       this.startCcState(who.display, 'charm', event.ts);
       return;
     }
@@ -1394,7 +1402,7 @@ export class LogParser {
     for (const [name, cast] of this.casts) {
       if (ts - cast.ts > CHARM_WINDOW_MS) continue;
       if (!cast.ability || !CHARM_SPELL_RE.test(cast.ability)) continue;
-      if (!this.isFriendly(name)) continue;
+      if (this.isEnemy(name) || this.standing(name) === 'enemy') continue;
       if (!best || cast.ts > best.ts) best = { name, ts: cast.ts };
     }
     return best?.name ?? null;
@@ -1446,7 +1454,7 @@ export class LogParser {
     if (!effect) return;
     // A pet resolves to its owner, so a friendly pet passes here through the owner's
     // name while an enemy's pet fails with its enemy owner — no pet special-casing.
-    if (!this.isFriendly(who.name)) return;
+    if (this.isEnemy(who.name) || this.standing(who.name) === 'enemy') return;
     this.startCcState(who.display, effect, event.ts);
   }
 
@@ -1505,7 +1513,7 @@ export class LogParser {
     this.endCcState(target.display, null);
 
     if (!this.current || this.current.closed) return;
-    if (this.isFriendly(target.name)) {
+    if (!this.isEnemy(target.name)) {
       // A player dying does not end the pull — but it is the single most important
       // fact in the damage-taken view, so it is recorded before the early return.
       // A pet's death is marked as such and never counts as its owner's.

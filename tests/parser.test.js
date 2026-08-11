@@ -571,14 +571,20 @@ test('mez is not charm', () => {
   assert.equal(rhain, undefined, 'a mezzed mob is asleep, not fighting for us');
 });
 
-test('a charm with no charm spell in flight credits nobody', () => {
+test('a charm with no charm spell in flight gets its own row, not somebody else\'s', () => {
   const p = makeParser();
   p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
   p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
   p.feed(`${D(19, 20, 4)} A tal ghoul wizard slashes a ghoul savant for 40 points of damage.`);
 
-  // Uncounted rather than guessed onto someone.
-  assert.equal(p.snapshot().totalDamage, 100);
+  // It is helping kill the mob we are on, so it counts — under its own name, because
+  // the charmer could not be identified and guessing one was never the honest option.
+  // Discarding it was the OTHER dishonest option, and it cost 84,676 damage in the live
+  // log from a single loathling lich.
+  const snap = p.snapshot();
+  assert.equal(snap.totalDamage, 140);
+  assert.equal(snap.rows.find((r) => r.name === 'tal ghoul wizard').damage, 40);
+  assert.equal(snap.rows.find((r) => r.name === 'Emalina').damage, 100);
 });
 
 test('charm breaks when the pet turns on the group', () => {
@@ -650,11 +656,19 @@ test('a mob-named pet can be mapped in settings despite the article', () => {
   assert.equal(rhain.petDamage, 40);
 });
 
-test('uncharmed mobs fighting each other are still ignored', () => {
+test('a mob helping kill OUR mob counts; two mobs off on their own do not', () => {
   const p = makeParser();
   p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  // Aimed at the mob we are fighting, so it lands. Whether it is charmed, someone
+  // else's, or simply a mob that hates this one is not a question the parser can answer
+  // and no longer one it has to.
   p.feed(`${D(19, 20, 4)} A tal ghoul wizard slashes a ghoul savant for 40 points of damage.`);
-  assert.equal(p.snapshot().totalDamage, 100);
+  assert.equal(p.snapshot().totalDamage, 140);
+
+  // Neither end is our fight: still ignored, and still cannot open one.
+  p.feed(`${D(19, 20, 5)} A shriveled mummy slashes a rock golem for 500 points of damage.`);
+  assert.equal(p.snapshot().totalDamage, 140);
+  assert.equal(p.snapshot().rows.some((r) => r.name === 'shriveled mummy'), false);
 });
 
 // ---------------------------------------------------------------- damage taken
@@ -1135,16 +1149,17 @@ test('different effects on the same member are separate states', () => {
 // raid zone as friendly. Every line below is taken from the live bee fight.
 // ---------------------------------------------------------------------------
 
-test('an entity that damages a confirmed member is hostile, whatever its name looks like', () => {
+test('an entity that damages a confirmed member is the enemy, whatever its name looks like', () => {
   const p = makeParser();
   p.feed(`${D(10, 44, 0)} Khanvikt has joined the group.`);
-  assert.equal(p.isFriendly('Bzzazzt'), true, 'name shape alone says player');
+  // Shape says nothing either way now — a bare capitalized token is simply unanswered,
+  // which is the whole lesson of the bee island.
+  assert.equal(p.standing('Bzzazzt'), null);
 
   p.feed(`${D(10, 44, 1)} Bzzazzt stings Khanvikt for 47 points of damage.`);
 
-  assert.equal(p.isFriendly('Bzzazzt'), false);
+  assert.equal(p.isEnemy('Bzzazzt'), true, 'the fight placed it, not its spelling');
   assert.equal(p.isHostileCaster('Bzzazzt'), true);
-  // ...and the sting is scored as damage taken, which it never was before.
   const khan = p.snapshot().rows.find((r) => r.name === 'Khanvikt');
   assert.equal(khan.damageTaken, 47);
 });
@@ -1154,7 +1169,7 @@ test('a bee the group attacks becomes hostile too, and its casts raise warnings'
   // No group message at all: the logging character is the only confirmed member, and
   // hitting the thing is proof enough on its own.
   p.feed(`${D(10, 44, 1)} You pierce Bazzzazzt for 60 points of damage.`);
-  assert.equal(p.isFriendly('Bazzzazzt'), false);
+  assert.equal(p.isEnemy('Bazzzazzt'), true);
 
   p.feed(`${D(10, 44, 2)} Bazzzazzt begins casting Deadly Poison.`);
   const warning = p.snapshot().hostileCasts.find((c) => c.ability === 'Deadly Poison');
@@ -1177,7 +1192,6 @@ test('a charmed mob turning on the group is a charm break, not a fresh enemy', (
   // marked hostile-by-action, which would be a second, redundant claim.
   p.feed(`${D(19, 20, 9)} A tal ghoul wizard slashes YOU for 30 points of damage.`);
   assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
-  assert.equal(p.roster.isHostileByAction('tal ghoul wizard'), false);
   assert.equal(p.snapshot().rows.find((r) => r.name === 'Rhale').damageTaken, 30);
 });
 
@@ -1193,45 +1207,51 @@ test('a charmed mob turning on the group is a charm break, not a fresh enemy', (
 // Every line below is from the live log at [Sat Aug 08 00:31:47 2026].
 // ---------------------------------------------------------------------------
 
-/** The live Goneker setup: a group with Syphon in it, and a healed friendly pet. */
-function charmScene({ heal = true } = {}) {
+/** The live Goneker scene: a group with Syphon in it, and a pet fighting the boss. */
+function charmScene() {
   const p = makeParser();
   p.feed(`${D(0, 31, 40)} Syphon has joined the group.`);
-  // Taneldar earns standing the ordinary way, by damaging the mob the group is on.
   p.feed(`${D(0, 31, 41)} Taneldar slashes Cleric of Innoruuk for 30 points of damage.`);
   p.feed(`${D(0, 31, 42)} Goneker cleaves Cleric of Innoruuk for 70 points of damage.`);
-  if (heal) p.feed(`${D(0, 31, 43)} Taneldar healed Goneker for 255 hit points by Skin like Nature.`);
   return p;
 }
 
 test('a friendly pet that swings at a charmed member keeps its row', () => {
   const p = charmScene();
-  assert.equal(p.roster.hasFriendlyProof('Goneker'), true, 'a group member healed it');
 
-  // Syphon is charmed. Nothing in the log says so; these two lines are all there is.
+  // Syphon is charmed. Nothing in the log says so; these two lines are all there is —
+  // and under the old design the second one deleted Goneker for the rest of the session.
   p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
   p.feed(`${D(0, 31, 47)} Goneker is pierced by Syphon's thorns for 24 points of non-melee damage.`);
 
-  assert.equal(p.roster.isHostileByAction('Goneker'), false, 'never branded');
-  assert.equal(p.isFriendly('Goneker'), true);
+  assert.equal(p.isEnemy('Goneker'), false, 'never becomes the enemy');
 
-  // And it keeps scoring, which is the whole point — this is the damage that vanished.
+  // It keeps hitting the boss and keeps being counted. No heal, no proof, no branding:
+  // it is contributing to this kill, which is the entire test.
   p.feed(`${D(0, 31, 48)} Goneker backstabs Cleric of Innoruuk for 102 points of damage.`);
   assert.equal(p.snapshot().rows.find((r) => r.name === 'Goneker').damage, 172);
 });
 
-test('the impossible line is read as the member being charmed, and says so on screen', () => {
+test('a charmed member shows up in the damage logs of whoever they hit', () => {
+  const p = charmScene();
+  p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
+
+  // James: "If I get charmed and start attacking a player it's fine for me to show up
+  // in their damage logs." So it lands on the victim, naming who did it.
+  const syphon = p.snapshot().rows.find((r) => r.name === 'Syphon');
+  assert.equal(syphon.damageTaken, 34);
+  assert.deepEqual(syphon.attackers.map((a) => a.name), ['Goneker']);
+
+  // But it is not DPS: that column measures damage done to the enemy, and this was not.
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Goneker').damage, 70);
+});
+
+test('the impossible line says on screen that a member has been turned', () => {
   const p = charmScene();
   p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
 
   const effects = p.snapshot(T(0, 31, 47)).memberEffects;
   assert.deepEqual(effects.map((e) => [e.who, e.effect]), [['Syphon', 'charm']]);
-
-  // Neither side is scored. A charmed member's swings are not group damage, and filing
-  // them as damage taken would put a friend's name in the victim's "what is killing me".
-  const rows = p.snapshot().rows;
-  assert.equal(rows.find((r) => r.name === 'Syphon'), undefined);
-  assert.equal(rows.find((r) => r.name === 'Goneker').damage, 70);
 });
 
 test('swinging at the mob again is what ends the charm state', () => {
@@ -1243,53 +1263,26 @@ test('swinging at the mob again is what ends the charm state', () => {
   assert.deepEqual(p.snapshot(T(0, 31, 55)).memberEffects, []);
 });
 
-test('without the heal, the same sequence still brands — the proof is what changed', () => {
-  const p = charmScene({ heal: false });
-  assert.equal(p.roster.hasFriendlyProof('Goneker'), false);
-
-  p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
-  assert.equal(p.roster.isHostileByAction('Goneker'), true);
-  // ...and no charm is claimed, because with Goneker unaccounted for the honest reading
-  // is that IT was the enemy. Naming a member charmed on this evidence alone is what
-  // would have destroyed the Plane of Sky fix.
-  assert.deepEqual(p.snapshot(T(0, 31, 47)).memberEffects, []);
-});
-
-test('a mob healing a mob is not friendly proof, so the brand still lands', () => {
+test('a heal landing on the enemy is the enemy\'s business, not our HPS', () => {
   const p = makeParser();
-  p.feed(`${D(15, 13, 50)} You slash Knight V\`Tal for 40 points of damage.`);
-  // The one branded name in the live log that IS healed — by "a Teir`Dal ranger".
-  p.feed(`${D(15, 13, 51)} a Teir\`Dal ranger healed Knight V\`Tal for 175 hit points by Healing.`);
-  assert.equal(p.roster.hasFriendlyProof('Knight V`Tal'), false);
+  p.feed(`${D(22, 32, 50)} You hit orc legionnaire for 40 points of damage.`);
+  // "Bonefire healed orc legionnaire for 20 hit points by Courage." — an orc topping up
+  // an orc. The mirror of the damage rule: a heal counts when it lands on our side.
+  p.feed(`${D(22, 32, 59)} Bonefire healed orc legionnaire for 20 hit points by Courage.`);
 
-  p.feed(`${D(15, 50, 51)} Knight V\`Tal hit you for 14 points of magic damage by Lifespike.`);
-  assert.equal(p.isFriendly('Knight V`Tal'), false);
+  assert.equal(p.snapshot().totalHealing, 0);
+  assert.equal(p.snapshot().rows.some((r) => r.name === 'Bonefire'), false);
 });
 
-test('a heal revokes a branding made before the evidence arrived', () => {
-  const p = charmScene({ heal: false });
-  p.feed(`${D(0, 31, 47)} Goneker cleaves Syphon for 34 points of damage.`);
-  assert.equal(p.roster.isHostileByAction('Goneker'), true);
-  assert.equal(p.isFriendly('Goneker'), false);
-
-  p.feed(`${D(0, 31, 50)} Taneldar healed Goneker for 255 hit points by Skin like Nature.`);
-  assert.equal(p.roster.isHostileByAction('Goneker'), false);
-  assert.equal(p.isFriendly('Goneker'), true);
-
-  p.feed(`${D(0, 31, 51)} Goneker backstabs Cleric of Innoruuk for 102 points of damage.`);
-  assert.equal(p.snapshot().rows.find((r) => r.name === 'Goneker').damage, 172);
-});
-
-test('a healed bee is still a bee — nobody healed one, and nobody does', () => {
+test('a heal landing on a friendly pet counts, whoever cast it', () => {
   const p = makeParser();
-  p.feed(`${D(10, 44, 0)} Khanvikt has joined the group.`);
-  // The group heals itself all through the fight; none of it touches the bees.
-  p.feed(`${D(10, 44, 1)} Emalina healed Khanvikt for 119 hit points by Bravery.`);
-  p.feed(`${D(10, 44, 2)} Bzzazzt stings Khanvikt for 47 points of damage.`);
+  p.feed(`${D(0, 31, 41)} Taneldar slashes Cleric of Innoruuk for 30 points of damage.`);
+  p.feed(`${D(0, 31, 42)} Goneker cleaves Cleric of Innoruuk for 70 points of damage.`);
+  p.feed(`${D(0, 31, 43)} Taneldar healed Goneker for 255 hit points by Skin like Nature.`);
 
-  assert.equal(p.isFriendly('Bzzazzt'), false);
-  assert.equal(p.roster.isHostileByAction('Bzzazzt'), true);
-  assert.deepEqual(p.snapshot(T(10, 44, 2)).memberEffects, []);
+  const taneldar = p.snapshot().rows.find((r) => r.name === 'Taneldar');
+  assert.equal(taneldar.healing, 255);
+  assert.deepEqual(taneldar.healTargets, [{ name: 'Goneker', healing: 255 }]);
 });
 
 test('self-damage is dropped without disturbing anybody\'s identity', () => {
@@ -1298,8 +1291,8 @@ test('self-damage is dropped without disturbing anybody\'s identity', () => {
   // A shaman buying mana with life: 18 lines and 20,965 points in the live log.
   p.feed(`${D(22, 45, 57)} Venun hit Venun for 1924 points of unresistable damage by Cannibalization I.`);
 
-  assert.equal(p.roster.isHostileByAction('Venun'), false);
-  assert.equal(p.isFriendly('Venun'), true);
+  assert.equal(p.isEnemy('Venun'), false);
+  assert.equal(p.standing('Venun'), 'ours');
   const venun = p.snapshot().rows.find((r) => r.name === 'Venun');
   assert.equal(venun.damage, 45, 'not counted as DPS');
   assert.equal(venun.damageTaken, 0, 'and not counted against them either');
@@ -1344,7 +1337,7 @@ test('a proven player is never claimed as somebody else\'s pet', () => {
 
 test('a mob with a backtick in its name is an enemy from the first line', () => {
   const p = makeParser();
-  assert.equal(p.isFriendly('Innoruuk`s Chosen'), false, 'before anything has happened');
+  assert.equal(p.standing('Innoruuk`s Chosen'), 'enemy', 'before anything has happened');
 
   p.feed(`${D(0, 25, 42)} You slash Innoruuk\`s Chosen for 42 points of damage.`);
 
@@ -1387,9 +1380,9 @@ test('a real warder is never marked hostile by a friendly-fire line', () => {
   p.feed(`${D(18, 48, 13)} Rhale\`s warder slashes Rhale for 40 points of damage.`);
   p.feed(`${D(18, 48, 14)} Rhale slashes Rhale\`s warder for 40 points of damage.`);
 
-  assert.equal(p.roster.isHostileByAction('Rhale`s warder'), false);
-  assert.equal(p.roster.isHostileByAction('Rhale'), false);
-  assert.equal(p.isFriendly('Rhale'), true);
+  // A pet is only as ours as its owner, and this owner is the logging character — so
+  // both ends read as ours, no fight opens, and nothing is scored in either direction.
+  assert.equal(p.standing('Rhale'), 'ours');
   assert.equal(p.snapshot().rows.length, 0, 'and nothing is scored either way');
 });
 
@@ -1398,20 +1391,20 @@ test('a lowercase-nouned mob name is corrected by proof of action', () => {
   // belonging to "Dreadlord", who looks like a player. Trading a blow with a confirmed
   // member is what puts it right, and it stays right for the session.
   const p = makeParser();
-  assert.equal(p.isFriendly('Dreadlord'), true, 'name shape alone says player');
+  // Nobody has ever heard of "Dreadlord", so its "pet" inherits no standing at all.
+  assert.equal(p.standing('Dreadlord'), null);
 
   p.feed(`${D(0, 30, 0)} Dreadlord\`s minion crushes YOU for 61 points of damage.`);
-  assert.equal(p.roster.isHostileByAction('Dreadlord`s minion'), true);
-  // The mark goes on the minion, never on the owner it was folded into — branding
-  // "Dreadlord" an enemy off its pet's swing is exactly what must not happen.
-  assert.equal(p.roster.isHostileByAction('Dreadlord'), false);
-
   p.feed(`${D(0, 30, 2)} Dreadlord\`s minion crushes YOU for 61 points of damage.`);
+
+  // The logging character is the one fixed point, so a hit landing on him makes the
+  // other end the enemy whatever it is spelled like. Not even the first blow is lost.
+  assert.equal(p.isEnemy('Dreadlord'), true);
   const row = p.snapshot().rows.find((r) => r.name === 'Rhale');
-  // Not even the first blow is lost: resolveFriendlyFire re-scores the line that
-  // taught us, which is why the correction costs nothing but the warning it missed.
   assert.equal(row.damageTaken, 122);
   assert.equal(row.attackers[0].name, 'Dreadlord`s minion');
+  // And "Dreadlord" never becomes a phantom combatant row of its own.
+  assert.equal(p.snapshot().rows.some((r) => r.name === 'Dreadlord'), false);
 });
 
 test('a capitalized possessive still folds when the owner has player proof', () => {

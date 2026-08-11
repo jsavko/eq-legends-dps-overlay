@@ -124,6 +124,23 @@ export function looksLikePetName(name) {
   return Boolean(m) && /^[a-z]/.test(m[2].trim());
 }
 
+/**
+ * True for a name only a mob has: an article, a space, or backtick punctuation that is
+ * not the generic-possession form — "a froglok shin knight", "Cleric of Innoruuk",
+ * "Innoruuk`s Chosen", "skeleton L`rodd".
+ *
+ * The complement of the two tests above and, unlike them, safe to act on. A name this
+ * rejects is NOT thereby a player: "Bzzazzt" is a Plane of Sky bee spelled exactly like
+ * a player name, and reading that shape as friendly is what once made a whole raid zone
+ * score nothing. So this says "certainly a mob" and never "certainly a player" — the
+ * bare capitalized token is left unanswered, for the fight itself to place.
+ */
+export function looksLikeMobName(name) {
+  const trimmed = String(name ?? '').trim();
+  if (!trimmed) return false;
+  return !looksLikePlayerName(trimmed) && !looksLikePetName(trimmed);
+}
+
 /** Edit distance, capped: anything past `max` is reported as `max + 1` and stops early. */
 function editDistance(a, b, max) {
   if (Math.abs(a.length - b.length) > max) return max + 1;

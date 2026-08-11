@@ -91,16 +91,23 @@ scoring pipeline is unit-testable in WSL and replayable offline. Keep it that wa
 - `entities.js` — raw name → canonical combatant. The big trick: pets are written
   `` <Owner>`s <type> `` with a BACKTICK, so ownership is a string split. A pet's
   canonical `name` IS its owner — pet damage folds into the owner's row at resolve time.
-- `roster.js` — who counts as "us". Explicit membership (group/`/who` messages) always
-  beats the implicit heuristic (player-shaped names that damage NPCs). Also holds named
-  summoned pets (`Gann` → owner, learned from the pet-calls-you-"Master" line or user
-  settings) and charmed mobs (charm inferred from cast + "has been charmed", break
-  inferred from friendly-hits-friendly — the log has no charm-break message).
-- `encounter.js` — per-fight aggregation. Opens on first friendly damage; closes on idle
-  timeout, zone, or all-engaged-NPCs-slain + grace. Heals never open or extend an
-  encounter (a between-pull top-up would stretch fight duration and dilute DPS).
+- `roster.js` — what the session has learned about who is who. It does **not** decide
+  whose damage counts (the fight does); it SEEDS that decision on the first line of a
+  pull and answers identity questions the fight cannot. Facts first (logging character,
+  party list), then what the game stated (group/`/who`/`Targeted`), then channel chat,
+  then the implicit set. Also holds named summoned pets (`Gann` → owner, learned from
+  the pet-calls-you-"Master" line or user settings) and charmed mobs (charm inferred
+  from cast + "has been charmed", break inferred from a friendly-hits-friendly line —
+  the log has no charm-break message).
+- `encounter.js` — per-fight aggregation, and the home of `engagedNpcs`: the fight's
+  enemy set, which is the axis all scoring turns on. Opens on the first damage line that
+  can be placed; closes on idle timeout, zone, or all-engaged-NPCs-slain + grace. Heals
+  never open or extend an encounter (a between-pull top-up would stretch fight duration
+  and dilute DPS).
 - `index.js` (`LogParser`) — orchestrates all of the above; `feed(line)` → typed event,
-  `snapshot()` → what the overlay renders. Unattributed non-melee damage is credited to
+  `snapshot()` → what the overlay renders. **The scoring rule is one sentence: damage on
+  the mob we are fighting counts, whoever landed it; damage from it is damage somebody
+  took.** Unattributed non-melee damage is credited to
   the sole friendly with a cast in flight (2s window) or shown as an explicit "Unknown"
   row — never guessed onto a player. Fires `onEncounterEnd(encounter)` on both close
   paths (timeout/zone and all-slain+grace) but **not** on a manual reset — resets are
@@ -194,8 +201,8 @@ default) shows everyone the log produces, and a filled-in list shows exactly tho
 It replaced a `groupOnly` switch that filtered on membership the parser had INFERRED from
 group join/leave lines — which fails closed and fails silently, since anyone already in the
 group when logging began is never in `explicit`. `roster.inParty()` is read where rows are
-chosen and never by `isFriendly`, so hiding somebody changes no attribution: clear the list
-and it is the same fight with more rows.
+chosen and by nothing in the scoring path, so hiding somebody changes no attribution:
+clear the list and it is the same fight with more rows.
 
 ## Invariants that are easy to break
 
@@ -245,18 +252,22 @@ and it is the same fight with more rows.
   the most plausible player. Overhealing is exact (EQ prints `effective (potential)`),
   never estimated. Damage with no stated type stays "untyped" — a spell-name→school
   lookup table would be guessing and was deliberately not built.
-- **Hostility is proven, and so is friendliness.** `hostileByAction` brands an entity that
-  traded damage with a confirmed member, and it lasts the session. That is only safe
-  because `friendlyByAction` can block and revoke it: Plane of Hate charms group members
-  with NO log line either way, so the group's own pets swing at them, and one such swing
-  used to delete a friendly for the rest of the night (a water elemental, 69,394 damage,
-  gone from the meter). The one act that proves friendliness is **being healed by a proven
-  friendly** — nobody heals an enemy, and it separates the live log's twenty brandings
-  20/20. Two things it must never become: fed by "it damaged something we are also
-  fighting" (the Sky bees are scored friendly right up until they are branded, so a mob has
-  that signal too), or granted to a name carrying an article or a space (the group heals
-  the mobs it charms, and permanent standing would outlive the charm). See
-  `docs/changelog/2026-08-10-a-charmed-friend-is-still-a-friend.md`.
+- **The fight decides who counts, not the roster.** Damage landing on the mob this
+  encounter is against counts, whoever landed it; damage coming from that mob is damage
+  somebody took. There is no friend test anywhere in the scoring path, because that
+  question was never the one that mattered and answering it wrong deleted people — a
+  water elemental lost 69,394 damage and its whole row for swinging once at a charmed
+  group member. `Encounter#engagedNpcs` is the axis and it is per-pull; `standing()` in
+  the parser exists ONLY to seed the first line of a fight, and a wrong answer there
+  costs a column for one fight rather than a person for a session. Consequences worth
+  knowing: a charmed mob helping kill the boss gets its own row (its charmer often
+  cannot be identified, and discarding it cost 84,676 damage in the live log), and a
+  charmed member's swings land in the victim's damage-taken rather than in anybody's
+  DPS. See `docs/changelog/2026-08-10-the-fight-decides-who-counts.md`.
+- **Name shape answers one way only.** `looksLikeMobName` says "certainly a mob"; nothing
+  says "certainly a player". "Bzzazzt" is a Plane of Sky bee spelled exactly like a
+  player name, and reading that shape as friendly is what made a whole raid zone score
+  nothing. A bare capitalized token is left unanswered for the fight to place.
 - **No native modules, ever.** A native dependency would need a win32 build under
   Windows npm AND a linux build for the WSL test suite — this is why history is JSONL
   and not SQLite. Pure-JS runtime dependencies are allowed but stay rare; the only one

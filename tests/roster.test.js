@@ -137,92 +137,26 @@ test('group join and leave lines never change what the party list shows', () => 
   assert.equal(open.inParty('Washerefirst'), true);
 });
 
-// -------------------------------------------------------------- friendly proof
+// ------------------------------------------------------- what the roster is FOR now
 
-test('friendly proof blocks a branding', () => {
+test('the roster seeds a fight, it does not gate one', () => {
   const r = new Roster('Rhale');
-  assert.equal(r.noteFriendlyByAction('Goneker'), true);
-  assert.equal(r.hasFriendlyProof('Goneker'), true);
+  // Everything it can answer, it answers for one purpose: telling the parser which end
+  // of the first damage line of a pull is the enemy. Nothing here decides whose damage
+  // counts — the fight decides that, so a wrong answer costs a column, not a person.
+  assert.equal(r.includes('Rhale'), true);
+  assert.equal(r.isConfirmedMember('Rhale'), true);
 
-  // The pet took a swing at a charmed group member. That used to be enough.
-  assert.equal(r.noteHostileByAction('Goneker'), false);
-  assert.equal(r.isHostileByAction('Goneker'), false);
+  r.noteFriendlyCombatant('Goneker');
+  assert.equal(r.includes('Goneker'), true, 'fought alongside us, so it seeds as ours');
 });
 
-test('friendly proof arriving later revokes a branding', () => {
+test('the hostile brand is gone, and nothing replaced it', () => {
   const r = new Roster('Rhale');
-  assert.equal(r.noteHostileByAction('Goneker'), true);
-  assert.equal(r.isHostileByAction('Goneker'), true);
-  assert.equal(r.notPets.has('Goneker'), true);
-
-  // A group member heals it: whatever it was mistaken for, it is ours.
-  assert.equal(r.noteFriendlyByAction('Goneker'), true);
-  assert.equal(r.isHostileByAction('Goneker'), false);
-  // The blacklist goes with the brand, or the next summon could never re-bind it.
-  assert.equal(r.notPets.has('Goneker'), false);
-});
-
-test('a mob the group has charmed does not collect permanent friendly standing', () => {
-  const r = new Roster('Rhale');
-  r.charm('a tal ghoul wizard', 'Rhain');
-  // Healing your own charmed pet proves nothing that charmedPets does not already say,
-  // and recording it would outlive the charm.
-  assert.equal(r.noteFriendlyByAction('a tal ghoul wizard'), false);
-
-  r.uncharm('a tal ghoul wizard');
-  assert.equal(r.noteHostileByAction('a tal ghoul wizard'), true);
-});
-
-test('only shape-dependent names can collect friendly proof at all', () => {
-  const r = new Roster('Rhale');
-  // The set the branding mechanism can wrongly claim: player-shaped, or a pet.
-  assert.equal(r.noteFriendlyByAction('Goneker'), true);
-  assert.equal(r.noteFriendlyByAction('Rhale`s warder'), true);
-
-  // Everything else was never friendly by shape, so it needs no protection — and giving
-  // it any is how a charmed mob the group healed keeps standing after the charm breaks.
-  // Five did exactly that in the live log before this guard, including a loathling lich
-  // with 85,374 damage that would have scored as the group's own.
-  for (const mob of ['a loathling lich', 'an elemental warrior', 'Cleric of Innoruuk',
-                     'Knight V`Tal', 'skeleton L`rodd', 'Innoruuk`s Chosen']) {
-    assert.equal(r.noteFriendlyByAction(mob), false, mob);
-    assert.equal(r.hasFriendlyProof(mob), false, mob);
-    assert.equal(r.noteHostileByAction(mob), true, `${mob} can still be branded`);
-  }
-});
-
-test('a branding still sticks to something nobody ever healed', () => {
-  const r = new Roster('Rhale');
-  assert.equal(r.noteHostileByAction('Bzzazzt'), true);
-  assert.equal(r.isHostileByAction('Bzzazzt'), true);
-  assert.equal(r.hasFriendlyProof('Bzzazzt'), false);
-});
-
-test('friendly proof is discarded on a character switch', () => {
-  const r = new Roster('Rhale');
-  r.noteFriendlyByAction('Goneker');
-  r.setSelf('Fuaim');
-  assert.equal(r.hasFriendlyProof('Goneker'), false);
-});
-
-test('switching character discards everything learned about the old group', () => {
-  const r = new Roster('Rhale');
-  r.applyEvent({ kind: 'group', action: 'join', who: 'Rhain' });
-  r.noteFriendlyCombatant('Passerby');
-  r.override('Zevrex', true);
-
-  r.setSelf('Fuaim');
-
-  assert.equal(r.includes('Rhain', false), false);
-  assert.equal(r.includes('Passerby', false), false);
-  assert.equal(r.includes('Zevrex', false), false);
-  assert.equal(r.includes('Fuaim', true), true);
-  assert.equal(r.hasExplicitData, false);
-});
-
-test('re-setting the same character is a no-op, not a wipe', () => {
-  const r = new Roster('Rhale');
-  r.noteFriendlyCombatant('Rhain');
-  r.setSelf('Rhale');
-  assert.equal(r.includes('Rhain', false), true);
+  // The session-long "this is an enemy" mark deleted a friendly pet for a whole raid
+  // night. The fight's own enemy set replaced it, and that set lives on the encounter.
+  assert.equal(typeof r.noteHostileByAction, 'undefined');
+  assert.equal(typeof r.isHostileByAction, 'undefined');
+  assert.equal(typeof r.noteFriendlyByAction, 'undefined');
+  assert.equal(typeof r.hasFriendlyProof, 'undefined');
 });
