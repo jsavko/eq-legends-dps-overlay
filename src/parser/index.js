@@ -597,6 +597,56 @@ export class LogParser {
    * already fighting? If not, does anything we know say which end WOULD be? If not
    * either, then both ends are ours and one of them has been turned.
    */
+  /**
+   * Which way a swing goes, on the fight's own axis.
+   *
+   * Shared by damage and by misses, because the two drifting apart is not a cosmetic
+   * bug: a miss scored as an attack where the hit would not have been creates a
+   * combatant row, and that is how five Befallen mobs — `a necro acolyte`, its pet, a
+   * `putrid skeleton` — ended up on the meter swinging at each other.
+   *
+   * @returns {'dealt'|'taken'|'friendly-fire'|null} null means the line is not our fight
+   */
+  swingSide(attacker, target, enc) {
+    // 1. It landed on the mob we are fighting. That is a contribution to this kill and
+    //    it counts, with no test of any kind on who threw it: the group's charmed pet,
+    //    a raid-mate two groups over, another mob that happens to hate this one. In the
+    //    live log this branch alone is 3,486 lines and 219,010 damage that used to be
+    //    discarded, 84,676 of it from one charmed loathling lich whose charmer the
+    //    parser simply could not identify.
+    if (enc?.engagedNpcs.has(target.name)) return 'dealt';
+
+    const a = this.standingOf(attacker);
+    const t = this.standingOf(target);
+
+    // 2. It came from the mob we are fighting, so somebody took it.
+    //
+    //    Two exclusions, both narrow. A victim we are ALSO fighting is mob infighting and
+    //    belongs to neither side. A mob-shaped victim that has never contributed anything
+    //    to this fight is a bystander — our boss swinging at a wandering skeleton is not
+    //    damage anybody on our side took, and the skeleton has no business in the "what
+    //    is killing me" view.
+    //
+    //    But a mob-shaped victim that HAS already dealt damage in this fight is in it,
+    //    which is what a charmed pet looks like from the outside: it beats on the boss,
+    //    the boss beats back. Participation is the test, not what the thing is called.
+    if (enc?.engagedNpcs.has(attacker.name)
+        && !enc.engagedNpcs.has(target.name)
+        && (t !== 'enemy' || enc.combatants.has(target.name))) return 'taken';
+
+    // 3. Neither end is a known enemy yet. Work out which end WOULD be, from standing
+    //    alone. Two mobs going at each other is not our fight in either direction and
+    //    must never open one — a froglok killing a mummy across the room would otherwise
+    //    start an encounter and score it.
+    if (a === 'enemy' && t === 'enemy') return null;
+    if (t === 'enemy' || (a === 'ours' && t !== 'ours')) return 'dealt';
+    if (a === 'enemy' || (t === 'ours' && a !== 'ours')) return 'taken';
+
+    // 4. Both ends are ours, which cannot be true of a damage line — unless one of them
+    //    has been turned against the other.
+    return 'friendly-fire';
+  }
+
   handleDamage(event) {
     const attacker = this.resolve(event.attacker, true);
     const target = this.resolve(event.target);
@@ -621,6 +671,10 @@ export class LogParser {
     // opposite of self-damage — it is the charm-break signal.
     if (!attacker.isPet && !target.isPet && attacker.display === target.display
         && !hasArticle(event.attacker) && !hasArticle(event.target)) {
+      // An enemy's own self-damage is not ours to record: "Hoptor Thaggelum hit Hoptor
+      // Thaggelum for 30 points of unresistable damage by Dark Empathy Recourse." is a
+      // mob paying its own costs, and it earned the mob a row on the meter.
+      if (this.isEnemy(target.name) || this.standing(target.name) === 'enemy') return;
       // Never opens a fight. A shaman canni-ing up between pulls is not a pull, and an
       // encounter opened by it would run its clock until the idle timeout with no enemy
       // in it — the same reasoning that keeps fall damage and lone DoT ticks from
@@ -629,48 +683,12 @@ export class LogParser {
       return;
     }
 
-    // 1. It landed on the mob we are fighting. That is a contribution to this kill and
-    //    it counts, with no test of any kind on who threw it: the group's charmed pet,
-    //    a raid-mate two groups over, another mob that happens to hate this one. In the
-    //    live log this single branch is 3,486 lines and 219,010 damage that used to be
-    //    discarded, 84,676 of it from one charmed loathling lich whose charmer the
-    //    parser simply could not identify.
-    if (enc?.engagedNpcs.has(target.name)) {
-      this.creditDamage(event, attacker, target, enc);
-      return;
-    }
-
-    const a = this.standingOf(attacker);
-    const t = this.standingOf(target);
-
-    // 2. It came from the mob we are fighting, so somebody took it.
-    //
-    //    Two exclusions, both narrow. A victim we are ALSO fighting is mob infighting and
-    //    belongs to neither side. A mob-shaped victim that has never contributed anything
-    //    to this fight is a bystander — our boss swinging at a wandering skeleton is not
-    //    damage anybody on our side took, and the skeleton has no business in the "what
-    //    is killing me" view.
-    //
-    //    But a mob-shaped victim that HAS already dealt damage in this fight is in it,
-    //    which is what a charmed pet looks like from the outside: it beats on the boss,
-    //    the boss beats back. Participation is the test, not what the thing is called.
-    if (enc?.engagedNpcs.has(attacker.name)
-        && !enc.engagedNpcs.has(target.name)
-        && (t !== 'enemy' || enc.combatants.has(target.name))) {
-      this.creditDamageTaken(event, attacker, target, enc);
-      return;
-    }
-
-    // 3. Neither end is a known enemy yet. Work out which end WOULD be, from standing
-    //    alone, and let that open or extend the fight. Two mobs going at each other is
-    //    not our fight in either direction and must never open one — a froglok killing
-    //    a mummy across the room would otherwise start an encounter and score it.
-    if (a === 'enemy' && t === 'enemy') return;
-    if (t === 'enemy' || (a === 'ours' && t !== 'ours')) {
+    const side = this.swingSide(attacker, target, enc);
+    if (side === 'dealt') {
       this.creditDamage(event, attacker, target, this.ensureEncounter(event.ts));
       return;
     }
-    if (a === 'enemy' || (t === 'ours' && a !== 'ours')) {
+    if (side === 'taken') {
       // A DoT already ticking on you is not proof that a fight is on. This is the succor
       // case: evacuate out of Plane of Hate and Wrath of the Elements keeps landing every
       // six seconds from a mob in a room you have left, opening a fresh encounter
@@ -681,6 +699,7 @@ export class LogParser {
       this.creditDamageTaken(event, attacker, target, this.ensureEncounter(event.ts));
       return;
     }
+    if (side !== 'friendly-fire') return;
 
     // 4. Both ends are ours, which cannot be true of a damage line — unless one of them
     //    has been turned against the other. First check whether it is an identity we got
@@ -1309,20 +1328,18 @@ export class LogParser {
   }
 
   handleMiss(event) {
-    const attacker = this.resolve(event.attacker, true);
-    const target = this.resolve(event.target);
-    // The same axis handleDamage uses: a swing AT the mob we are fighting is an attack,
-    // a swing FROM it is one somebody avoided.
-    const attackerFriendly = this.isEnemy(target.name)
-      || (!this.isEnemy(attacker.name) && this.standing(target.name) === 'enemy');
-    const targetFriendly = this.isEnemy(attacker.name)
-      || (!this.isEnemy(target.name) && this.standing(attacker.name) === 'enemy');
-
     // A miss alone does not start a fight — otherwise a stray swing at a passing mob
     // opens an encounter with 0 damage and an ever-growing duration.
     if (!this.current || this.current.closed) return;
 
-    if (attackerFriendly && !targetFriendly) {
+    const attacker = this.resolve(event.attacker, true);
+    const target = this.resolve(event.target);
+    // Exactly the axis handleDamage uses, from exactly the same function. A swing AT the
+    // mob we are fighting is an attack; a swing FROM it is one somebody avoided; a swing
+    // between two mobs is neither and must create no row.
+    const side = this.swingSide(attacker, target, this.current);
+
+    if (side === 'dealt') {
       this.current.addMiss({
         name: attacker.name,
         ts: event.ts,
@@ -1336,7 +1353,7 @@ export class LogParser {
     // The other direction — a mob swinging at a friendly who avoided it — is defense
     // credit for the taken view: dodges and ripostes are why the damage-taken number
     // is as low as it is, and hiding them would make a good tank look merely lucky.
-    if (!attackerFriendly && targetFriendly) {
+    if (side === 'taken') {
       this.current.addAvoidTaken({
         name: target.name,
         avoidance: event.avoidance ?? 'miss',
@@ -1368,10 +1385,30 @@ export class LogParser {
     if (!this.current || this.current.closed) return;
 
     // The mirror of the damage rule: damage counts when it lands on the enemy, so a heal
-    // counts when it lands on OUR side. That is one test on the target rather than a
-    // friend test on the healer, and it drops exactly the right thing — "Bonefire healed
-    // orc legionnaire for 20 hit points by Courage." is an orc topping up an orc.
+    // counts when it lands on OUR side. One test on the target rather than a friend test
+    // on the healer — but it has to be the RIGHT test, and "not an engaged enemy" was
+    // far too weak. An enemy the group has not personally hit is not in `engagedNpcs`,
+    // so mobs healing each other mid-pull turned up as HEALERS on the meter: `a necro
+    // acolyte`, its pet and a `shadowknight` all had rows in Befallen.
+    //
+    // So the target must be an enemy by neither the fight NOR its name. A mob-shaped
+    // name earns its way back exactly as it does on the damage side, by having actually
+    // dealt damage in this fight — which is what a charmed pet looks like from outside.
+    // A bare capitalized token is still unanswered and still healable: a player nobody
+    // has seen act yet is a player, not a mob.
     if (this.isEnemy(target.name)) return;
+    if (this.standing(target.name) === 'enemy'
+        && !(this.current.combatants.get(target.name)?.damage > 0)) return;
+
+    // And the HEALER must not be an enemy either, which is not the same test twice.
+    // EQ words a lifetap recourse backwards: "a spite golem healed Glorb for 34 hit
+    // points by Leech Touch I." is GLORB draining the golem, logged as though the golem
+    // were the healer — and it put a spite golem on the meter as a healer. Whose heal it
+    // really is cannot be read off the line without assuming the spell's mechanics, so
+    // it scores for nobody rather than being credited to a guess. The cost is that
+    // lifetap self-healing goes uncounted; the honest fix for that is a rule that reads
+    // the recourse wording, not an inference here.
+    if (this.isEnemy(healer.name) || this.standing(healer.name) === 'enemy') return;
 
     this.roster.noteFriendlyCombatant(healer.name);
     this.current.addHeal({
@@ -1539,7 +1576,11 @@ export class LogParser {
     this.endCcState(target.display, null);
 
     if (!this.current || this.current.closed) return;
-    if (!this.isEnemy(target.name)) {
+    // A mob is a mob whether or not WE were the ones fighting it. "Orc centurion has
+    // been slain by Foalya!" is somebody else's kill, and recording it as a friendly
+    // death gave the orc a row in our fight — deaths are the one thing that keeps a row
+    // visible at zero of everything else.
+    if (!this.isEnemy(target.name) && this.standing(target.name) !== 'enemy') {
       // A player dying does not end the pull — but it is the single most important
       // fact in the damage-taken view, so it is recorded before the early return.
       // A pet's death is marked as such and never counts as its owner's.

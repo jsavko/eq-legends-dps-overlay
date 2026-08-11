@@ -190,12 +190,50 @@ something. No total or share moves, because a row dropped here contributed exact
 the metric it was dropped from — the number at the top still agrees with the bars beneath
 it. The COPY button reads the same function, so the pasted line matches the screen.
 
+## Mobs on the meter: three leaks the re-axis opened
+
+James: "I have an entity on the parser who isn't even in the zone wtf". Replaying the tail
+of the live log showed eight rows in a Befallen fight, five of them mobs — `a necro
+acolyte`, its pet, a `shadowknight`, a `putrid skeleton`, a `necro apprentice` — several
+of them with HEALING credit. Three separate leaks, all introduced by this change:
+
+- **`handleMiss` had its own copy of the axis, and a weaker one.** A miss between two mobs
+  scored as an attack where the hit would not have, and `addMiss` mints a combatant row.
+  Both paths now call one `swingSide()`; the drift is what the bug was, so removing the
+  possibility of drift is the fix.
+- **The heal test only excluded ENGAGED enemies.** A mob the group has not personally hit
+  is not in `engagedNpcs`, so mobs healing each other mid-pull became healers on the
+  meter. The target must now be an enemy by neither the fight nor its name, and — the
+  other half — so must the **healer**. EQ words a lifetap recourse backwards: `a spite
+  golem healed Glorb for 34 hit points by Leech Touch I.` is Glorb draining the golem,
+  and it put a spite golem on the meter as a healer.
+- **Self-damage and foreign kills were not checked for being an enemy's.** `Hoptor
+  Thaggelum hit Hoptor Thaggelum ... by Dark Empathy Recourse.` is a mob paying its own
+  costs, and `Orc centurion has been slain by Foalya!` is somebody else's kill being
+  recorded as one of our deaths — and a death keeps a row visible at zero of everything
+  else.
+
+Measured over the session: mob-shaped rows with no damage at all fall from **65 to 4**,
+and mob healers from **38 to 0**. The 69 mob-shaped rows that *did* deal damage stay —
+those are the charmed pets this whole change exists to count.
+
+Verified live rather than by replay: the packed overlay was relaunched with
+`--remote-debugging-port=9223`, which Electron exposes on localhost and WSL can reach, and
+its DOM read over CDP mid-fight. Two rows, both real players. That beats inferring from a
+replay and is worth remembering as a technique — `docs/changelog/2026-08-02-breakdown-shows-every-ability.md`
+drives a separate headless Chrome, but the running app will answer for itself.
+
 ## Still open
 
 **Mob infighting inside your own pull is credited.** If two mobs the group has engaged
 fight each other, the attacker gets a DPS row. It is indistinguishable from a charmed pet
 helping, which is what it usually is, and the deliberate choice is to show it rather than
 guess. If it ever reads as noise on a specific fight, the party list is the answer.
+
+**Lifetap self-healing is not credited.** A heal cast by an enemy scores for nobody,
+because whose heal it really is cannot be read off the line without assuming the spell's
+mechanics. The honest fix is a rule that recognises the recourse wording, not an inference
+in the scoring path.
 
 **Two same-named mobs share one row.** `a fire giant warrior` beating on
 `a fire giant warrior` credits and debits the same key, so the charmed one and the boss's
