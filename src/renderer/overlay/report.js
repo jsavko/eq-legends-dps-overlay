@@ -59,16 +59,25 @@ const DASH = '—';
 /**
  * The rows the meter is showing, in the order it is showing them.
  *
- * Damage needs no work: the parser sorts rows by damage on the way out and every row it
- * emits was credited with something. The other two views are filters with their own
- * sort, and each filter is a judgement:
+ * All three views are filters with their own sort, and each filter is a judgement about
+ * what that view exists to show:
  *
+ *   damage  — `damage > 0`. A row that dealt nothing has nothing to say on this chart,
+ *             and it used to appear anyway: the parser emits one row per combatant and
+ *             a combatant is now created by taking damage or healing too, so a cleric
+ *             who never swung, or a shaman whose only entry was the health he spent on
+ *             mana, sat at the bottom of the DPS list reading 0. They are still on the
+ *             healing and taken charts, where they did something.
  *   healing — `heals > 0`, the CAST count, not the healed total. A healer whose every
  *             point was overheal still cast, still spent mana, and still belongs in the
  *             list; keyed on `healing` they would vanish from the view that exists to
  *             show them.
  *   taken   — a death keeps a row visible at zero damage taken. Dying is the one fact
  *             this view must never hide.
+ *
+ * None of this can change a total or a share. The parser computes both from the rows it
+ * emits, and every row dropped here contributes exactly zero to the metric it is dropped
+ * from — so the numbers at the top still agree with the bars underneath them.
  *
  * @param {Object|null} snap
  * @param {'damage'|'healing'|'taken'} metric
@@ -83,7 +92,7 @@ export function rowsForMetric(snap, metric) {
       .filter((r) => r.damageTaken > 0 || r.deaths > 0 || r.petDeaths > 0)
       .sort((a, b) => b.damageTaken - a.damageTaken);
   }
-  return rows;
+  return rows.filter((r) => r.damage > 0);
 }
 
 /**

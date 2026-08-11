@@ -175,6 +175,21 @@ already dealt damage in this fight is in this fight — which took the remaining
 | `CLAUDE.md`, `docs/architecture.md` | the invariant restated: the fight decides, name shape answers one way |
 | `tests/parser.test.js`, `tests/roster.test.js` | rewritten onto the new axis |
 
+## Nothing doing 0 dps is on the dps chart
+
+> "Things doing 0 dps shouldn't be on the dps chart"
+
+A side effect of everything above, and a visible one. The parser emits one row per
+combatant, and a combatant is now created by *taking* damage or by healing as well as by
+dealing it — so a cleric who never swung, and a shaman whose only entry was the health he
+spent on mana, both turned up at the bottom of the DPS list reading `0.0`.
+
+`rowsForMetric` now filters damage on `damage > 0`, which is the rule the healing and
+taken views already had in their own terms. They still appear on the charts where they did
+something. No total or share moves, because a row dropped here contributed exactly zero to
+the metric it was dropped from — the number at the top still agrees with the bars beneath
+it. The COPY button reads the same function, so the pasted line matches the screen.
+
 ## Still open
 
 **Mob infighting inside your own pull is credited.** If two mobs the group has engaged

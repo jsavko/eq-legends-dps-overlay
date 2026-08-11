@@ -57,6 +57,25 @@ test('the damage view shows every row, in the order the parser sorted them', () 
     ['Rhale', 'Emalina', 'Khanvikt', 'Aanya']);
 });
 
+test('a row that dealt nothing is not on the damage chart', () => {
+  // The parser emits one row per combatant, and a combatant is created by taking damage
+  // or healing too — so a cleric who never swung, or a shaman whose only entry was the
+  // health he spent on mana, used to sit at the bottom of the DPS list reading 0.
+  const snap = damageSnap(GROUP, {
+    rows: [
+      ...damageSnap(GROUP).rows,
+      member('Cleric', { damage: 0, dps: 0, heals: 4, healing: 900 }),
+      member('Shaman', { damage: 0, dps: 0, damageTaken: 1924 }),
+    ],
+  });
+
+  assert.deepEqual(rowsForMetric(snap, 'damage').map((r) => r.name),
+    ['Rhale', 'Emalina', 'Khanvikt', 'Aanya']);
+  // They are still on the charts where they did something.
+  assert.ok(rowsForMetric(snap, 'healing').some((r) => r.name === 'Cleric'));
+  assert.ok(rowsForMetric(snap, 'taken').some((r) => r.name === 'Shaman'));
+});
+
 test('the healing view keeps a healer whose every point was overheal', () => {
   // Keyed on the CAST count, not the healed total: a cleric who landed nothing still
   // cast, still spent the mana, and vanishing from the healing view would be absurd.
