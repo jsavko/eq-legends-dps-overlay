@@ -115,19 +115,35 @@ Replaying all 1,282,562 lines:
 
 | | Before | After |
 |---|---|---|
-| Damage lines dropped | 4,733 | **219** |
-| Damage discarded | 301,890 | **44,462** |
+| Damage lines dropped | 4,733 | **194** |
+| Damage discarded | 301,890 | **13,095** |
 | Total scored | 33,848,834 | **34,106,262** |
 | `Goneker` (water elemental) | 0 after branding | **87,612** |
 | `Vabann` | 0 after branding | **13,452** |
 | `a loathling lich` | 0 | **84,676** |
 | `a fire giant warrior` | 0 | **51,629** |
 
-The 219 that still drop are the ones that should: real self-damage (`Syphon -> Syphon`,
-`Venun -> Venun`), and genuine mob-on-mob between two things neither of which is in our
-fight (`A swampwater crocodile -> a froglok sentry`).
+The 194 that still drop are genuine mob-on-mob between two things neither of which is in
+our fight (`A swampwater crocodile -> a froglok sentry`), plus self-damage that happened
+between pulls with no encounter to put it in.
 
-706 tests pass.
+707 tests pass.
+
+## Self-damage is a cost, and costs are read in the taken view
+
+> "Syphon's self damage should be logged in their damage taken log, but not as dps"
+
+`Venun hit Venun for 1924 points of unresistable damage by Cannibalization I.` is a shaman
+buying mana with health. It was being discarded outright, which is wrong in the same way
+everything else here was wrong: it is real damage the player took. It now lands in their
+taken row naming themselves as the source, with the ability and the damage type the line
+stated, and earns no DPS — that column measures damage done to the enemy.
+
+Across the session that is **31,367 damage** finally recorded: Venun 18,664, Syphon
+12,316, Boan 357. It still never opens a fight, on the same reasoning that keeps fall
+damage and lone DoT ticks from starting one — a shaman canni-ing up before the pull is not
+a pull, and an encounter opened by it would run its clock to the idle timeout with no
+enemy in it.
 
 ## An article means "one of these"
 

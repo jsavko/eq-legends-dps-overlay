@@ -602,9 +602,12 @@ export class LogParser {
     const target = this.resolve(event.target);
     const enc = this.current && !this.current.closed ? this.current : null;
 
-    // Self-damage is not an exchange between two entities: "Venun hit Venun for 1924
-    // points of unresistable damage by Cannibalization I." is a shaman buying mana with
-    // life, 18 times and 20,965 points of it in the live log.
+    // Self-damage: "Venun hit Venun for 1924 points of unresistable damage by
+    // Cannibalization I." — a shaman buying mana with life, 18 times and 20,965 points
+    // of it in the live log. It is real damage the player took and it belongs in their
+    // taken row, naming themselves as the source; it is not damage done to the enemy, so
+    // it earns no DPS. Health spent on mana is a cost, and the taken view is where costs
+    // are read.
     //
     // Two conditions, and the second one is the whole subtlety. Matching names only mean
     // one entity when the name identifies one — and an ARTICLE says it does not. "A fire
@@ -617,7 +620,14 @@ export class LogParser {
     // from a charmed mob has the same resolved name on both sides while being the exact
     // opposite of self-damage — it is the charm-break signal.
     if (!attacker.isPet && !target.isPet && attacker.display === target.display
-        && !hasArticle(event.attacker) && !hasArticle(event.target)) return;
+        && !hasArticle(event.attacker) && !hasArticle(event.target)) {
+      // Never opens a fight. A shaman canni-ing up between pulls is not a pull, and an
+      // encounter opened by it would run its clock until the idle timeout with no enemy
+      // in it — the same reasoning that keeps fall damage and lone DoT ticks from
+      // starting one.
+      if (enc) this.creditDamageTaken(event, attacker, target, enc, { engageAttacker: false });
+      return;
+    }
 
     // 1. It landed on the mob we are fighting. That is a contribution to this kill and
     //    it counts, with no test of any kind on who threw it: the group's charmed pet,

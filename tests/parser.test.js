@@ -1324,17 +1324,30 @@ test('a bystander the boss swats has no business in the fight', () => {
   assert.equal(p.snapshot().totalDamageTaken, 0);
 });
 
-test('self-damage is dropped without disturbing anybody\'s identity', () => {
+test('self-damage lands in the taken row, never in DPS', () => {
   const p = makeParser();
   p.feed(`${D(22, 45, 56)} Venun slashes a revultant rat for 45 points of damage.`);
-  // A shaman buying mana with life: 18 lines and 20,965 points in the live log.
+  // A shaman buying mana with life: 18 lines and 20,965 points in the live log. Health
+  // spent on mana is a cost, and the taken view is where costs are read.
   p.feed(`${D(22, 45, 57)} Venun hit Venun for 1924 points of unresistable damage by Cannibalization I.`);
 
   assert.equal(p.isEnemy('Venun'), false);
   assert.equal(p.standing('Venun'), 'ours');
   const venun = p.snapshot().rows.find((r) => r.name === 'Venun');
   assert.equal(venun.damage, 45, 'not counted as DPS');
-  assert.equal(venun.damageTaken, 0, 'and not counted against them either');
+  assert.equal(venun.damageTaken, 1924);
+  // Named as their own attacker, because that is what the line says happened.
+  assert.deepEqual(venun.attackers.map((a) => a.name), ['Venun']);
+  assert.equal(venun.takenAbilities[0].name, 'Cannibalization I');
+  assert.equal(venun.takenByType.unresistable, 1924);
+});
+
+test('self-damage between pulls never opens a fight', () => {
+  const p = makeParser();
+  // Canni-ing up before the pull. An encounter opened by it would run its clock to the
+  // idle timeout with no enemy in it.
+  p.feed(`${D(22, 45, 57)} Venun hit Venun for 1924 points of unresistable damage by Cannibalization I.`);
+  assert.equal(p.snapshot().idle, true);
 });
 
 test('channel chat is player proof; a summon call-out is not', () => {
