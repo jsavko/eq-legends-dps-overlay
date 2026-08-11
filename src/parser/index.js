@@ -39,7 +39,7 @@
 
 import { parseTimestamp } from './timestamp.js';
 import { matchRule, spellStem } from './rules.js';
-import { resolveEntity, looksLikeMobName, looksLikePlayerName, nearestName, stripArticle } from './entities.js';
+import { resolveEntity, hasArticle, looksLikeMobName, looksLikePlayerName, nearestName, stripArticle } from './entities.js';
 import { Roster, parseLogFilename } from './roster.js';
 import { Encounter, DEFAULTS } from './encounter.js';
 import { classify, UNKNOWN_GROUP } from './spellwatch.js';
@@ -602,15 +602,22 @@ export class LogParser {
     const target = this.resolve(event.target);
     const enc = this.current && !this.current.closed ? this.current : null;
 
-    // Self-damage is not an exchange between two entities and never was: "Venun hit
-    // Venun for 1924 points of unresistable damage by Cannibalization I." is a shaman
-    // buying mana with life, 18 times and 20,965 points of it in the live log.
+    // Self-damage is not an exchange between two entities: "Venun hit Venun for 1924
+    // points of unresistable damage by Cannibalization I." is a shaman buying mana with
+    // life, 18 times and 20,965 points of it in the live log.
+    //
+    // Two conditions, and the second one is the whole subtlety. Matching names only mean
+    // one entity when the name identifies one — and an ARTICLE says it does not. "A fire
+    // giant warrior cleaves a fire giant warrior" is two different giants, one of them
+    // almost certainly the group's charmed pet, and reading it as self-damage discarded
+    // 789 lines of a real fight. So both sides must be article-free to count as self.
     //
     // Tested on the DISPLAY names with both sides required to be non-pets, never on the
     // resolved ones. A pet resolves to its owner, so "A tal ghoul wizard slashes YOU"
     // from a charmed mob has the same resolved name on both sides while being the exact
     // opposite of self-damage — it is the charm-break signal.
-    if (!attacker.isPet && !target.isPet && attacker.display === target.display) return;
+    if (!attacker.isPet && !target.isPet && attacker.display === target.display
+        && !hasArticle(event.attacker) && !hasArticle(event.target)) return;
 
     // 1. It landed on the mob we are fighting. That is a contribution to this kill and
     //    it counts, with no test of any kind on who threw it: the group's charmed pet,
@@ -626,11 +633,20 @@ export class LogParser {
     const a = this.standingOf(attacker);
     const t = this.standingOf(target);
 
-    // 2. It came from the mob we are fighting, so somebody took it — unless that
-    //    somebody is another mob. Our boss swinging at a wandering skeleton is not
-    //    damage anybody on our side took, and giving the skeleton a row would put a
-    //    stranger's health bar in the "what is killing me" view.
-    if (enc?.engagedNpcs.has(attacker.name) && t !== 'enemy' && !this.isEnemy(target.name)) {
+    // 2. It came from the mob we are fighting, so somebody took it.
+    //
+    //    Two exclusions, both narrow. A victim we are ALSO fighting is mob infighting and
+    //    belongs to neither side. A mob-shaped victim that has never contributed anything
+    //    to this fight is a bystander — our boss swinging at a wandering skeleton is not
+    //    damage anybody on our side took, and the skeleton has no business in the "what
+    //    is killing me" view.
+    //
+    //    But a mob-shaped victim that HAS already dealt damage in this fight is in it,
+    //    which is what a charmed pet looks like from the outside: it beats on the boss,
+    //    the boss beats back. Participation is the test, not what the thing is called.
+    if (enc?.engagedNpcs.has(attacker.name)
+        && !enc.engagedNpcs.has(target.name)
+        && (t !== 'enemy' || enc.combatants.has(target.name))) {
       this.creditDamageTaken(event, attacker, target, enc);
       return;
     }

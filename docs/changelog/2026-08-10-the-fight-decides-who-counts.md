@@ -39,8 +39,11 @@ One sentence, and there is no friend test anywhere in it:
 `Encounter#engagedNpcs` is the axis. `handleDamage` now reads as four questions:
 
 1. is the target a mob we are already fighting? → credit the attacker, no questions asked
-2. is the *attacker* one? → credit the target as damage taken (unless the victim is
-   itself another mob — our boss swinging at a wandering skeleton is nobody's business)
+2. is the *attacker* one? → credit the target as damage taken, unless the victim is a
+   mob we are also fighting (infighting, belonging to neither side) or a mob-shaped
+   bystander that has never contributed anything to this fight. A mob-shaped victim that
+   HAS already dealt damage here is in the fight — which is exactly what a charmed pet
+   looks like from the outside: it beats on the boss, the boss beats back
 3. neither, so which end *would* be the enemy, from standing alone? That opens or extends
    the fight. Two mobs going at each other is not our fight and cannot open one.
 4. both ends are ours, which means somebody has been turned — see below
@@ -85,7 +88,7 @@ Two subtleties the live log forced out, both about pets:
 
 ## What this changes on screen
 
-**A charmed mob gets its own row.** `a loathling lich` with 71,795 damage on a Plane of
+**A charmed mob gets its own row.** `a loathling lich` with 84,676 damage on a Plane of
 Fear night is now a row on the meter. Its charmer usually cannot be identified, so the
 choice was between showing it as itself and throwing the damage away. It shows as itself.
 
@@ -112,20 +115,39 @@ Replaying all 1,282,562 lines:
 
 | | Before | After |
 |---|---|---|
-| Damage lines dropped | 4,733 | **1,488** |
-| Damage discarded | 301,890 | **129,070** |
-| Total scored | 33,848,834 | **34,021,654** |
+| Damage lines dropped | 4,733 | **219** |
+| Damage discarded | 301,890 | **44,462** |
+| Total scored | 33,848,834 | **34,106,262** |
 | `Goneker` (water elemental) | 0 after branding | **87,612** |
 | `Vabann` | 0 after branding | **13,452** |
-| `a loathling lich` | 0 | **71,795** |
-| `a fire giant warrior` | 0 | **22,269** |
+| `a loathling lich` | 0 | **84,676** |
+| `a fire giant warrior` | 0 | **51,629** |
 
-The 1,488 that still drop are almost all irreducible: `A fire giant warrior -> a fire
-giant warrior`, a charmed mob fighting an uncharmed one **of the same name**. EQ writes
-both as the same string, so there is nothing in the log to tell them apart and crediting
-either would be inventing an answer.
+The 219 that still drop are the ones that should: real self-damage (`Syphon -> Syphon`,
+`Venun -> Venun`), and genuine mob-on-mob between two things neither of which is in our
+fight (`A swampwater crocodile -> a froglok sentry`).
 
-703 tests pass.
+706 tests pass.
+
+## An article means "one of these"
+
+The first cut of this still dropped 1,488 lines, and James spotted why in the sample:
+
+> "A fire giant warrior -> a fire giant warrior that's bullshit because it isn't attacking
+> itself, so it should show up as a friendly and a foe"
+
+Correct. The self-damage guard compared display names, and two mobs of the same type share
+one. The discriminator is the **article**: `Venun` names exactly one entity, so
+`Venun hit Venun` really is a shaman spending health on mana; `a fire giant warrior` names
+a type, so `A fire giant warrior cleaves a fire giant warrior` is two giants — one of them
+almost certainly the group's charmed pet. Self-damage now requires both sides to be
+article-free.
+
+That alone recovered 789 lines and 58,916 damage, and it exposed the next layer: our own
+charmed mobs were still being dropped when the boss hit *them* back, because a mob-shaped
+victim was excluded outright. Participation replaced shape there — a victim that has
+already dealt damage in this fight is in this fight — which took the remaining drops from
+595 lines to 219 and moved the lich from 71,795 to its full 84,676.
 
 ## Files
 
@@ -143,3 +165,8 @@ either would be inventing an answer.
 fight each other, the attacker gets a DPS row. It is indistinguishable from a charmed pet
 helping, which is what it usually is, and the deliberate choice is to show it rather than
 guess. If it ever reads as noise on a specific fight, the party list is the answer.
+
+**Two same-named mobs share one row.** `a fire giant warrior` beating on
+`a fire giant warrior` credits and debits the same key, so the charmed one and the boss's
+adds pool together. There is nothing in the log to separate them — EQ writes both as the
+same string — and inventing a suffix would be inventing identity.

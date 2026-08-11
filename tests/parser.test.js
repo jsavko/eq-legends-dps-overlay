@@ -1285,6 +1285,45 @@ test('a heal landing on a friendly pet counts, whoever cast it', () => {
   assert.deepEqual(taneldar.healTargets, [{ name: 'Goneker', healing: 255 }]);
 });
 
+test('two mobs with the same name are two mobs, not one hitting itself', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} You slash a fire giant warrior for 40 points of damage.`);
+  // James: "that's bullshit because it isn't attacking itself, so it should show up as a
+  // friendly and a foe". An article means EQ is saying "one of these", so two of them
+  // can share a line — and one is almost always the group's charmed pet. Reading it as
+  // self-damage threw away 789 lines and 58,916 damage in the live log.
+  p.feed(`${D(19, 20, 4)} A fire giant warrior cleaves a fire giant warrior for 100 points of damage.`);
+
+  const snap = p.snapshot();
+  assert.equal(snap.rows.find((r) => r.name === 'fire giant warrior').damage, 100);
+  assert.equal(snap.totalDamage, 140);
+});
+
+test('a mob already fighting for us takes damage like anybody else', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} You slash Lord Nagafen for 40 points of damage.`);
+  // It beats on the boss, so it is in this fight...
+  p.feed(`${D(19, 20, 2)} A fire giant warrior cleaves Lord Nagafen for 50 points of damage.`);
+  // ...and the boss beating back lands on it. Participation is the test, not the name.
+  p.feed(`${D(19, 20, 4)} Lord Nagafen cleaves a fire giant warrior for 200 points of damage.`);
+
+  const giant = p.snapshot().rows.find((r) => r.name === 'fire giant warrior');
+  assert.equal(giant.damage, 50);
+  assert.equal(giant.damageTaken, 200);
+  assert.deepEqual(giant.attackers.map((a) => a.name), ['Lord Nagafen']);
+});
+
+test('a bystander the boss swats has no business in the fight', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} You slash Lord Nagafen for 40 points of damage.`);
+  // Never contributed anything, so it is not in this fight and gets no row — otherwise
+  // a stranger's health bar turns up in the "what is killing me" view.
+  p.feed(`${D(19, 20, 4)} Lord Nagafen cleaves a shriveled mummy for 300 points of damage.`);
+
+  assert.deepEqual(p.snapshot().rows.map((r) => r.name), ['Rhale']);
+  assert.equal(p.snapshot().totalDamageTaken, 0);
+});
+
 test('self-damage is dropped without disturbing anybody\'s identity', () => {
   const p = makeParser();
   p.feed(`${D(22, 45, 56)} Venun slashes a revultant rat for 45 points of damage.`);

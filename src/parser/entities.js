@@ -43,6 +43,20 @@ export function stripArticle(name) {
   return name.replace(ARTICLE_RE, '');
 }
 
+/**
+ * True when the raw name carries a leading article, which is EQ saying "one of these"
+ * rather than naming somebody.
+ *
+ * The distinction matters for exactly one question: are these two names the same
+ * ENTITY? "Venun" names one entity, so "Venun hit Venun" is a shaman spending health on
+ * mana. "a fire giant warrior" names a type, so "A fire giant warrior cleaves a fire
+ * giant warrior" is two different giants — one of them almost certainly the group's
+ * charmed pet — and reading it as self-damage threw away 789 lines of a real fight.
+ */
+export function hasArticle(name) {
+  return ARTICLE_RE.test(String(name ?? '').trim());
+}
+
 /** True when the raw token refers to the logging character. */
 export function isSelfToken(name) {
   return SELF_TOKENS.has(String(name).trim().toLowerCase());
