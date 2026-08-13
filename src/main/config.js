@@ -226,6 +226,17 @@ export const DEFAULTS = {
      * underneath the player, which is the only thing migrateAlerts-style rescue is for.
      */
     newSession: 'Control+Shift+N',
+    /**
+     * "Put this fight in chat" — the COPY button, without unlocking to reach it.
+     *
+     * The button is only on screen while the overlay is unlocked, which is precisely the
+     * state it is not in during a pull; reaching it meant unlock, mouse, click, lock. This
+     * binding fires the same action from the game.
+     *
+     * Same no-migration story as `newSession` above: an existing config gains the key on
+     * the one-level-deep merge in `load()`, and nothing already bound changes meaning.
+     */
+    copyReport: 'Control+Shift+C',
   },
 };
 

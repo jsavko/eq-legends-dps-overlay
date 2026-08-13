@@ -62,8 +62,12 @@ test('a config written before a hotkey existed gains it rather than losing the b
 
   const store = new ConfigStore(dir);
   store.load();
+  // One pair of lines per binding added since: the fixture above is frozen at the shape
+  // that shipped, so every later gesture is exercised as a config that has never seen it.
   assert.ok(DEFAULTS.hotkeys.newSession, 'the new-session gesture ships with a binding');
   assert.equal(store.get('hotkeys').newSession, DEFAULTS.hotkeys.newSession);
+  assert.ok(DEFAULTS.hotkeys.copyReport, 'the copy gesture ships with a binding');
+  assert.equal(store.get('hotkeys').copyReport, DEFAULTS.hotkeys.copyReport);
   assert.equal(store.get('hotkeys').toggleLock, 'Control+Alt+D', 'their own choices survive');
 });
 

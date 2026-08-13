@@ -340,6 +340,7 @@ function fillForm(cfg) {
   $('hk-reset').value = cfg.hotkeys.resetEncounter;
   $('hk-session').value = cfg.hotkeys.newSession ?? '';
   $('hk-metric').value = cfg.hotkeys.toggleMetric;
+  $('hk-copy').value = cfg.hotkeys.copyReport ?? '';
   $('hk-alerts').value = cfg.hotkeys.toggleAlerts ?? '';
   syncOutputs();
 }
@@ -714,6 +715,7 @@ async function save() {
       resetEncounter: $('hk-reset').value.trim(),
       newSession: $('hk-session').value.trim(),
       toggleMetric: $('hk-metric').value.trim(),
+      copyReport: $('hk-copy').value.trim(),
       toggleAlerts: $('hk-alerts').value.trim(),
     },
   };

@@ -16,6 +16,19 @@ export const CHANNELS = {
   /** 'below' (the usual) or 'above', when the window is against the bottom of the screen. */
   PANEL_SIDE: 'overlay:panel-side',
   /**
+   * "Copy the meter" — the hotkey's half of the COPY button.
+   *
+   * This one carries an INTENT and no payload, which is the exact opposite of
+   * `CLIPBOARD_COPY` below, and for the same reason. The line has to be the rows the
+   * overlay is showing with the filters the current metric applies, and that lives in the
+   * renderer; so the hotkey asks the renderer to do what the button does, and the renderer
+   * comes back through `CLIPBOARD_COPY` with finished text. Main never composes the line.
+   *
+   * The result is one code path rather than two implementations kept in step — the hotkey
+   * and the button cannot disagree about what the meter says, by construction.
+   */
+  COPY_REPORT: 'overlay:copy-report',
+  /**
    * A fight was appended to the history store — `{ key }` names whose file grew. Sent
    * to the history window so an open one can refresh its rail live instead of showing
    * a list frozen at whatever moment it was opened.

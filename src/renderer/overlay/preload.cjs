@@ -10,6 +10,7 @@ const CH = {
   LOCK_CHANGED: 'overlay:lock-changed',
   HOVER: 'overlay:hover',
   PANEL_SIDE: 'overlay:panel-side',
+  COPY_REPORT: 'overlay:copy-report',
   SET_IGNORE_MOUSE: 'window:set-ignore-mouse',
   FIT_WINDOW: 'window:fit',
   CLOSE_WINDOW: 'window:close',
@@ -34,6 +35,13 @@ contextBridge.exposeInMainWorld('api', {
   onHover: on(CH.HOVER),
   /** Whether the breakdown should render below the rows or above them. */
   onPanelSide: on(CH.PANEL_SIDE),
+  /**
+   * The copy hotkey, asking for the same thing the COPY button does.
+   *
+   * An intent with no payload: main cannot compose the line, because the rows and the
+   * metric on screen are the renderer's. The finished text comes back over `copyText`.
+   */
+  onCopyRequest: on(CH.COPY_REPORT),
 
   getConfig: () => ipcRenderer.invoke(CH.CONFIG_GET),
   openSettings: () => ipcRenderer.invoke(CH.OPEN_SETTINGS),

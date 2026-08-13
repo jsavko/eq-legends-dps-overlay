@@ -1096,6 +1096,16 @@ function refreshTrayMenu() {
       accelerator: keys.toggleMetric,
       click: toggleMetric,
     },
+    // The COPY button, reachable without unlocking to reach it. Here rather than only in
+    // the settings form because the accelerator is the point: this row is how a player
+    // finds out the gesture exists, and it reads the binding from config on every rebuild
+    // so it cannot go stale the way a hardcoded tooltip would.
+    {
+      label: 'Copy meter to chat',
+      accelerator: keys.copyReport,
+      toolTip: 'The metric on screen, as one line to paste',
+      click: copyReport,
+    },
     {
       label: 'Reset encounter',
       accelerator: keys.resetEncounter,
@@ -1694,6 +1704,28 @@ function toggleVisible() {
   refreshTrayMenu();
 }
 
+/**
+ * "Put this fight in chat" — the hotkey and the tray row, both asking the overlay to do
+ * what its COPY button does.
+ *
+ * Main deliberately does NOT compose the line here, even though it holds the parser and
+ * the stored metric. What has to reach the clipboard is the rows the overlay is showing,
+ * in its order, with its filters — `report.js`, shared with `render()` — and a second
+ * derivation of that from `parser.snapshot()` would drift silently, discovered only once
+ * the wrong line was in guild chat. So this sends an intent and the renderer comes back
+ * through CLIPBOARD_COPY with finished text. See the note on COPY_REPORT in `ipc.js`.
+ *
+ * The toast belongs to the renderer for the same reason: only it knows whether the line
+ * was shortened or lost members. With the HUD hidden that toast draws into a hidden
+ * window and the copy still lands — the same deal `resetEncounter` has always had, and
+ * the snapshot push loop keeps feeding a hidden window, so the line is current rather
+ * than whatever was on screen when it was hidden.
+ */
+function copyReport() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.webContents.send(CHANNELS.COPY_REPORT);
+}
+
 function registerHotkeys() {
   globalShortcut.unregisterAll();
   const keys = config.get('hotkeys');
@@ -1715,6 +1747,7 @@ function registerHotkeys() {
   bind(keys.toggleMetric, toggleMetric, 'damage/healing');
   bind(keys.toggleAlerts, toggleAlerts, 'mute alerts');
   bind(keys.newSession, startNewSession, 'new session');
+  bind(keys.copyReport, copyReport, 'copy');
 }
 
 /**

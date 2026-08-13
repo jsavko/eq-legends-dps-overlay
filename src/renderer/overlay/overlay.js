@@ -937,6 +937,10 @@ function wireHover() {
 
 function wireControls() {
   $('btn-copy').addEventListener('click', copyReport);
+  // The hotkey's half of the same button, wired beside it so the two triggers of the one
+  // action read as a pair. The button is only on screen while unlocked — which is the
+  // state the overlay is not in during a pull — so this is how the line is normally taken.
+  window.api.onCopyRequest(copyReport);
   $('btn-metric').addEventListener('click', () => window.api.toggleMetric());
   $('btn-reset').addEventListener('click', () => window.api.resetEncounter());
   $('btn-settings').addEventListener('click', () => window.api.openSettings());
