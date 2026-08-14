@@ -39,7 +39,7 @@
 
 import { parseTimestamp } from './timestamp.js';
 import { matchRule, spellStem } from './rules.js';
-import { resolveEntity, hasArticle, looksLikeMobName, looksLikePlayerName, nearestName, stripArticle } from './entities.js';
+import { resolveEntity, hasArticle, looksLikeMobName, looksLikePlayerName, nearestName, stripArticle, stripPetSuffix } from './entities.js';
 import { Roster, parseLogFilename } from './roster.js';
 import { Encounter, DEFAULTS } from './encounter.js';
 import { classify, UNKNOWN_GROUP } from './spellwatch.js';
@@ -369,6 +369,9 @@ export class LogParser {
         break;
       case 'charm':
         this.handleCharm(event);
+        break;
+      case 'worn-off':
+        this.handleWornOff(event);
         break;
       case 'summon':
         this.handleSummon(event);
@@ -873,7 +876,7 @@ export class LogParser {
       const entries = this.petMappings();
       this.noteNotice(
         entries.length
-          ? `Pets: ${entries.map((e) => `${e.pet} = ${e.owner}`).join(', ')}`
+          ? `Pets: ${entries.map((e) => `${e.pet} = ${e.owner}${e.charmed ? ' (charmed)' : ''}`).join(', ')}`
           : 'No pet mappings yet',
         event.ts,
       );
@@ -888,15 +891,30 @@ export class LogParser {
     // pets still passes through as chat and says nothing.
     if (event.action === 'malformed') return this.notePetSyntax(event.ts);
 
-    const pet = stripArticle(String(event.pet ?? '').trim());
-    if (!looksLikePlayerName(pet)) return this.notePetSyntax(event.ts);
+    // The rule's captures are loose on purpose — a charmed pet is spelled with an
+    // article and spaces — so every judgement about what the names ARE happens here.
+    // The " pet" suffix is stripped because it is the game's marker, not the name:
+    // mapping "a skeletal monk pet" and mapping "a skeletal monk" must mean the same
+    // thing, and the charm store keys on the base. Mob-certainty is judged on the RAW
+    // spelling, before the article is stripped — "a basilisk" is certainly a mob, and
+    // the article that says so is exactly what stripping removes.
+    const rawPet = String(event.pet ?? '').trim();
+    const pet = stripPetSuffix(stripArticle(rawPet));
+    if (!pet) return this.notePetSyntax(event.ts);
+    const petIsMob = hasArticle(rawPet) || /\s/.test(pet) || pet.includes('`');
 
     if (event.action === 'clear') {
-      const had = this.roster.petOwners.delete(pet) ||
-        this.roster.unbindPet(pet, { includeStrong: true });
+      // Every store, not the first hit: "unmap this name" means one owner nowhere,
+      // and stopping at the durable table would let a live charm keep folding it.
+      const hadOwner = this.roster.petOwners.delete(pet);
+      const hadCharm = this.roster.uncharm(pet);
+      const hadLearned = this.roster.unbindPet(pet, { includeStrong: true });
       // Blacklisted either way: "not a pet" is the user overruling the log, and the
-      // log would otherwise re-learn the same binding from the next summon.
+      // log would otherwise re-learn the same binding from the next summon. A future
+      // charm is different — "has been charmed" is the game stating a new fact, and
+      // notPets never gated the charm store, so a re-charm may honestly re-map.
       this.roster.notPets.add(pet);
+      const had = hadOwner || hadCharm || hadLearned;
       this.noteNotice(had ? `${pet} unmapped` : `${pet} was not mapped`, event.ts);
       this.emitPetOwners();
       this.revision++;
@@ -904,6 +922,22 @@ export class LogParser {
     }
 
     const typed = String(event.owner ?? '').trim();
+
+    // Direction check before owner validation: `pets Rhale = a dark boned skeletone`
+    // was typed twice in the live log, and a mob-shaped right side can only mean the
+    // halves are swapped — a mob cannot own a pet. Refused rather than auto-swapped
+    // (the standard everywhere else), but refused SPECIFICALLY: the generic syntax
+    // line is what taught the player nothing five times in a row on Aug 13.
+    // Article-or-spaces, not looksLikeMobName: a bare lowercase token ("kadomony") is
+    // a capitalization slip on a player name, and it must still reach the owner
+    // validation below, which forgives exactly that.
+    if (hasArticle(typed) || /\s/.test(typed)) {
+      const leftIsPlayer = Boolean(this.matchFriendly(pet)) || looksLikePlayerName(pet);
+      return leftIsPlayer
+        ? this.noteNotice('Owner goes on the right: pet <Pet> = <Owner>', event.ts)
+        : this.notePetSyntax(event.ts);
+    }
+
     if (!/^[A-Za-z]{2,32}$/.test(typed) || typed.toLowerCase() === pet.toLowerCase()) {
       return this.notePetSyntax(event.ts);
     }
@@ -924,8 +958,32 @@ export class LogParser {
     }
 
     const name = owner ?? typed;
+
+    // A mob-shaped pet name is a charm, and a charm's mapping gets a charm's lifetime:
+    // it lives in the transient store, ends with the worn-off line, the friendly-fire
+    // inference or a zone, and never reaches the persisted settings. Storing it durably
+    // is how "basilisk = Rhale" ended up in the saved config branding every wild
+    // basilisk 'ours' at every launch. charm() also evicts the name from the durable
+    // and learned tables — mappings override, they do not layer.
+    if (petIsMob) {
+      this.roster.charm(pet, name);
+      this.roster.implicit.delete(pet);
+      this.noteNotice(
+        owner ? `${pet} = ${name} (while charmed)` : `${pet} = ${name} (not seen yet, while charmed)`,
+        event.ts,
+      );
+      this.revision++;
+      return;
+    }
+
+    if (!looksLikePlayerName(pet)) return this.notePetSyntax(event.ts);
+
     this.roster.notPets.delete(pet);
     this.roster.learnedPetOwners.delete(pet);
+    // The typed command overrides a live charm entry too. charmedPets sits FIRST in
+    // ownerOf's precedence, so leaving a stale attribution there would let it silently
+    // outrank the very mapping this command just acknowledged.
+    this.roster.charmedPets.delete(pet);
     this.roster.petOwners.set(pet, name);
     this.roster.implicit.delete(pet);
     // A name nobody here answers to is honoured — the owner may simply not have acted
@@ -1001,15 +1059,30 @@ export class LogParser {
     return [...out].filter((n) => !looksLikeMobName(n)).sort();
   }
 
-  /** Every pet mapping in force, configured and learned alike. */
+  /** Every pet mapping in force — learned, configured and live charms alike. */
   petMappings() {
     const out = new Map();
     for (const { pet, owner, weak } of this.roster.learnedPets()) out.set(pet, { pet, owner, weak });
     for (const [pet, owner] of this.roster.petOwners) out.set(pet, { pet, owner, weak: false });
+    // Charms last, in the same precedence order ownerOf answers with: a live charm is
+    // the mapping actually in force for that name, and the list must not say otherwise.
+    for (const [pet, owner] of this.roster.charmedPets) {
+      out.set(pet, { pet, owner, weak: false, charmed: true });
+    }
     return [...out.values()].sort((a, b) => a.pet.localeCompare(b.pet));
   }
 
-  /** Hand the configured mapping to whoever persists it (main writes it to config). */
+  /**
+   * Hand the configured mapping to whoever persists it (main writes it to config).
+   *
+   * This persists the WHOLE table, so what is allowed into petOwners is what is allowed
+   * onto disk. Mob-shaped names never enter it in-session any more — the Master line and
+   * the typed command both route them to the charm store — so the only mob-shaped entry
+   * that can appear here is one the user put in their own settings. That closes the leak
+   * that wrote "basilisk = Rhale" into the saved config: a charm learned mid-session,
+   * persisted forever by the next unrelated successful command. No filter on the way
+   * out, deliberately: filtering would silently rewrite the user's own settings box.
+   */
   emitPetOwners() {
     this.onPetOwnersChanged?.(Object.fromEntries(this.roster.petOwners));
   }
@@ -1475,9 +1548,29 @@ export class LogParser {
   }
 
   /**
+   * The explicit end of one of OUR spells, target named.
+   *
+   * The worn-off line fires for every spell the logging character has running, and
+   * almost all of them are noise here — a DoT fading changes nothing the meter shows.
+   * Charm is the exception: "Your Charm spell has worn off of a skeletal monk." is the
+   * log stating outright that the pet is a pet no longer, several swings before the
+   * friendly-fire inference below would deduce the same thing from it attacking its
+   * ex-master. Acting on the announcement instead of waiting closes the window where a
+   * freed, hostile mob still resolves to its charmer and its damage is dropped as
+   * friendly fire — which is one of the two mechanisms that blanked the meter in the
+   * Aug 13 charm session. Only YOUR charms get this line; everyone else's still ends by
+   * inference.
+   */
+  handleWornOff(event) {
+    if (!CHARM_SPELL_RE.test(String(event.ability ?? ''))) return;
+    if (this.roster.uncharm(event.target)) this.revision++;
+  }
+
+  /**
    * Infer that a charm has ended.
    *
-   * EQ Legends logs no charm-break message whatsoever, so the break has to be deduced.
+   * For everyone else's charms the log has no break message, so the break has to be
+   * deduced (your own gets the explicit worn-off line, handled above).
    * A charmed pet resolves to its owner, who is friendly — so a "friendly hitting a
    * friendly" line involving a charmed mob can only mean the charm just broke, in either
    * direction (the ex-pet turning on the group, or the group turning on it).

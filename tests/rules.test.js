@@ -528,3 +528,43 @@ test('resist lines parse in all three forms (sample)', () => {
   assert.equal(pet.attacker, 'Rhale`s warder');
   assert.equal(pet.ability, 'Sicken');
 });
+
+test('the worn-off line carries the spell and the target (live log)', () => {
+  const e = m('Your Charm spell has worn off of a skeletal monk.');
+  assert.equal(e.kind, 'worn-off');
+  assert.equal(e.ability, 'Charm');
+  assert.equal(e.target, 'a skeletal monk');
+
+  const dot = m('Your Drifting Death spell has worn off of Master Yael.');
+  assert.equal(dot.kind, 'worn-off');
+  assert.equal(dot.ability, 'Drifting Death');
+  assert.equal(dot.target, 'Master Yael');
+
+  // The pet-buff variant has no "of" and no target, and must stay unmatched noise —
+  // 136 "Your pet's Ghoul Root spell has worn off." lines in the live log say nothing
+  // this parser needs.
+  assert.equal(m("Your pet's Ghoul Root spell has worn off.")?.kind ?? null, null);
+});
+
+test('the mapping command accepts a mob-shaped pet name (live log)', () => {
+  // The exact line typed (twice) on Aug 13 and refused by the letters-only capture.
+  const e = m("You tell your party, 'pets a skeletal monk = Rhale'");
+  assert.equal(e.kind, 'pet-command');
+  assert.equal(e.action, 'set');
+  assert.equal(e.pet, 'a skeletal monk');
+  assert.equal(e.owner, 'Rhale');
+
+  // Loose captures, same anchors: which half is which is the handler's judgement,
+  // so the reversed form must PARSE — refusing it with a specific answer is the point.
+  const reversed = m("You tell your party, 'pets Rhale = a dark boned skeletone'");
+  assert.equal(reversed.kind, 'pet-command');
+  assert.equal(reversed.pet, 'Rhale');
+  assert.equal(reversed.owner, 'a dark boned skeletone');
+
+  const cleared = m("You say, 'pet a skeletal monk = none'");
+  assert.equal(cleared.action, 'clear');
+  assert.equal(cleared.pet, 'a skeletal monk');
+
+  // Talking about pets still is not a command: no equals sign, no match.
+  assert.notEqual(m("You tell your raid, 'pets increase level with rank up'")?.kind, 'pet-command');
+});

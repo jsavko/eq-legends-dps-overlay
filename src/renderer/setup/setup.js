@@ -291,7 +291,13 @@ function renderPetsInForce() {
   }
   for (const m of state.pets.mapped) {
     if (state.petOwners[m.pet]) continue;
-    rows.push({ pet: m.pet, owner: m.owner, src: m.weak ? 'from the log · weak' : 'from the log' });
+    // A charm is a mapping in force RIGHT NOW and gone when the charm is — labelling it
+    // like a durable binding would invite the player to expect it back next session.
+    rows.push({
+      pet: m.pet,
+      owner: m.owner,
+      src: m.charmed ? 'charmed right now' : m.weak ? 'from the log · weak' : 'from the log',
+    });
   }
   rows.sort((a, b) => a.pet.localeCompare(b.pet));
 

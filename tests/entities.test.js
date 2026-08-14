@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveEntity, looksLikePlayerName, nearestName, stripArticle, isSelfToken } from '../src/parser/entities.js';
+import { resolveEntity, looksLikePlayerName, nearestName, stripArticle, stripPetSuffix, isSelfToken } from '../src/parser/entities.js';
 
 test('normalizes every spelling of the logging character', () => {
   for (const token of ['You', 'YOU', 'you', 'Yourself']) {
@@ -98,4 +98,13 @@ test('nearestName stays quiet unless the answer is obvious', () => {
   // A tie is a coin flip, and offering one invites accepting the wrong half.
   assert.equal(nearestName('Garn', ['Gaern', 'Gairn']), null);
   assert.equal(nearestName('Kadomony', []), null);
+});
+
+test('stripPetSuffix removes the game\'s pet marker and nothing else', () => {
+  assert.equal(stripPetSuffix('skeletal monk pet'), 'skeletal monk');
+  assert.equal(stripPetSuffix('a skeletal monk pet'), 'a skeletal monk');
+  assert.equal(stripPetSuffix('skeletal monk'), 'skeletal monk');
+  // Only a trailing marker: the word inside a name is part of the name.
+  assert.equal(stripPetSuffix('pet'), 'pet');
+  assert.equal(stripPetSuffix('carpet'), 'carpet');
 });

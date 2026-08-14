@@ -160,3 +160,46 @@ test('the hostile brand is gone, and nothing replaced it', () => {
   assert.equal(typeof r.noteFriendlyByAction, 'undefined');
   assert.equal(typeof r.hasFriendlyProof, 'undefined');
 });
+
+test('a charm mapping reaches both spellings of its pet, one direction only', () => {
+  const r = new Roster('Rhale');
+  r.charm('a ghoul', 'Ribbers');
+
+  // The charm line and the command use the plain name; the log then writes the pet's
+  // every action as "a ghoul pet". One mapping must reach both spellings.
+  assert.equal(r.ownerOf('a ghoul'), 'Ribbers');
+  assert.equal(r.ownerOf('a ghoul pet'), 'Ribbers');
+  assert.equal(r.isCharmed('A ghoul pet'), true);
+
+  // The other direction stays closed: a binding recorded AGAINST the suffixed name
+  // (summon adjacency on somebody's animation) must never claim the plain mob — that
+  // would hand every wild dark boned skeleton to the pet's owner.
+  r.bindPet('dark boned skeleton pet', 'Rhain');
+  assert.equal(r.ownerOf('a dark boned skeleton pet'), 'Rhain');
+  assert.equal(r.ownerOf('a dark boned skeleton'), null);
+});
+
+test('mapping writes override, they do not layer', () => {
+  const r = new Roster('Rhale');
+
+  // A charm evicts the durable and learned entries for its name, so nothing stale
+  // resurfaces when the charm ends — the "basilisk = Rhale" failure was exactly a
+  // durable entry outliving every charm that justified it.
+  r.petOwners.set('basilisk', 'Rhale');
+  r.charm('a basilisk', 'Rhain');
+  assert.equal(r.ownerOf('a basilisk'), 'Rhain');
+  r.uncharm('a basilisk');
+  assert.equal(r.ownerOf('a basilisk'), null, 'nothing stale underneath');
+});
+
+test('a mob-named Master report is a charm, a player-named one is durable', () => {
+  const r = new Roster('Rhale');
+
+  r.applyEvent({ kind: 'pet-owner', pet: 'A skeletal monk', owner: 'You' });
+  assert.equal(r.ownerOf('a skeletal monk'), 'Rhale');
+  assert.equal(r.petOwners.size, 0, 'a charm never lands in the persisted table');
+  assert.equal(r.charmedPets.get('skeletal monk'), 'Rhale');
+
+  r.applyEvent({ kind: 'pet-owner', pet: 'Gann', owner: 'You' });
+  assert.equal(r.petOwners.get('Gann'), 'Rhale', 'named summons keep the durable path');
+});

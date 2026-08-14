@@ -91,14 +91,21 @@ scoring pipeline is unit-testable in WSL and replayable offline. Keep it that wa
 - `entities.js` — raw name → canonical combatant. The big trick: pets are written
   `` <Owner>`s <type> `` with a BACKTICK, so ownership is a string split. A pet's
   canonical `name` IS its owner — pet damage folds into the owner's row at resolve time.
+  A second marker with no ownership in it: any pet that is not your own is written
+  `<base> pet` ("a ghoul pet"), hostile pets included, so the suffix is stripped only to
+  normalize lookup keys and never decides whose side anything is on.
 - `roster.js` — what the session has learned about who is who. It does **not** decide
   whose damage counts (the fight does); it SEEDS that decision on the first line of a
   pull and answers identity questions the fight cannot. Facts first (logging character,
   party list), then what the game stated (group/`/who`/`Targeted`), then channel chat,
   then the implicit set. Also holds named summoned pets (`Gann` → owner, learned from
-  the pet-calls-you-"Master" line or user settings) and charmed mobs (charm inferred
-  from cast + "has been charmed", break inferred from a friendly-hits-friendly line —
-  the log has no charm-break message).
+  the pet-calls-you-"Master" line or user settings) and charmed mobs. Charm is inferred
+  from cast + "has been charmed"; it ends on "Your <spell> spell has worn off of <mob>."
+  for your own charm and by friendly-fire inference for everyone else's. Mob-named pets
+  are charm-scoped by definition: every path that learns one (the Master line, the typed
+  `pets` command) writes the transient charm store, never the durable `petOwners`, and a
+  mapping write evicts that name from every other store — mappings override, they do not
+  layer. See `docs/changelog/2026-08-13-charm-scoped-pet-mappings.md`.
 - `encounter.js` — per-fight aggregation, and the home of `engagedNpcs`: the fight's
   enemy set, which is the axis all scoring turns on. Opens on the first damage line that
   can be placed; closes on idle timeout, zone, or all-engaged-NPCs-slain + grace. Heals

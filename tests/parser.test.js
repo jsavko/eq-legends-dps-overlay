@@ -541,7 +541,8 @@ test('an enemy damage shield hurting us is never credited to anyone', () => {
 //
 // A charmed mob keeps its mob name ("a tal ghoul wizard") but fights for the group, and
 // its damage IS logged. EQ Legends emits exactly one charm signal — "<mob> has been
-// charmed." — and NO break message at all, so the end of a charm must be inferred.
+// charmed." — and a break message ONLY for your own charm (the worn-off line); everyone
+// else's end must be inferred.
 // ---------------------------------------------------------------------------
 
 test('a charmed mob is credited to whoever cast the charm', () => {
@@ -654,6 +655,69 @@ test('a mob-named pet can be mapped in settings despite the article', () => {
 
   const rhain = p.snapshot().rows.find((r) => r.name === 'Rhain');
   assert.equal(rhain.petDamage, 40);
+});
+
+test('your own charm break line frees the mob at once, before it swings', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} You begin casting Charm.`);
+  p.feed(`${D(19, 20, 2)} a skeletal monk has been charmed.`);
+  assert.equal(p.roster.ownerOf('a skeletal monk'), 'Rhale');
+
+  // (confirmed live, Aug 13) The log announces the end of YOUR charm outright. Waiting
+  // for the freed mob's first swing instead left a hostile mob resolving to its
+  // ex-charmer, and everything it did — and everything done to it — read as friendly
+  // fire and was dropped.
+  p.feed(`${D(19, 20, 30)} Your Charm spell has worn off of a skeletal monk.`);
+  assert.equal(p.roster.ownerOf('a skeletal monk'), null);
+
+  // Its next swing at us is damage taken, not self-damage and not a charm inference.
+  p.feed(`${D(19, 20, 31)} A skeletal monk punches YOU for 10 points of damage.`);
+  assert.equal(p.snapshot().rows.find((r) => r.name === 'Rhale').damageTaken, 10);
+});
+
+test('a worn-off line for a non-charm spell changes nothing', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 10)} Your Stinging Swarm spell has worn off of a tal ghoul wizard.`);
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), true, 'a DoT fading is not a charm break');
+});
+
+test('a charm mapping reaches the " pet" spelling the pet actually fights under', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a dark boned skeleton has been charmed.`);
+
+  // The game writes every pet that is not your own as `<base> pet`, while the charm
+  // line uses the plain name — 1,354 suffixed lines in the Aug 13 session never matched
+  // their mapping, which left the group's own pets scoring as strangers.
+  p.feed(`${D(19, 20, 4)} A dark boned skeleton pet slashes a ghoul savant for 40 points of damage.`);
+  const rhain = p.snapshot().rows.find((r) => r.name === 'Rhain');
+  assert.equal(rhain.damage, 40);
+  assert.equal(rhain.petDamage, 40);
+  assert.equal(p.snapshot().rows.some((r) => r.name === 'dark boned skeleton pet'), false);
+});
+
+test('a mob-named pet reporting to its Master is a charm, never saved config', () => {
+  const saved = [];
+  const p = makeParser({ onPetOwnersChanged: (m) => saved.push(m) });
+  p.feed(`${D(19, 20, 0)} A skeletal monk told you, 'Attacking a lurking mummy Master.'`);
+
+  assert.equal(p.roster.ownerOf('a skeletal monk'), 'Rhale');
+  assert.equal(p.roster.petOwners.size, 0, 'a charm gets a charm store, not the durable table');
+
+  // The durable table is persisted wholesale by the next successful command, which is
+  // exactly how "basilisk = Rhale" escaped into the live config and branded every wild
+  // basilisk 'ours' at every launch since.
+  p.feed(`${D(19, 20, 5)} You say, 'pet Kibektik = Khanvikt'`);
+  assert.deepEqual(saved.at(-1), { Kibektik: 'Khanvikt' }, 'the monk never reaches disk');
+
+  // And it ends like the charm it is.
+  p.feed(`${D(19, 20, 30)} Your Charm spell has worn off of a skeletal monk.`);
+  assert.equal(p.roster.ownerOf('a skeletal monk'), null);
 });
 
 test('a mob helping kill OUR mob counts; two mobs off on their own do not', () => {
@@ -1734,6 +1798,86 @@ test('the mapping command unmaps, lists, and hands the mapping to the caller', (
   assert.deepEqual(saved.at(-1), {});
   // "not a pet" is the user overruling the log, so the next summon must not re-learn it.
   assert.equal(p.roster.notPets.has('Kibektik'), true);
+});
+
+test('the command maps a mob-named charm pet, with a charm\'s lifetime', () => {
+  const saved = [];
+  const p = makeParser({ onPetOwnersChanged: (m) => saved.push(m) });
+  p.feed(`${D(10, 5, 0)} Rhain has joined the group.`);
+
+  // The exact line from the live log, typed five ways on Aug 13 and refused every time
+  // with the very syntax it was already following.
+  p.feed(`${D(10, 6, 0)} You tell your party, 'pets a skeletal monk = Rhain'`);
+  assert.equal(p.roster.ownerOf('a skeletal monk'), 'Rhain');
+  assert.equal(p.roster.petOwners.size, 0, 'charm-scoped, never durable');
+  assert.equal(saved.length, 0, 'and never persisted');
+  // The acknowledgement names the lifetime, so "gone after zoning" is expected, not a bug.
+  assert.equal(p.snapshot().notices.at(-1).text, 'skeletal monk = Rhain (while charmed)');
+
+  // The suffixed spelling and the plain one are the same pet.
+  p.feed(`${D(10, 6, 5)} You crush a lurking mummy for 40 points of damage.`);
+  p.feed(`${D(10, 6, 6)} A skeletal monk pet pierces a lurking mummy for 30 points of damage.`);
+  const rhain = p.snapshot().rows.find((r) => r.name === 'Rhain');
+  assert.equal(rhain.petDamage, 30);
+});
+
+test('the game\'s " pet" marker is stripped from a typed name, not stored as part of it', () => {
+  const p = makeParser();
+  p.feed(`${D(10, 5, 0)} Rhain has joined the group.`);
+  p.feed(`${D(10, 6, 0)} You tell your party, 'pets a skeletal monk pet = Rhain'`);
+  // Mapping the name as the game displays it and mapping the plain name mean the same
+  // thing, so both must land on one key.
+  assert.equal(p.roster.ownerOf('a skeletal monk'), 'Rhain');
+  assert.equal(p.roster.ownerOf('a skeletal monk pet'), 'Rhain');
+});
+
+test('owner on the wrong side gets a direction hint, not the generic syntax line', () => {
+  const p = makeParser();
+  // Straight from the live log: `pets Rhale = a dark boned skeletone`, typed twice.
+  // The generic syntax reprint taught nothing — the player was already typing it.
+  p.feed(`${D(10, 6, 0)} You tell your party, 'pets Rhale = a dark boned skeletone'`);
+  assert.equal(p.roster.charmedPets.size, 0);
+  assert.equal(p.roster.petOwners.size, 0);
+  assert.equal(p.snapshot().notices.at(-1).text, 'Owner goes on the right: pet <Pet> = <Owner>');
+});
+
+test('a typed mapping overrides a live charm attribution, not layers under it', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Ribbers begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  assert.equal(p.roster.ownerOf('a tal ghoul wizard'), 'Ribbers');
+
+  // The charm store sits FIRST in ownerOf's precedence, so without eviction the stale
+  // attribution would keep answering while the command's acknowledged mapping sat under
+  // it doing nothing.
+  p.feed(`${D(19, 20, 5)} You tell your party, 'pets a tal ghoul wizard = Emalina'`);
+  assert.equal(p.roster.ownerOf('a tal ghoul wizard'), 'Emalina', 'the newest statement wins');
+});
+
+test('clearing a mob name unmaps it everywhere, and a later charm may honestly re-map', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+
+  p.feed(`${D(19, 20, 5)} You tell your party, 'pets a tal ghoul wizard = none'`);
+  assert.equal(p.roster.ownerOf('a tal ghoul wizard'), null);
+  assert.equal(p.snapshot().notices.at(-1).text, 'tal ghoul wizard unmapped');
+
+  // "has been charmed" is the game stating a new fact; the clear must not veto it.
+  p.feed(`${D(19, 20, 8)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 9)} a tal ghoul wizard has been charmed.`);
+  assert.equal(p.roster.ownerOf('a tal ghoul wizard'), 'Rhain');
+});
+
+test('the list names live charms and says which they are', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 5)} You say, 'pet ?'`);
+  assert.equal(p.snapshot().notices.at(-1).text, 'Pets: tal ghoul wizard = Rhain (charmed)');
 });
 
 // ---------------------------------------------------------------------------

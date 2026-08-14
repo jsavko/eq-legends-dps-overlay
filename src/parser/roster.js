@@ -28,7 +28,7 @@
  * that question without asking about names at all.
  */
 
-import { looksLikePetName, looksLikePlayerName, stripArticle } from './entities.js';
+import { looksLikeMobName, looksLikePetName, looksLikePlayerName, stripArticle, stripPetSuffix } from './entities.js';
 
 /**
  * How long after a summon FLAVOUR line ("Khanvikt animates an undead servant.") a
@@ -162,23 +162,37 @@ export class Roster {
     this.pendingSummon = null;
   }
 
-  /** Record that `owner` has charmed `pet`. Names are stored article-stripped. */
+  /**
+   * Record that `owner` has charmed `pet`. Names are stored article-stripped and
+   * suffix-stripped — the charm line always uses the plain name, but the typed command
+   * may carry the game's " pet" marker and both spellings must land on one key.
+   *
+   * A charm write EVICTS the name from the durable and learned tables: mappings
+   * override, they do not layer. Leaving a stale entry underneath would let it
+   * resurface the moment the charm ends — which is exactly the "basilisk = Rhale"
+   * failure, where a name mapped once kept branding every same-named wild mob 'ours'
+   * long after any charm was live.
+   */
   charm(pet, owner) {
-    const key = stripArticle(String(pet).trim());
+    const key = stripPetSuffix(stripArticle(String(pet).trim()));
     if (!key || !owner) return;
     // One charm per charmer: landing a new one releases the old.
     for (const [existing, holder] of this.charmedPets) {
       if (holder === owner) this.charmedPets.delete(existing);
     }
+    this.petOwners.delete(key);
+    this.learnedPetOwners.delete(key);
     this.charmedPets.set(key, owner);
   }
 
   uncharm(pet) {
-    return this.charmedPets.delete(stripArticle(String(pet).trim()));
+    const key = stripArticle(String(pet).trim());
+    return this.charmedPets.delete(key) || this.charmedPets.delete(stripPetSuffix(key));
   }
 
   isCharmed(name) {
-    return this.charmedPets.has(stripArticle(String(name).trim()));
+    const key = stripArticle(String(name).trim());
+    return this.charmedPets.has(key) || this.charmedPets.has(stripPetSuffix(key));
   }
 
   clearCharms() {
@@ -205,9 +219,24 @@ export class Roster {
   /** @returns {string|null} the owner if `name` is a charmed mob or a known named pet */
   ownerOf(name) {
     const key = stripArticle(String(name).trim());
-    return this.charmedPets.get(key)
+    const direct = this.charmedPets.get(key)
       ?? this.petOwners.get(key)
       ?? this.learnedPetOwners.get(key)?.owner
+      ?? null;
+    if (direct) return direct;
+
+    // The game writes every pet that is not your own as `<base> pet` ("a ghoul pet"),
+    // while the charm line, the Master report and the typed command all use the base
+    // name — so a mapping recorded against "ghoul" must still reach the spelling the
+    // pet actually fights under. One direction only: a suffixed SIGHTING falls back to
+    // its base, but a mapping keyed with the suffix (a summon-adjacency binding on
+    // "dark boned skeleton pet", say) never claims the plain name — that would hand
+    // every wild dark boned skeleton to the pet's owner on adjacency-grade evidence.
+    const base = stripPetSuffix(key);
+    if (base === key) return null;
+    return this.charmedPets.get(base)
+      ?? this.petOwners.get(base)
+      ?? this.learnedPetOwners.get(base)?.owner
       ?? null;
   }
 
@@ -399,14 +428,28 @@ export class Roster {
     if (event.kind === 'pet-owner') {
       const owner = event.owner === 'You' ? this.selfName : event.owner;
       if (event.pet && owner) {
-        const key = stripArticle(String(event.pet).trim());
+        const key = stripPetSuffix(stripArticle(String(event.pet).trim()));
         // A backtick pet needs no table: `Rhale`s warder` resolves to Rhale by string
         // split before any lookup happens. Storing it anyway did no harm to the numbers
         // but leaked into the saved mapping — the next in-game command persists this
         // whole table — and so into the settings box, where a line the player neither
         // wrote nor needs reads as something they are expected to maintain.
         if (!key.includes('`')) {
-          this.petOwners.set(key, owner);
+          if (looksLikeMobName(key)) {
+            // A mob-named pet reporting to its Master is a CHARM report — summoned pets
+            // get generated player-shaped names, so a mob name here means a charmed mob
+            // announcing whose it is right now. It gets a charm's lifetime, not a durable
+            // entry: writing "skeletal monk = Rhale" into petOwners is how the mapping
+            // outlived the charm, and — via the command persisting the whole table —
+            // how "basilisk = Rhale" reached the saved config.
+            this.charm(key, owner);
+          } else {
+            this.petOwners.set(key, owner);
+            // Override, not layer: the newest statement is the one in force, and a
+            // stale charm entry would otherwise outrank this in ownerOf.
+            this.charmedPets.delete(key);
+            this.learnedPetOwners.delete(key);
+          }
           this.implicit.delete(key);
         }
       }

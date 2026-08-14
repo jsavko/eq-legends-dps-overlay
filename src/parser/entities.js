@@ -44,6 +44,23 @@ export function stripArticle(name) {
 }
 
 /**
+ * Strip the game's pet marker from a generically-named pet.
+ *
+ * EQ Legends names every pet that is not your own `<base> pet` — `a lurking mummy pet`,
+ * `A dark boned skeleton pet` — while your own charmed mob keeps its plain name. The
+ * suffix says "somebody's pet" and nothing about WHOSE: a hostile necromancer's skeleton
+ * carries it exactly as a group member's charm does ("A dark boned skeleton pet hits
+ * YOU", live log Aug 13). So nothing may fold a suffixed name to an owner on this shape
+ * alone — the suffix is stripped only to normalize LOOKUP keys, so that a charm recorded
+ * against "skeletal monk" still matches the "a skeletal monk pet" spelling the log uses
+ * for it, and the mapping itself always comes from evidence (a charm line, the Master
+ * report, the typed command), never from here.
+ */
+export function stripPetSuffix(name) {
+  return String(name ?? '').replace(/ pet$/, '');
+}
+
+/**
  * True when the raw name carries a leading article, which is EQ saying "one of these"
  * rather than naming somebody.
  *

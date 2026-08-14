@@ -149,11 +149,24 @@ const SELF_CHANNEL =
  * the rule that was wrong. Capitalization gets the same treatment for the same reason.
  *
  * Loosening the keyword costs nothing in safety: what keeps ordinary chatter out is
- * the anchor to the ENTIRE quoted message plus letters-only names, neither of which
- * moves here. "pets are expensive" still cannot match — it has no `=` and its words
- * have spaces.
+ * the anchor to the ENTIRE quoted message plus the mandatory `=`, neither of which
+ * moves here. "pets are expensive" still cannot match — it has no `=`.
  */
 const PET_CMD = '[Pp]ets?';
+
+/**
+ * A name as the mapping command accepts it: letters, spaces and backticks.
+ *
+ * Spaces and articles are how charmed pets are spelled — the live log's five failed
+ * attempts at `pets a skeletal monk = Rhale` are what this used to reject with a
+ * letters-only token, answering each with the very syntax the player was already
+ * typing. The backtick admits named mobs like `` Torklar Battlemaster `` and the odd
+ * `` Teir`Dal `` spelling. This capture deliberately takes MORE than is valid — which
+ * half is the pet, whether the owner is real, whether the direction is backwards — so
+ * the handler, which can see the roster, answers every near miss specifically instead
+ * of this table silently routing it to the generic malformed toast.
+ */
+const PET_NAME = "([A-Za-z][A-Za-z `]{0,47}?)";
 
 /**
  * @typedef {Object} LogEvent
@@ -232,19 +245,21 @@ export const RULES = [
     // (confirmed forms) "You tell your party, 'pet Kibektik = Khanvikt'"
     //                   "You say, 'pet Kibektik = none'"
     //                   "You tell your party, 'pets Jonarn = Khanvikt'"
+    //                   "You tell your party, 'pets a skeletal monk = Rhale'"
     //
     // Anchored to the ENTIRE quoted message, not a substring, so chatter that merely
     // contains the words is ignored — "pet needs heals" cannot match. No `eqlo` prefix:
     // the anchor plus the self form is what provides safety, and a prefix would only
-    // make the command harder to type. Names are letters only, which is what EQ allows,
-    // so a malformed command falls through to the chat rule and writes nothing.
+    // make the command harder to type. Names follow PET_NAME — loose on purpose, so a
+    // charmed mob's article-and-spaces spelling parses and every judgement about what
+    // the names ARE lives in the handler.
     //
     // Whitespace is forgiving on every seam a typist can get wrong — a doubled space
     // after the keyword, a stray trailing space before the closing quote — because none
     // of it changes what was meant and all of it used to mean silence.
     id: 'pet-command-set',
     re: new RegExp(
-      '^' + SELF_CHANNEL + ", '" + PET_CMD + " +([A-Za-z]{2,32}) *= *([A-Za-z]{2,32}) *'$"
+      '^' + SELF_CHANNEL + ", '" + PET_CMD + ' +' + PET_NAME + ' *= *' + PET_NAME + " *'$"
     ),
     make: (m) => (/^none$/i.test(m[2])
       ? { kind: 'pet-command', action: 'clear', pet: m[1] }
@@ -641,12 +656,26 @@ export const RULES = [
     //
     // A charmed mob fights FOR the group, and its damage is logged
     // ("A tal ghoul wizard slashes a ghoul savant for 40 points of damage."), so it is
-    // real group damage belonging to whoever charmed it. This line is the only charm
-    // signal EQ Legends emits — there is no corresponding break message, so the end of
-    // a charm has to be inferred (see index.js).
+    // real group damage belonging to whoever charmed it. This is the only charm signal
+    // for OTHER people's charms; your own gets an explicit break line too (the worn-off
+    // rule below), and everyone else's end has to be inferred (see index.js).
     id: 'charm',
     re: /^(.+?) has been charmed\.$/,
     make: (m) => ({ kind: 'charm', who: m[1] }),
+  },
+  {
+    // (confirmed) "Your Charm spell has worn off of a skeletal monk."
+    // (confirmed) "Your Drifting Death spell has worn off of Master Yael."
+    //
+    // The generic fade line for YOUR spells, target and all — the one place the log
+    // states a charm ending outright rather than leaving it to be inferred from the
+    // freed mob's first swing at its ex-master. Emitted for every spell; whether this
+    // particular fade matters (a charm ending does, a DoT ending does not) is the
+    // parser's judgement, not this table's. The pet-buff variant ("Your pet's Inner
+    // Fire spell has worn off.") carries no "of" and stays unmatched noise.
+    id: 'worn-off',
+    re: /^Your (.+?) spell has worn off of (.+?)\.$/,
+    make: (m) => ({ kind: 'worn-off', ability: m[1], target: m[2] }),
   },
   {
     // (confirmed) "a shin ghoul knight has been mesmerized."
