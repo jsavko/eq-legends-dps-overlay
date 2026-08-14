@@ -364,10 +364,15 @@ export class SessionTracker {
     switch (event.kind) {
       case 'kill':        this.applyKill(s, event); break;
       case 'death':       s.deaths.push({ ts: event.ts, killer: event.killer }); break;
-      case 'loot':
-        s.loot.set(event.item, (s.loot.get(event.item) ?? 0) + 1);
-        s.lootTotal += 1;
+      case 'loot': {
+        // Every disposition counts the same here — kept, auto-stored, upgraded on the
+        // spot or auto-sold, the night earned the item. The quantity form ("You have
+        // looted 2 Bone Chips…") counts what the line says, not the line itself.
+        const qty = event.qty ?? 1;
+        s.loot.set(event.item, (s.loot.get(event.item) ?? 0) + qty);
+        s.lootTotal += qty;
         break;
+      }
       case 'coin': {
         addCoin(s.coinEarned, event.coin);
         const purse = s.coinBySource.get(event.source)

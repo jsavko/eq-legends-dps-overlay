@@ -97,6 +97,22 @@ export const DEFAULTS = {
   /** Crowd control sitting on the group right now: stunned / mezzed / charmed chips. */
   ccAlerts: true,
   /**
+   * "Your charm broke" — the freed mob is turning on you right now.
+   *
+   * On by default because it is tier-3 class information for anyone who charms: the
+   * parser already detects the break (the worn-off line ending a live charm) and until
+   * this key existed it acted on it silently, dropping the pet from the charm store
+   * while the player found out from their own health bar.
+   */
+  charmBreakAlerts: true,
+  /**
+   * Chips for looted Plane of Sky quest items — "Wind Rune Azia — 7 class tests".
+   *
+   * A moment of recognition at the loot window, not a call to act; the ledger itself
+   * lives in the Quests window whether or not this is on.
+   */
+  questLootAlerts: true,
+  /**
    * Chips raised by imported or authored trigger packs.
    *
    * Its own category rather than a branch of `castAlerts`, because it answers a
@@ -124,6 +140,12 @@ export const DEFAULTS = {
   triggerTimers: true,
   /** Short cue on a NEW tier-3 warning. Off by default — sound is opt-in, always. */
   castAlertSound: false,
+  /**
+   * A second, DESCENDING cue for a charm break, audibly distinct from the rising cast
+   * cue — the whole point is being heard while you look elsewhere. Off by default:
+   * sound is opt-in, always.
+   */
+  charmBreakSound: false,
   /**
    * Session mute, deliberately separate from the four category switches.
    *
@@ -166,6 +188,8 @@ export const DEFAULTS = {
   triggersBounds: null,
   /** Session window position and size; null until the user moves or resizes it. */
   sessionBounds: null,
+  /** Quests window position and size; null until the user moves or resizes it. */
+  questsBounds: null,
 
   /**
    * The non-combat half of a play session: kills, loot, coin, experience, faction,
@@ -241,7 +265,9 @@ export const DEFAULTS = {
 };
 
 /** The category switches, in the order they read in the settings form and the tray. */
-export const ALERT_CATEGORIES = ['castAlerts', 'summonAlerts', 'ccAlerts', 'triggerAlerts'];
+export const ALERT_CATEGORIES = [
+  'castAlerts', 'summonAlerts', 'ccAlerts', 'charmBreakAlerts', 'questLootAlerts', 'triggerAlerts',
+];
 
 /** Every key that can change whether the alert window should exist. */
 export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
@@ -502,6 +528,11 @@ function migrateAlerts(raw) {
     castTimers: false,
     triggerAlerts: false,
     triggerTimers: false,
+    // Later categories, same reasoning again: absent from a config this old, so
+    // without these they would arrive from DEFAULTS switched ON under a player who
+    // had said "no alerts".
+    charmBreakAlerts: false,
+    questLootAlerts: false,
   };
 }
 

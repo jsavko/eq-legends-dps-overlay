@@ -123,8 +123,8 @@ test('parserOptions converts seconds to the milliseconds the parser wants', () =
 
 /** A config with every alert category off, to switch one back on per case. */
 const NO_ALERTS = {
-  castAlerts: false, summonAlerts: false, ccAlerts: false, triggerAlerts: false,
-  triggerTimers: false,
+  castAlerts: false, summonAlerts: false, ccAlerts: false, charmBreakAlerts: false,
+  questLootAlerts: false, triggerAlerts: false, triggerTimers: false,
 };
 
 test('any single alert category keeps the alert window alive', () => {

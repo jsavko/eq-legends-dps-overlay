@@ -23,6 +23,9 @@ const SAMPLES = {
   'coin-split': 'You receive 1 platinum 2 gold as your split.',
   purchase: 'You purchased 1 Spell: Wrath from Zealot Zorshais for  6 platinum 3 gold 9 copper.',
   loot: "--You have looted a Mote of Lesser Potential from a shin ghoul knight's corpse.--",
+  'loot-stored': "You looted a Wind Rune Lena from a blade storm's corpse and stored it in your currency",
+  'loot-created': "You looted a Shin Gauntlets +2 from a froglok shin knight's corpse to create a Shin Gauntlets +3",
+  'loot-sold': "You looted 2 Phosphorous Powder from a zol ghoul knight's corpse and sold it for 3 platinum, 2 gold, 1 silver and 4 copper.",
   'xp-solo': 'You gain experience! (8.001%)',
   'xp-party': 'You gain party experience! (0.769%)',
   'level-up': 'You have gained a level! Welcome to level 28!',
@@ -201,6 +204,80 @@ test('creatureKey and itemKey strip the article EQ capitalizes mid-sentence', ()
   assert.equal(creatureKey('Emperor Ssraeshza'), 'Emperor Ssraeshza');
   assert.equal(itemKey('a Mote of Lesser Potential'), 'Mote of Lesser Potential');
   assert.equal(itemKey('an Embroidered Black Cape +2'), 'Embroidered Black Cape +2');
+});
+
+// ------------------------------------------------------------------------------- loot
+
+test('all four loot wordings emit kind loot with their disposition', () => {
+  const kept = matchSessionRule(SAMPLES.loot);
+  assert.deepEqual(
+    { kind: kept.kind, disposition: kept.disposition, qty: kept.qty, item: kept.item, from: kept.from },
+    { kind: 'loot', disposition: 'kept', qty: 1, item: 'Mote of Lesser Potential', from: 'shin ghoul knight' },
+  );
+
+  const stored = matchSessionRule(SAMPLES['loot-stored']);
+  assert.deepEqual(
+    { disposition: stored.disposition, item: stored.item, from: stored.from, container: stored.container },
+    { disposition: 'stored', item: 'Wind Rune Lena', from: 'blade storm', container: 'currency' },
+  );
+
+  const created = matchSessionRule(SAMPLES['loot-created']);
+  assert.deepEqual(
+    { disposition: created.disposition, item: created.item, into: created.into },
+    { disposition: 'created', item: 'Shin Gauntlets +2', into: 'Shin Gauntlets +3' },
+  );
+
+  const sold = matchSessionRule(SAMPLES['loot-sold']);
+  assert.deepEqual(
+    { disposition: sold.disposition, qty: sold.qty, item: sold.item },
+    { disposition: 'sold', qty: 2, item: 'Phosphorous Powder' },
+  );
+});
+
+test('the stored container is captured generically, not matched literally', () => {
+  // All three containers are live in the log; a rule pinned to one would drop the rest.
+  for (const container of ['currency', 'Dragon Hoard', 'tradeskill depot']) {
+    const e = matchSessionRule(`You looted a Diamond from Gorgalosk's corpse and stored it in your ${container}`);
+    assert.equal(e?.rule, 'loot-stored', container);
+    assert.equal(e.container, container);
+  }
+});
+
+test('the quantity form counts what the line says on every wording that has it', () => {
+  const kept = matchSessionRule("--You have looted 3 Wind Rune Kala from Protector of Sky's corpse.--");
+  assert.equal(kept.qty, 3);
+  // Quantity lines are article-less, so the item survives untouched.
+  assert.equal(kept.item, 'Wind Rune Kala');
+
+  const stored = matchSessionRule("You looted 2 Bone Chips from a dry bone skeleton's corpse and stored it in your currency");
+  assert.equal(stored.qty, 2);
+  assert.equal(stored.item, 'Bone Chips');
+});
+
+test('auto-sell matches coin and "free" alike, and carries no coin event', () => {
+  const free = matchSessionRule("You looted a Burnt Sash from an imp protector's corpse and sold it for free.");
+  assert.equal(free?.rule, 'loot-sold');
+  assert.equal(free.item, 'Burnt Sash');
+
+  const coined = matchSessionRule("You looted an Ashroot from an imp protector's corpse and sold it for 1 gold, 2 silver and 3 copper.");
+  assert.equal(coined?.rule, 'loot-sold');
+  // The plan's note: auto-sell coin stays out of the coin category until that fix is
+  // made deliberately. A loot event that smuggled a coin field in would half-make it.
+  assert.equal('coin' in coined, false);
+});
+
+test('loot survives backtick mob names and latin1 accents', () => {
+  const backtick = matchSessionRule("--You have looted a Blue Diamond from Innoruuk`s Chosen's corpse.--");
+  assert.equal(backtick?.rule, 'loot');
+  assert.equal(backtick.from, 'Innoruuk`s Chosen');
+
+  const stored = matchSessionRule("You looted a Mote of Infinitesimal Potential from a Teir`Dal rogue's corpse and stored it in your currency");
+  assert.equal(stored.from, 'Teir`Dal rogue');
+
+  // The log is latin1 and accented bytes must pass through the pattern untouched.
+  const accented = matchSessionRule("--You have looted a Crépon Sash from a Grimling Prêtre's corpse.--");
+  assert.equal(accented.item, 'Crépon Sash');
+  assert.equal(accented.from, 'Grimling Prêtre');
 });
 
 // ------------------------------------------------------- experience, levels and ability points

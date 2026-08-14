@@ -145,6 +145,10 @@ function groupOn(group) {
 function shows(w) {
   if (w.category === 'summon') return on('summonAlerts');
   if (w.category === 'trigger') return on('triggerAlerts');
+  // Charm breaks and quest loot are each their own category with their own switch,
+  // like summons: parser (or main) judgements a cast-group switch has no say over.
+  if (w.category === 'charm-break') return on('charmBreakAlerts');
+  if (w.category === 'quest') return on('questLootAlerts');
   if (!on('castAlerts')) return false;
   if (w.tier < 0) return false;
   return groupOn(w.group ?? 'unknown');
@@ -199,7 +203,18 @@ function render(warnings) {
       // checkbox sits under it and greys out with it. Summons are tier 3 too and still
       // beep while warnings are on — but a player who switched warnings off has a
       // disabled sound checkbox in front of them, and a beep would make a liar of it.
-      if (w.tier === 3 && !seenIds.has(w.id) && cfg?.castAlertSound && on('castAlerts')) cue();
+      //
+      // A charm break has its own opt-in and its own DESCENDING cue, so it cannot be
+      // mistaken for the rising interrupt call. Only here, on a chip actually being
+      // drawn — a beep for something not on screen is a beep with no explanation —
+      // and never both cues for one chip.
+      if (w.tier === 3 && !seenIds.has(w.id)) {
+        if (w.category === 'charm-break') {
+          if (cfg?.charmBreakSound === true) cue(CHARM_BREAK_NOTES);
+        } else if (cfg?.castAlertSound && on('castAlerts')) {
+          cue();
+        }
+      }
     }
     if (w.remainingMs <= FADE_MS) el.dataset.fading = '';
     else delete el.dataset.fading;
@@ -224,7 +239,8 @@ function buildChip(w) {
   li.dataset.tier = String(w.tier);
   // Which switch owns this chip: the stack mixes three categories, and a live toggle
   // has to be able to pick its own chips back out of it.
-  li.dataset.category = w.category === 'summon' || w.category === 'trigger' ? w.category : 'warning';
+  li.dataset.category = ['summon', 'trigger', 'charm-break', 'quest'].includes(w.category)
+    ? w.category : 'warning';
   li.dataset.group = w.group ?? 'unknown';
 
   const verb = document.createElement('span');
@@ -244,6 +260,19 @@ function buildChip(w) {
     verb.textContent = 'Summoned';
     spell.textContent = w.victim;
     caster.textContent = w.caster ?? '';
+  } else if (w.category === 'charm-break') {
+    // The summon's shape exactly: an announcement whose payload is a name — the freed
+    // mob, which is now deciding whose face to eat. It rides `victim` because that is
+    // the snapshot's slot for the one name a non-cast warning carries.
+    verb.textContent = 'Charm broke';
+    spell.textContent = w.victim;
+    caster.textContent = '';
+  } else if (w.category === 'quest') {
+    // The trigger chip's shape: finished text up top, provenance underneath — here the
+    // item that just dropped, and which class test wants it.
+    verb.textContent = 'Quest loot';
+    spell.textContent = w.text;
+    caster.textContent = w.sub ?? '';
   } else if (w.category === 'trigger') {
     // A trigger chip is the player's OWN words, already rendered by the engine, so it
     // takes the big slot whole rather than being split into a verb and a spell name we
@@ -370,16 +399,26 @@ function renderNotices(notices) {
 /** Created on first use; an AudioContext held from load would sit idle forever. */
 let audio = null;
 
+/** The default cue: two RISING notes — "look up", an interrupt call. */
+const CAST_NOTES = [[880, 0], [1174.7, 0.11]];
+
 /**
- * Two rising notes, ~200 ms total — long enough to register as "look up", short
- * enough to never talk over the next warning. Synthesized here because the app
- * ships no media assets and never will for a beep.
+ * The charm-break cue: two FALLING notes, lower and a mirror of the rising pair, so
+ * the two cannot be mistaken for each other with your eyes on the game. Falling is
+ * the semantics too: something you had just slipped away.
  */
-function cue() {
+const CHARM_BREAK_NOTES = [[659.3, 0], [440, 0.11]];
+
+/**
+ * Two notes, ~200 ms total — long enough to register, short enough to never talk
+ * over the next warning. Synthesized here because the app ships no media assets and
+ * never will for a beep.
+ */
+function cue(notes = CAST_NOTES) {
   try {
     audio ??= new AudioContext();
     const t0 = audio.currentTime;
-    for (const [freq, at] of [[880, 0], [1174.7, 0.11]]) {
+    for (const [freq, at] of notes) {
       const osc = audio.createOscillator();
       const gain = audio.createGain();
       osc.type = 'triangle';

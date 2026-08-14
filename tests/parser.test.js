@@ -647,6 +647,72 @@ test('zoning clears charms', () => {
   assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
 });
 
+test('your worn-off line ending a live charm announces the break', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+
+  const e = p.feed(`${D(19, 20, 30)} Your Beguile spell has worn off of a tal ghoul wizard.`);
+  assert.equal(e.charmBroke, true, 'the returned event carries the signal');
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
+
+  // And the alerts window is told, through the same list summons ride: tier 3, the
+  // freed mob in the victim slot, retiring on its own TTL.
+  const warn = p.snapshot().hostileCasts.find((c) => c.category === 'charm-break');
+  assert.ok(warn, 'a charm break raises a warning chip');
+  assert.equal(warn.tier, 3);
+  assert.equal(warn.victim, 'tal ghoul wizard');
+});
+
+test('a DoT fading is not a charm break', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+
+  const e = p.feed(`${D(19, 20, 30)} Your Drifting Death spell has worn off of Master Yael.`);
+  assert.equal(e.charmBroke, undefined);
+  assert.equal(p.snapshot().hostileCasts.some((c) => c.category === 'charm-break'), false);
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), true, 'the charm is untouched');
+});
+
+test('a charm-family worn-off with no live charm behind it raises nothing', () => {
+  // The wording alone is not the signal — the parser must have seen the charm land.
+  // A worn-off for a charm that already ended (killed, zoned, re-charmed elsewhere)
+  // would otherwise warn about a mob that is not turning on anybody.
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  const e = p.feed(`${D(19, 20, 30)} Your Beguile spell has worn off of a tal ghoul wizard.`);
+  assert.equal(e.charmBroke, undefined);
+  assert.equal(p.snapshot().hostileCasts.some((c) => c.category === 'charm-break'), false);
+});
+
+test('the charmed mob dying is an uncharm but never a charm-break warning', () => {
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 9)} A tal ghoul wizard has been slain by Emalina!`);
+
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
+  assert.equal(p.snapshot().hostileCasts.some((c) => c.category === 'charm-break'), false,
+    'a fight ending is not a mob turning');
+});
+
+test('an inferred break of somebody else\'s charm raises no warning either', () => {
+  // Other people's charms end by friendly-fire inference, well after the fact — stale
+  // news about somebody else's pet, not a call for the logging character to act.
+  const p = makeParser();
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 6)} A tal ghoul wizard hits Emalina for 20 points of damage.`);
+
+  assert.equal(p.roster.isCharmed('a tal ghoul wizard'), false);
+  assert.equal(p.snapshot().hostileCasts.some((c) => c.category === 'charm-break'), false);
+});
+
 test('a mob-named pet can be mapped in settings despite the article', () => {
   // The lookup path strips articles, so the configured key must be stripped too.
   const p = makeParser({ petOwners: { 'a tal ghoul wizard': 'Rhain' } });

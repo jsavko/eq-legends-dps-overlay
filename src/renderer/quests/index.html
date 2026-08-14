@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>Plane of Sky Quests</title>
+  <link rel="stylesheet" href="quests.css" />
+</head>
+<body>
+  <!-- Three fixed panes on the History model. Every click swaps CONTENT inside a
+       pane; no pane ever resizes, expands, or pushes another around. -->
+  <header id="titlebar">
+    <h1>Plane of Sky Quests</h1>
+    <span id="who"></span>
+    <span class="spacer"></span>
+    <span id="total"></span>
+    <button id="import">Import eqlposky export…</button>
+  </header>
+
+  <aside id="rail"><ol id="quests"></ol></aside>
+
+  <main id="quest">
+    <div id="quest-empty" class="pane-empty" hidden></div>
+    <div id="quest-body" hidden>
+      <h2 id="q-reward"></h2>
+      <p id="q-npc"></p>
+      <button id="q-done" class="donebox">
+        <span class="box"></span>
+        <span class="lbl">Turned in</span>
+        <span class="hint">your claim — the log cannot see turn-ins</span>
+      </button>
+      <div id="q-stats"><span class="shead">Reward</span><pre id="q-stats-text"></pre></div>
+      <!-- Always in flow, even with nothing imported: a stamp that appears only after
+           an import would shift the stats pane above it. -->
+      <p id="q-stamp"></p>
+    </div>
+  </main>
+
+  <section id="items">
+    <div class="ihead"><span>Turn-in items</span><span id="i-owned"></span></div>
+    <ol id="item-list"></ol>
+    <p class="legend"><b>Looted</b> counts what the log shows, every wording (bags,
+      auto-stored, upgrades, auto-sells). <b>Owned ✓</b> is a claim — yours or an
+      import's — because loot from before logging, trades and turn-ins are invisible
+      to the log.</p>
+  </section>
+
+  <script type="module" src="quests.js"></script>
+</body>
+</html>

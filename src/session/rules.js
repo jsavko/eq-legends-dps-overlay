@@ -206,16 +206,81 @@ export const SESSION_RULES = [
   },
 
   // ------------------------------------------------------------------------------ loot
+  //
+  // Loot arrives in FOUR confirmed wordings, one per fate the item met at the loot
+  // window, and every one of them is the night earning something — a tracker that read
+  // only the kept form would miss nearly every Wind Rune the player loots, because
+  // runes overwhelmingly arrive auto-stored to currency. Each rule emits `kind: 'loot'`
+  // with a `disposition` naming the fate, so a consumer that cares (the quest tracker
+  // shows bags-vs-currency splits) can tell them apart while one that does not (the
+  // session's loot pane) counts them all the same.
+  //
+  // All four share a head: an optional quantity ("You have looted 2 Bone Chips…" is
+  // live, article-less), then the item, then the corpse. `qty` defaults to 1 so no
+  // consumer has to know which shape the line took.
   {
     // (confirmed) "--You have looted a Mote of Lesser Potential from a shin ghoul knight's corpse.--"
+    // (confirmed) "--You have looted 3 Wind Rune Kala from Protector of Sky's corpse.--"
     //
     // The double-dash bookends are EQ's own emphasis and are part of the line, not
     // decoration this rule may skip: without them the pattern would also match the loot
-    // messages the game prints about OTHER people.
+    // messages the game prints about OTHER people. This is the form NO DROP quest items
+    // take — the item went to bags and stayed there.
     id: 'loot',
     category: 'loot',
-    re: /^--You have looted (.+?) from (.+?)'s corpse\.--$/,
-    make: (m) => ({ kind: 'loot', item: itemKey(m[1]), from: creatureKey(m[2]) }),
+    re: /^--You have looted (?:(\d+) )?(.+?) from (.+?)'s corpse\.--$/,
+    make: (m) => ({
+      kind: 'loot', disposition: 'kept', qty: m[1] ? Number(m[1]) : 1,
+      item: itemKey(m[2]), from: creatureKey(m[3]),
+    }),
+  },
+  {
+    // (confirmed) "You looted a Wind Rune Lena from a blade storm's corpse and stored it in your currency"
+    // (confirmed) "You looted a Diamond from Gorgalosk's corpse and stored it in your Dragon Hoard"
+    //
+    // Auto-store, and the container is CAPTURED, not matched literally: "currency",
+    // "Dragon Hoard" and "tradeskill depot" are all live, and a rule pinned to one of
+    // them would silently drop the others. No trailing period — the game genuinely ends
+    // this sentence without one, and anchoring on `\.$` is the difference between this
+    // rule working and never firing.
+    id: 'loot-stored',
+    category: 'loot',
+    re: /^You looted (?:(\d+) )?(.+?) from (.+?)'s corpse and stored it in your (.+)$/,
+    make: (m) => ({
+      kind: 'loot', disposition: 'stored', qty: m[1] ? Number(m[1]) : 1,
+      item: itemKey(m[2]), from: creatureKey(m[3]), container: m[4],
+    }),
+  },
+  {
+    // (confirmed) "You looted a Shin Gauntlets +2 from a froglok shin knight's corpse to create a Shin Gauntlets +3"
+    //
+    // The Legends upgrade path: the drop was consumed on the spot to raise an item the
+    // player already holds. What was LOOTED is the first name; what it became is carried
+    // as `into` for anything that wants to show the upgrade. Also unterminated.
+    id: 'loot-created',
+    category: 'loot',
+    re: /^You looted (?:(\d+) )?(.+?) from (.+?)'s corpse to create (.+)$/,
+    make: (m) => ({
+      kind: 'loot', disposition: 'created', qty: m[1] ? Number(m[1]) : 1,
+      item: itemKey(m[2]), from: creatureKey(m[3]), into: itemKey(m[4]),
+    }),
+  },
+  {
+    // (confirmed) "You looted 2 Phosphorous Powder from a zol ghoul knight's corpse and sold it for 3 platinum, 2 gold, 1 silver and 4 copper."
+    // (confirmed) "You looted a Burnt Sash from an imp protector's corpse and sold it for free."
+    //
+    // Auto-sell, coin or "free", and this one DOES end with a period. The coin is
+    // deliberately not parsed into the coin category here — the session's coin pane
+    // currently counts only the merchant-window sale line, and folding auto-sell coin in
+    // is its own change with its own review, not a side effect of a loot rule (see the
+    // plan's notes). The item still counts as loot: the night earned it either way.
+    id: 'loot-sold',
+    category: 'loot',
+    re: new RegExp(`^You looted (?:(\\d+) )?(.+?) from (.+?)'s corpse and sold it for (?:free|${COIN_FRAG})\\.$`),
+    make: (m) => ({
+      kind: 'loot', disposition: 'sold', qty: m[1] ? Number(m[1]) : 1,
+      item: itemKey(m[2]), from: creatureKey(m[3]),
+    }),
   },
 
   // ------------------------------------------------------- experience, levels and AA

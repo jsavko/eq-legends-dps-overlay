@@ -27,6 +27,7 @@ import {
 import { EncounterStore, RECORD_VERSION, storeKey, combatBetween } from './history.js';
 import { SessionStore, sessionKey, listEntry, CHECKPOINT_INTERVAL_MS } from './session-store.js';
 import { SessionTracker } from '../session/session.js';
+import { QuestProgress } from '../quests/progress.js';
 import { TriggerStore } from './triggers-store.js';
 import { builtinPack, builtinPatch, builtinPresetPatch } from './builtin-pack.js';
 import { TriggerEngine } from '../triggers/engine.js';
@@ -97,6 +98,28 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {SessionTracker|null} */ let session = null;
 /** @type {SessionStore|null} */  let sessionStore = null;
 /** @type {BrowserWindow|null} */ let sessionWindow = null;
+/**
+ * The Plane of Sky quest ledger — a THIRD sibling of the parser, same terms again.
+ * Always constructed: unlike the session tracker it has no master switch, because its
+ * whole cost when idle is four anchored regexes per line and a lookup that misses.
+ */
+/** @type {QuestProgress|null} */ let quests = null;
+/** @type {BrowserWindow|null} */ let questsWindow = null;
+let saveQuestsBoundsTimer = null;
+
+/**
+ * Quest-loot chips in flight, merged into the warning stack by buildSnapshot. Kept
+ * here rather than in the parser (which knows nothing about quests) or the tracker
+ * (which is pure bookkeeping): a chip is a presentation fact, and this is the
+ * presentation process. Ids start far above the parser's and the trigger engine's
+ * (WARNING_ID_BASE = 1e9) so the renderer's per-id chip map can never collide.
+ */
+let questChips = [];
+let questChipSeq = 2_000_000_000;
+const QUEST_CHIP_TTL_MS = 6000;
+/** Bumped when a chip arrives or expires, so the push loop cannot strand a stale one. */
+let questChipsRevision = 0;
+let lastQuestChipsRevision = -1;
 
 let pushTimer = null;
 let checkpointTimer = null;
@@ -172,6 +195,11 @@ async function main() {
   history = new EncounterStore(path.join(app.getPath('userData'), 'history'));
   sessionStore = new SessionStore(path.join(app.getPath('userData'), 'sessions'));
   recoverSessions();
+  quests = new QuestProgress({
+    dir: path.join(app.getPath('userData'), 'quests'),
+    // The history store's policy: a full disk must not take the live overlay down.
+    onWriteError: (err) => toast(`Quest ledger write failed: ${err.message}`),
+  });
   triggerStore = new TriggerStore(path.join(app.getPath('userData'), 'triggers'));
   installSeedTimers();
   triggers = new TriggerEngine();
@@ -411,6 +439,7 @@ async function startTailing(logPath) {
   triggers?.setCharacter(parser.selfName);
   applyPartyList();
   syncSessionTracker();
+  quests?.setCharacter(parser.selfName, parser.server);
 
   tailer.on('lines', (lines) => {
     for (const line of lines) {
@@ -424,11 +453,24 @@ async function startTailing(logPath) {
       // player quoting "You have slain a froglok shin knight!" in guild chat arrives
       // already labelled and never reaches the night's kill count.
       session?.feed(line, event);
+      // The fourth consumer, same contract. It answers with the quest slots a looted
+      // item satisfies — and the chip fires only for the slots still NEEDED (quest not
+      // done, item not owned): a chip for loot already checked off is noise that
+      // teaches the player to stop reading the window.
+      const questRefs = quests?.feedLine(line, event);
+      if (questRefs?.length) {
+        // Any counted loot moves the ledger, so an open window refetches; the chip
+        // additionally requires that some slot still NEEDS the item.
+        notifyQuestsChanged();
+        const needed = quests.needed(questRefs);
+        if (needed.length) noteQuestLoot(needed);
+      }
     }
     // The parser learns the character's own name from the log rather than only from the
     // filename, so `{C}` patterns may only become resolvable partway into a session.
     triggers?.setCharacter(parser.selfName);
     session?.setCharacter(parser.selfName, parser.server);
+    quests?.setCharacter(parser.selfName, parser.server);
   });
 
   tailer.on('switch', ({ to, character }) => {
@@ -445,6 +487,10 @@ async function startTailing(logPath) {
     // The session closes and is written rather than continuing under the new name — a
     // different character is a different purse, level and faction standing.
     session?.setCharacter(character ?? parser.selfName, parser.server);
+    // The quest ledger swaps files the same way — a different character has different
+    // checkmarks, and their counts must not land in each other's ledgers.
+    quests?.setCharacter(character ?? parser.selfName, parser.server);
+    notifyQuestsChanged();
     config.set({ logPath: to });
     toast(`Now following ${character}`);
     refreshTrayMenu();
@@ -868,7 +914,8 @@ function startPushLoop() {
     const snapshot = buildSnapshot();
     const unchanged = parser.revision === lastRevision &&
       (triggers?.revision ?? -1) === lastTriggerRevision &&
-      (session?.revision ?? -1) === lastSessionRevision;
+      (session?.revision ?? -1) === lastSessionRevision &&
+      questChipsRevision === lastQuestChipsRevision;
     // An open session is the third thing whose display moves every tick even when nothing
     // has happened: its elapsed time, and every per-hour rate divided by it, advance on
     // the clock alone. Same case as a running encounter and a live countdown.
@@ -876,6 +923,7 @@ function startPushLoop() {
     lastRevision = parser.revision;
     lastTriggerRevision = triggers?.revision ?? -1;
     lastSessionRevision = session?.revision ?? -1;
+    lastQuestChipsRevision = questChipsRevision;
 
     overlayWindow.webContents.send(CHANNELS.SNAPSHOT, snapshot);
     for (const win of [alertsWindow, timersWindow]) {
@@ -903,13 +951,60 @@ function buildSnapshot() {
   // is off or no session is open, which is what lets the renderer draw nothing at all
   // rather than an empty row.
   const sessionSummary = session?.summary(now) ?? null;
-  if (!triggers) return { ...snapshot, triggerTimers: [], session: sessionSummary };
+  const questWarns = questWarnings(now);
+  if (!triggers) {
+    return {
+      ...snapshot,
+      hostileCasts: [...snapshot.hostileCasts, ...questWarns],
+      triggerTimers: [],
+      session: sessionSummary,
+    };
+  }
   return {
     ...snapshot,
-    hostileCasts: [...snapshot.hostileCasts, ...triggers.warnings(now)],
+    hostileCasts: [...snapshot.hostileCasts, ...triggers.warnings(now), ...questWarns],
     triggerTimers: triggers.timers(now),
     session: sessionSummary,
   };
+}
+
+/**
+ * A looted quest item, as an alert chip: the item up top, who wants it underneath.
+ *
+ * A single-quest item names the class and the reward outright. A rune serves up to
+ * seven class tests, and listing them would be a chip nobody can read mid-fight, so it
+ * carries the count — the full answer is one Quests window away.
+ */
+function noteQuestLoot(refs) {
+  const first = refs[0];
+  const sub = refs.length === 1
+    ? `${first.className} — ${first.reward}`
+    : `${refs.length} class tests want this`;
+  questChips.push({ id: ++questChipSeq, text: first.itemName, sub, ts: Date.now() });
+  questChipsRevision++;
+}
+
+/** The ledger moved — an open Quests window refetches rather than showing a freeze. */
+function notifyQuestsChanged() {
+  if (questsWindow && !questsWindow.isDestroyed()) {
+    questsWindow.webContents.send(CHANNELS.QUESTS_CHANGED, {});
+  }
+}
+
+/** Live quest chips in the warning shape, pruned in place on the way out. */
+function questWarnings(now) {
+  const before = questChips.length;
+  questChips = questChips.filter((c) => now - c.ts <= QUEST_CHIP_TTL_MS);
+  if (questChips.length !== before) questChipsRevision++;
+  return questChips.map((c) => ({
+    id: c.id,
+    category: 'quest',
+    // Tier 2: worth looking up for, never a siren — and never the tier-3 cue.
+    tier: 2,
+    text: c.text,
+    sub: c.sub,
+    remainingMs: Math.max(0, QUEST_CHIP_TTL_MS - (now - c.ts)),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1163,6 +1258,14 @@ function refreshTrayMenu() {
         alertToggle('Summon announcements', 'summonAlerts'),
         alertToggle('Crowd control on the group', 'ccAlerts'),
         {
+          ...alertToggle('Charm breaks', 'charmBreakAlerts'),
+          toolTip: 'Your charm wore off — the freed mob is turning on you',
+        },
+        {
+          ...alertToggle('Quest loot', 'questLootAlerts'),
+          toolTip: 'A looted item matches a Plane of Sky class test',
+        },
+        {
           ...alertToggle('Trigger packs', 'triggerAlerts'),
           toolTip: 'Chips raised by imported or authored triggers',
         },
@@ -1170,6 +1273,11 @@ function refreshTrayMenu() {
           ...alertToggle('Sound for interrupt warnings', 'castAlertSound'),
           // A beep for a warning that isn't drawn is a noise with no explanation.
           enabled: config.get('castAlerts') !== false,
+        },
+        {
+          ...alertToggle('Sound for charm breaks', 'charmBreakSound'),
+          // Same rule as the cast cue: no beep for a chip that cannot draw.
+          enabled: config.get('charmBreakAlerts') !== false,
         },
         { type: 'separator' },
         // Below the line because it is not one of the categories above: the timers
@@ -1194,6 +1302,7 @@ function refreshTrayMenu() {
     // ever be empty is a promise the app cannot keep, and the switch that would fill it
     // is one screen away in Settings.
     ...(sessionEnabled(config.all) ? [{ label: 'Session…', click: createSession }] : []),
+    { label: 'Quests…', click: createQuests },
     { label: 'Settings…', click: () => createSetup('settings') },
     { type: 'separator' },
     // The version is the first half of the answer to "am I on the latest?", and it is the
@@ -1394,6 +1503,51 @@ function createSession() {
   sessionWindow.on('moved', remember);
   sessionWindow.on('resized', remember);
   sessionWindow.on('closed', () => { sessionWindow = null; });
+}
+
+/**
+ * The Quests window: the Plane of Sky class-test ledger.
+ *
+ * Fourth of the reading surfaces, built exactly like History, Triggers and Session —
+ * a real window with three fixed panes that take mouse input and scroll internally,
+ * its own bounds key, and no part in the click-through HUD. Its shape was approved as
+ * docs/design/2026-08-14-quests-window-mockups.html.
+ */
+function createQuests() {
+  if (questsWindow && !questsWindow.isDestroyed()) {
+    questsWindow.focus();
+    return;
+  }
+
+  questsWindow = new BrowserWindow({
+    width: 1160,
+    height: 720,
+    ...(config.get('questsBounds') ?? {}),
+    minWidth: 980,
+    minHeight: 540,
+    title: 'EQL DPS Overlay — Plane of Sky Quests',
+    backgroundColor: '#100d0a',
+    icon: path.join(ASSETS, 'icon-256.png'),
+    webPreferences: {
+      preload: path.join(RENDERER, 'quests', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  questsWindow.setMenuBarVisibility(false);
+  questsWindow.loadFile(path.join(RENDERER, 'quests', 'index.html'));
+
+  const remember = () => {
+    clearTimeout(saveQuestsBoundsTimer);
+    saveQuestsBoundsTimer = setTimeout(() => {
+      if (!questsWindow || questsWindow.isDestroyed()) return;
+      config.set({ questsBounds: questsWindow.getBounds() });
+    }, 400);
+  };
+  questsWindow.on('moved', remember);
+  questsWindow.on('resized', remember);
+  questsWindow.on('closed', () => { questsWindow = null; });
 }
 
 /**
@@ -2468,6 +2622,49 @@ function registerIpc() {
   ipcMain.handle(CHANNELS.SESSION_CLEAR, (_e, key) => sessionStore.clear(key));
 
   ipcMain.handle(CHANNELS.SESSION_OPEN, () => { createSession(); });
+
+  // ------------------------------------------------------------------- quests
+
+  ipcMain.handle(CHANNELS.QUESTS_GET, () => quests?.snapshot() ?? null);
+
+  ipcMain.handle(CHANNELS.QUESTS_SET_OWNED, (_e, { ref, owned }) => {
+    quests?.setOwned(String(ref), Boolean(owned));
+    return { ok: true };
+  });
+
+  ipcMain.handle(CHANNELS.QUESTS_SET_DONE, (_e, { ref, done }) => {
+    quests?.setDone(String(ref), Boolean(done));
+    return { ok: true };
+  });
+
+  ipcMain.handle(CHANNELS.QUESTS_OPEN, () => { createQuests(); });
+
+  /**
+   * Import an eqlposky.com progress export.
+   *
+   * The report is the headline, exactly as it is for a GINA pack: an export is a dated
+   * snapshot of what the site knew, so what crossed over — and as of when — is the only
+   * honest thing to show. The store enforces the one-way rule (an import only ever SETS
+   * flags); this handler just moves the file.
+   */
+  ipcMain.handle(CHANNELS.QUESTS_IMPORT, async () => {
+    const picked = await dialog.showOpenDialog({
+      title: 'Import an eqlposky.com progress export',
+      filters: [{ name: 'eqlposky progress export', extensions: ['json'] }],
+      properties: ['openFile'],
+    });
+    if (picked.canceled || !picked.filePaths[0]) return { canceled: true };
+
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(picked.filePaths[0], 'utf8'));
+    } catch (err) {
+      return { ok: false, error: `could not read the file: ${err.message}` };
+    }
+    const result = quests?.applyImport(data) ?? { ok: false, error: 'no character yet' };
+    if (result.ok) notifyQuestsChanged();
+    return result;
+  });
 
   /**
    * Replay a log file into the session store.

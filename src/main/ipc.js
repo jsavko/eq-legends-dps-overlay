@@ -42,6 +42,14 @@ export const CHANNELS = {
    */
   SESSION_APPENDED: 'session:appended',
 
+  /**
+   * The quest ledger moved — a loot was counted, a flag was toggled, an import landed.
+   * Sent to the Quests window so an open one refetches instead of showing a checklist
+   * frozen at whatever moment it was opened. Payloadless: the window asks QUESTS_GET
+   * for the whole picture, which is small and saves inventing a delta format.
+   */
+  QUESTS_CHANGED: 'quests:changed',
+
   // renderer -> main (invoke, returns a value)
   CONFIG_GET: 'config:get',
   CONFIG_SET: 'config:set',
@@ -176,6 +184,23 @@ export const CHANNELS = {
   SESSION_IMPORT: 'session:import',
   /** Open the Session window — the settings form's entry point to it. */
   SESSION_OPEN: 'session:open',
+
+  /**
+   * The Plane of Sky quest ledger, for the Quests window.
+   *
+   * `QUESTS_GET` answers with the whole resolved picture — every class, quest and item,
+   * data names joined with this character's counts and flags. `SET_OWNED` / `SET_DONE`
+   * are the manual toggles, named by the positional refs the dataset defines
+   * ("bard:0:0" / "bard:0"). `QUESTS_IMPORT` opens a file dialog for an eqlposky.com
+   * progress export and returns the import report — what it set, dated by the export's
+   * own `exportedAt` — because an import is a snapshot claim, not a sync.
+   */
+  QUESTS_GET: 'quests:get',
+  QUESTS_SET_OWNED: 'quests:set-owned',
+  QUESTS_SET_DONE: 'quests:set-done',
+  QUESTS_IMPORT: 'quests:import',
+  /** Open the Quests window — the settings form's entry point to it. */
+  QUESTS_OPEN: 'quests:open',
 
   /**
    * Put a finished line of text on the Windows clipboard.

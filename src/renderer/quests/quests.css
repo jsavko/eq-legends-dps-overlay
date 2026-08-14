@@ -1,0 +1,182 @@
+/*
+ * The Quests window wears the overlay's warm parchment palette, like History, Triggers
+ * and Session before it: a reading surface, not a form. Three fixed panes on one grid —
+ * rail (every quest, grouped by class) / quest (the selected one) / items (its
+ * checklist). Panes scroll internally; the built HTML matches the approved mockup in
+ * docs/design/2026-08-14-quests-window-mockups.html.
+ */
+
+:root {
+  --bg:        #100d0a;
+  --panel:     #17130f;
+  --panel-2:   #221b14;
+  --line:      #2e2620;
+
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+
+  --ember:     #b9702a;
+  --gold:      #e0a53f;
+  --balm:      #63c2b4;   /* the done ✓ — the one “finished” colour this window has */
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 292px 336px 1fr;
+  grid-template-areas:
+    "titlebar titlebar titlebar"
+    "rail     quest    items";
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ---------------------------------------------------------------- titlebar */
+
+#titlebar {
+  grid-area: titlebar;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+#titlebar h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+#who { color: var(--ink-dim); font-size: 12px; }
+#titlebar .spacer { flex: 1; }
+#total { color: var(--ink-dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+#total b { color: var(--gold); font-weight: 700; }
+
+button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--ember); }
+
+/* -------------------------------------------------------------------- rail */
+
+#rail { grid-area: rail; border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
+#quests { list-style: none; margin: 0; padding: 0 0 12px; }
+
+.chead {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 10px 14px 5px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.chead .n { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+
+.qrow {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 14px 6px 20px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.qrow:hover { background: var(--panel-2); }
+.qrow[aria-selected="true"] { background: var(--panel-2); border-left-color: var(--gold); }
+.qrow .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+.qrow .st { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+.qrow.done .name { color: var(--ink-faint); }
+.qrow.done .st { color: var(--balm); }
+
+/* ------------------------------------------------------------- quest pane */
+
+#quest { grid-area: quest; border-right: 1px solid var(--line); padding: 16px 18px; overflow: hidden; display: flex; flex-direction: column; }
+.pane-empty { color: var(--ink-faint); font-size: 12.5px; padding-top: 30px; text-align: center; }
+#quest-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#q-reward { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: 0.01em; }
+#q-npc { margin: 3px 0 0; color: var(--ink-dim); font-size: 12px; }
+#q-npc b { color: var(--ink); font-weight: 600; }
+
+.donebox {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 0 0; padding: 9px 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+  text-align: left;
+}
+.donebox .box {
+  flex: none;
+  width: 15px; height: 15px; border: 1px solid var(--ink-faint); border-radius: 3px;
+  display: grid; place-items: center; font-size: 11px; color: var(--balm);
+}
+.donebox[aria-pressed="true"] .box { border-color: var(--balm); }
+.donebox[aria-pressed="true"] .box::after { content: "✓"; }
+.donebox .lbl { font-size: 12.5px; white-space: nowrap; }
+.donebox .hint { font-size: 10.5px; color: var(--ink-faint); margin-left: auto; text-align: right; }
+
+#q-stats {
+  margin-top: 14px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+  overflow-y: auto; flex: 1; min-height: 0;
+}
+#q-stats .shead { color: var(--gold); font-weight: 700; font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; }
+#q-stats-text { margin: 6px 0 0; font: inherit; font-size: 11.5px; line-height: 1.6; color: var(--ink-dim); white-space: pre-wrap; }
+
+#q-stamp { margin: 12px 0 0; font-size: 11px; color: var(--ink-faint); line-height: 1.5; min-height: 2.9em; }
+
+/* -------------------------------------------------------------- items pane */
+
+#items { grid-area: items; padding: 16px 18px; overflow-y: auto; }
+.ihead {
+  display: flex; align-items: baseline;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-faint); margin-bottom: 10px;
+}
+.ihead #i-owned { margin-left: auto; color: var(--ink-dim); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+
+#item-list { list-style: none; margin: 0; padding: 0; }
+.item {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  grid-template-areas: "own name count" ". src count";
+  column-gap: 10px; align-items: baseline;
+  padding: 10px 12px; margin-bottom: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+}
+.item .own {
+  grid-area: own; align-self: start;
+  width: 15px; height: 15px; padding: 0;
+  border: 1px solid var(--ink-faint); border-radius: 3px;
+  display: grid; place-items: center; font-size: 11px; color: var(--balm);
+  background: none;
+}
+.item .own[aria-pressed="true"] { border-color: var(--balm); }
+.item .own[aria-pressed="true"]::after { content: "✓"; }
+.item .name { grid-area: name; font-size: 13.5px; font-weight: 600; }
+.item.owned .name { color: var(--ink-dim); }
+.item .src { grid-area: src; font-size: 11.5px; color: var(--ink-dim); margin-top: 2px; }
+.item .count { grid-area: count; text-align: right; align-self: center; }
+.item .count .cap { display: block; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
+.item .count .big { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--gold); }
+.item .count .big.zero { color: var(--ink-faint); font-weight: 400; }
+.item .count .split { display: block; font-size: 10.5px; color: var(--ink-faint); white-space: nowrap; }
+
+/* The rune row: a zone-wide drop, not an island's — it dresses gold on purpose. */
+.item.rune { border-color: color-mix(in srgb, var(--gold) 34%, var(--line)); background: color-mix(in srgb, var(--panel) 92%, #3a2c12); }
+.item.rune .src { color: var(--gold); font-style: italic; }
+
+.legend { margin-top: 14px; font-size: 11px; color: var(--ink-faint); line-height: 1.6; max-width: 64ch; }
+.legend b { color: var(--ink-dim); font-weight: 600; }
+
+/* ------------------------------------------------------------- scrollbars */
+
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-thumb { background: var(--panel-2); border-radius: 5px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--line); }

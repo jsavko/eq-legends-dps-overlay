@@ -33,7 +33,15 @@
 
 import { ALERT_PRESETS, WARN_GROUPS, warnKeyFor, warnGroupOn, presetOf } from './config.js';
 import { ruleSource } from '../parser/rules.js';
+import { SESSION_RULES } from '../session/rules.js';
 import { SPELL_PATTERNS, UNKNOWN_GROUP } from '../parser/spellwatch.js';
+
+/**
+ * A rule's pattern from the SESSION table, for the one row raised by that table rather
+ * than the combat one — quest loot rides the session loot rules. Same live-read
+ * contract as `ruleSource`: the window cannot show a pattern the tracker stopped using.
+ */
+const sessionRuleSource = (id) => SESSION_RULES.find((r) => r.id === id)?.re.source ?? null;
 
 /**
  * The pack id. Prefixed and suffixed so it can never collide with a real pack: pack ids
@@ -235,6 +243,53 @@ export const BUILTIN_ROWS = [
       'You are no longer stunned.',
     ],
   },
+  {
+    key: 'charmBreakAlerts',
+    kind: 'group',
+    surface: 'chips',
+    name: 'Charm breaks',
+    sub: 'your charm wore off — the freed mob is turning on you',
+    why:
+      'The one worn-off line that changes what you must do next. The pattern below ' +
+      'fires for every fading spell you have running; what a copy of it cannot carry ' +
+      'is the judgement that makes this row quiet — the parser raises it only when ' +
+      'the fade ends a charm it saw land, so a DoT expiring says nothing.',
+    lineRules: ['worn-off'],
+    catches: ['Your Charm spell has worn off of a skeletal monk.'],
+  },
+  {
+    key: 'charmBreakSound',
+    kind: 'option',
+    parent: 'charmBreakAlerts',
+    surface: 'chips',
+    name: 'Play a sound when your charm breaks',
+    sub: 'sound is opt-in, always',
+    why:
+      'Two falling notes, the mirror of the rising interrupt cue, so your ears can ' +
+      'tell them apart with your eyes on the game — which is the whole point: a charm ' +
+      'usually breaks while you are looking somewhere else.',
+    lineRules: [],
+    catches: [],
+  },
+  {
+    key: 'questLootAlerts',
+    kind: 'group',
+    surface: 'chips',
+    name: 'Quest loot',
+    sub: 'a looted item matches a Plane of Sky class test',
+    why:
+      'A moment of recognition at the loot window — the chip names the item and which ' +
+      'class test wants it. The patterns below are the four wordings loot arrives in; ' +
+      'what a copy cannot carry is the dataset lookup that decides whether the item is ' +
+      'quest loot at all. The ledger itself is in the Quests window either way.',
+    lineRules: [],
+    sessionRules: ['loot', 'loot-stored', 'loot-created', 'loot-sold'],
+    catches: [
+      "--You have looted a Crude Wooden Flute from The Spiroc Lord's corpse.--",
+      "You looted a Wind Rune Lena from a blade storm's corpse and stored it in your currency",
+      "You looted an Efreeti War Shield from Noble Dojorn's corpse to create an Efreeti War Shield +1",
+    ],
+  },
 ];
 
 /** Every config key the built-in pack owns, for callers that need to watch them. */
@@ -273,9 +328,10 @@ export function builtinRowOn(cfg, key) {
  */
 export function builtinMatches(row) {
   return {
-    lines: (row.lineRules ?? [])
-      .map((id) => ({ id, source: ruleSource(id) }))
-      .filter((r) => r.source),
+    lines: [
+      ...(row.lineRules ?? []).map((id) => ({ id, source: ruleSource(id) })),
+      ...(row.sessionRules ?? []).map((id) => ({ id, source: sessionRuleSource(id) })),
+    ].filter((r) => r.source),
     spells: row.group
       ? SPELL_PATTERNS.filter((p) => p.group === row.group)
         .map(({ category, source }) => ({ category, source }))

@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Plane of Sky Quests — window mockups</title>
+<style>
+/*
+ * Mockup for the Quests window (tray → Quests…): the Plane of Sky class-test ledger.
+ * Everything is at 1:1 pixel scale in the shipping parchment palette and type — this
+ * file is a mockup, not a component, so the CSS is deliberately flat.
+ *
+ * Every number in the mock is REAL: Rhale's actual ledger after backfilling the live
+ * log, joined with the actual eqlposky.com progress export of Aug 14. Nothing here is
+ * lorem ipsum, so the density judgement is honest.
+ */
+:root {
+  --bg:        #100d0a;
+  --panel:     #17130f;
+  --panel-2:   #221b14;
+  --line:      #2e2620;
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+  --ember:     #b9702a;
+  --gold:      #e0a53f;
+  --balm:      #63c2b4;
+  --bad:       #e5766b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 28px 32px 60px;
+  background: radial-gradient(120% 90% at 30% 0%, #1d2422 0%, #0b0d0c 55%, #070808 100%);
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+h1 {
+  font-size: 15px; font-weight: 700; letter-spacing: 0.26em; text-transform: uppercase;
+  color: var(--gold); margin: 0 0 4px;
+}
+.sub { color: var(--ink-dim); font-size: 12.5px; margin: 0 0 26px; max-width: 78ch; line-height: 1.5; }
+h2 {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--ink); margin: 34px 0 2px; padding-top: 18px; border-top: 1px solid #1c211f;
+}
+h2 .tag { color: var(--gold); }
+.note { color: var(--ink-dim); font-size: 12px; margin: 0 0 16px; max-width: 82ch; line-height: 1.55; }
+.note b { color: var(--ink); font-weight: 600; }
+
+/* ═══════════════════════════════ the window ═══════════════════════════════ */
+.win {
+  width: 1160px; height: 720px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 292px 336px 1fr;
+  grid-template-areas: "titlebar titlebar titlebar" "rail quest items";
+  background: var(--bg);
+  border: 1px solid #000;
+  border-radius: 4px;
+  box-shadow: 0 6px 40px rgba(0,0,0,0.7);
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* titlebar */
+.tbar {
+  grid-area: titlebar;
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.tbar h3 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+.tbar .who { color: var(--ink-dim); font-size: 12px; }
+.tbar .spacer { flex: 1; }
+.tbar .total { color: var(--ink-dim); font-size: 12px; }
+.tbar .total b { color: var(--gold); font-weight: 700; }
+.btn {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+  color: var(--ink); padding: 5px 12px; font: inherit; font-size: 12.5px; cursor: pointer;
+}
+
+/* rail: every quest, grouped by class. Scrolls internally; panes never move. */
+.rail { grid-area: rail; border-right: 1px solid var(--line); overflow: hidden; background: var(--panel); }
+.rail .chead {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 9px 14px 5px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.rail .chead .n { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.rail .chead.mine { color: var(--gold); }
+.qrow {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 14px 6px 20px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.qrow:hover { background: var(--panel-2); }
+.qrow.sel { background: var(--panel-2); border-left-color: var(--gold); }
+.qrow .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+.qrow .st { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+.qrow.done .name { color: var(--ink-faint); }
+.qrow.done .st { color: var(--balm); letter-spacing: 0.04em; }
+.fade { position: relative; height: 40px; overflow: hidden; }
+.fade::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent, var(--panel)); }
+
+/* middle pane: the selected quest */
+.quest { grid-area: quest; border-right: 1px solid var(--line); padding: 16px 18px; overflow: hidden; display: flex; flex-direction: column; }
+.quest .reward { font-size: 17px; font-weight: 700; letter-spacing: 0.01em; }
+.quest .npc { color: var(--ink-dim); font-size: 12px; margin-top: 3px; }
+.quest .npc b { color: var(--ink); font-weight: 600; }
+.donebox {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 0 0; padding: 9px 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+  cursor: pointer;
+}
+.donebox .box {
+  width: 15px; height: 15px; border: 1px solid var(--ink-faint); border-radius: 3px;
+  display: grid; place-items: center; font-size: 11px; color: var(--balm);
+}
+.donebox.on .box { border-color: var(--balm); }
+.donebox .lbl { font-size: 12.5px; white-space: nowrap; }
+.donebox .sub { font-size: 10.5px; color: var(--ink-faint); margin-left: auto; text-align: right; }
+.stats {
+  margin-top: 14px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+  font-size: 11.5px; line-height: 1.6; color: var(--ink-dim);
+  white-space: pre-line;
+  overflow: auto; flex: 1;
+}
+.stats .shead { color: var(--gold); font-weight: 700; font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; }
+.stamp { margin-top: 12px; font-size: 11px; color: var(--ink-faint); line-height: 1.5; }
+
+/* right pane: the item checklist */
+.items { grid-area: items; padding: 16px 18px; overflow: hidden; }
+.items .ihead {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-faint); margin-bottom: 10px;
+  display: flex; align-items: baseline;
+}
+.items .ihead .n { margin-left: auto; color: var(--ink-dim); letter-spacing: 0; }
+.item {
+  display: grid; grid-template-columns: 24px 1fr auto; grid-template-areas: "own name count" ". src count";
+  column-gap: 10px; align-items: baseline;
+  padding: 10px 12px; margin-bottom: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+}
+.item .own {
+  grid-area: own; align-self: start;
+  width: 15px; height: 15px; border: 1px solid var(--ink-faint); border-radius: 3px;
+  display: grid; place-items: center; font-size: 11px; color: var(--balm); cursor: pointer;
+}
+.item.owned .own { border-color: var(--balm); }
+.item .name { grid-area: name; font-size: 13.5px; font-weight: 600; }
+.item.owned .name { color: var(--ink-dim); }
+.item .src { grid-area: src; font-size: 11.5px; color: var(--ink-dim); margin-top: 2px; }
+.item .count { grid-area: count; text-align: right; align-self: center; }
+.item .count .big { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--gold); }
+.item .count .big.zero { color: var(--ink-faint); font-weight: 400; }
+.item .count .split { display: block; font-size: 10.5px; color: var(--ink-faint); white-space: nowrap; }
+.item .count .cap { display: block; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
+/* the rune row: zone-wide, not an island's — it dresses differently on purpose */
+.item.rune { border-color: color-mix(in srgb, var(--gold) 34%, var(--line)); background: color-mix(in srgb, var(--panel) 92%, #3a2c12); }
+.item.rune .src { color: var(--gold); font-style: italic; }
+.legend { margin-top: 14px; font-size: 11px; color: var(--ink-faint); line-height: 1.6; }
+.legend b { color: var(--ink-dim); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Plane of Sky Quests</h1>
+<p class="sub">
+  A fourth reading surface (tray → Quests…), on the History/Triggers/Session model: three
+  fixed panes, warm parchment palette, every click swaps content inside a pane and nothing
+  reflows. Rail = all 95 class-test quests grouped by class. Middle = the selected quest:
+  reward, stats, quest NPC, and the turned-in toggle. Right = the item checklist. All data
+  below is Rhale's real ledger (live log, backfilled) joined with the real eqlposky.com
+  export of Aug 14.
+</p>
+
+<h2><span class="tag">A</span> · the window</h2>
+<p class="note">
+  <b>Two kinds of truth, never conflated.</b> The <b>looted count</b> (right column) is a
+  fact from the log and nothing can edit it. The <b>owned checkbox</b> and the quest's
+  <b>turned-in toggle</b> are claims — set by hand or by an eqlposky import, both
+  editable, neither ever inferred from the counts beside them. A done quest dims in the
+  rail with a teal ✓; class headers count them. The player's own class is not something
+  the app can know, so the rail simply remembers which class was last selected and pins
+  nothing.
+</p>
+
+<div class="win">
+  <div class="tbar">
+    <h3>Plane of Sky Quests</h3>
+    <span class="who">Rhale · oggok</span>
+    <span class="spacer"></span>
+    <span class="total"><b>8</b> of 95 tests turned in</span>
+    <button class="btn">Import eqlposky export…</button>
+  </div>
+
+  <div class="rail">
+    <div class="chead">Bard <span class="n">5 / 6 done</span></div>
+    <div class="qrow done"><span class="name">Ervaj's Flute of Flight</span><span class="st">✓</span></div>
+    <div class="qrow done"><span class="name">Mantle of the Songweaver</span><span class="st">✓</span></div>
+    <div class="qrow done"><span class="name">Mask of Song</span><span class="st">✓</span></div>
+    <div class="qrow done"><span class="name">Amulet of the Fae</span><span class="st">✓</span></div>
+    <div class="qrow"><span class="name">Denon's Horn of Disaster</span><span class="st">1/2</span></div>
+    <div class="qrow done"><span class="name">Spear of Harmony</span><span class="st">✓</span></div>
+
+    <div class="chead mine">Beastlord <span class="n">2 / 5 done</span></div>
+    <div class="qrow"><span class="name">Azarack Skin Wristwraps</span><span class="st">1/2</span></div>
+    <div class="qrow done"><span class="name">Diaphonous Waistband</span><span class="st">✓</span></div>
+    <div class="qrow done"><span class="name">Griffin-Hide Armguards</span><span class="st">✓</span></div>
+    <div class="qrow"><span class="name">Spiroc Beak Earcuff</span><span class="st">1/2</span></div>
+    <div class="qrow sel"><span class="name">Windhowl / Spirit Render</span><span class="st">2/4</span></div>
+
+    <div class="chead">Berserker <span class="n">0 / 6 done</span></div>
+    <div class="qrow"><span class="name">Blood-Drawn Runes</span><span class="st">2/3</span></div>
+    <div class="fade">
+      <div class="qrow"><span class="name">Cudgel of the Fool</span><span class="st">1/2</span></div>
+    </div>
+  </div>
+
+  <div class="quest">
+    <div class="reward">Windhowl / Spirit Render</div>
+    <div class="npc">hand in to <b>Animist Kratho</b> · Quest Room, Island 1</div>
+
+    <div class="donebox">
+      <span class="box"></span>
+      <span class="lbl">Turned in</span>
+      <span class="sub">your claim — the log cannot see turn-ins</span>
+    </div>
+
+    <div class="stats"><span class="shead">Reward</span>
+Windhowl:
+No Trade
+Slot: Primary
+Skill: Hand to Hand  Atk Delay: 22
+DMG: 12
+HP: +55 End: +25
+STR: +4  DEX: +4
+Effect: Herikol's Soothing (Combat, Casting Time: Instant) at Level 46
+WT: 0.1  Size: Tiny
+Class: BST  Race: ALL
+
+Spirit Render:
+No Trade
+Slot: Secondary
+Skill: Hand to Hand  Atk Delay: 23
+DMG: 10
+HP: 25 Mana: 25
+Effect: Sha's Lethargy (Combat, Casting Time: Instant) at Level 46
+WT: 0.1  Size: Tiny
+Class: BST  Race: ALL</div>
+
+    <div class="stamp">
+      Imported from eqlposky export of Aug 14 · an export is a snapshot: the log keeps
+      counting past it, and every checkbox stays editable.
+    </div>
+  </div>
+
+  <div class="items">
+    <div class="ihead">Turn-in items <span class="n">2 of 4 owned</span></div>
+
+    <div class="item owned">
+      <span class="own">✓</span>
+      <span class="name">Brass Knuckles</span>
+      <span class="src">Island 1.5: Noble Dojorn / Island 4: Overseer of Air / Island 8: the Hand of Veeshan</span>
+      <span class="count"><span class="cap">looted</span><span class="big">3</span></span>
+    </div>
+
+    <div class="item">
+      <span class="own"></span>
+      <span class="name">Mithril Bands</span>
+      <span class="src">Island 8: Eye of Veeshan</span>
+      <span class="count"><span class="cap">looted</span><span class="big zero">0</span></span>
+    </div>
+
+    <div class="item">
+      <span class="own"></span>
+      <span class="name">Sphinx Claw</span>
+      <span class="src">Island 7: Sister of the Spire</span>
+      <span class="count"><span class="cap">looted</span><span class="big zero">0</span></span>
+    </div>
+
+    <div class="item rune owned">
+      <span class="own">✓</span>
+      <span class="name">Wind Rune Izah</span>
+      <span class="src">Random zone-wide drop — any Sky mob</span>
+      <span class="count"><span class="cap">looted</span><span class="big">9</span><span class="split">1 in bags · 8 in currency</span></span>
+    </div>
+
+    <div class="legend">
+      <b>Looted</b> counts what the log shows, both wordings (bags and auto-stored).
+      <b>Owned ✓</b> is a claim — yours or an import's — because loot from before logging,
+      trades and turn-ins are invisible to the log. The rune row dresses gold because it
+      drops zone-wide rather than from the islands the other rows name.
+    </div>
+  </div>
+</div>
+
+<h2><span class="tag">B</span> · why the panes split this way</h2>
+<p class="note">
+  The rail answers <b>"where am I across all sixteen classes"</b> — every quest visible,
+  done ones dimmed with a ✓, in-progress ones showing owned-of-needed. The middle answers
+  <b>"what is this quest and is it finished"</b> — the toggle lives beside the reward it
+  claims, not in the checklist, because "turned in" is a fact about the QUEST while the
+  checkboxes are facts about ITEMS. The right pane answers <b>"what do I still need and
+  who drops it"</b>, sources verbatim from the dataset. Selecting anything swaps content
+  on the same pixels; the window never reflows — the History window's contract, kept.
+</p>
+<p class="note">
+  <b>Not in v1, on purpose:</b> item icons (would hotlink a fan site's CDN), a
+  per-class achievement readout (the game's /ach already answers it), and auto-detecting
+  turn-ins from the log's "You offered 1 Crude Wooden Flute to Cilin Spellsinger." lines —
+  that wording turned out to exist after all, but folding it in deserves its own pass with
+  its own rules; the toggle stays manual and honest until then.
+</p>
+
+</body>
+</html>

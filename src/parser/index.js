@@ -122,6 +122,14 @@ export const HOSTILE_CAST_TTL_MS = 6000;
 export const SUMMON_TTL_MS = 5000;
 
 /**
+ * How long a CHARM BROKE chip stays up. The same shape as a summon — an instant fact,
+ * tier 3, cue-worthy — and slightly longer than one, because the response is not a
+ * glance but an action (re-charm, root, run) and the chip is what explains the mob
+ * suddenly eating the charmer's face.
+ */
+export const CHARM_BREAK_TTL_MS = 6000;
+
+/**
  * Ceiling on how long a CC state chip may live without an explicit end-line.
  *
  * Stun and mez clear on the log's own "no longer"/"awakened" lines; charm on a member
@@ -1563,7 +1571,32 @@ export class LogParser {
    */
   handleWornOff(event) {
     if (!CHARM_SPELL_RE.test(String(event.ability ?? ''))) return;
-    if (this.roster.uncharm(event.target)) this.revision++;
+    if (!this.roster.uncharm(event.target)) return;
+
+    // A live charm just ended, announced — the one worn-off that changes what the
+    // player must DO next, because the freed mob's first act is usually to turn on its
+    // ex-master. Two consumers get told: the returned event carries `charmBroke` for
+    // anything downstream of feed(), and the alerts window gets a chip through the same
+    // list summons ride. ONLY this path raises it — the charmed-mob-dies uncharm is a
+    // fight ending, not a mob turning, and other people's charms end by inference well
+    // after the fact, when a warning would be stale news about somebody else's pet.
+    event.charmBroke = true;
+    this.hostileCasts.push({
+      id: ++this.hostileCastSeq,
+      // No caster: the interrupt/death clear paths match on caster, and neither event
+      // says anything about whether the freed mob is still coming for you. The chip
+      // retires on its TTL alone. The freed mob rides in `victim` — the slot the
+      // snapshot already carries for the one name a non-cast warning announces.
+      caster: null,
+      ability: null,
+      category: 'charm-break',
+      tier: 3,
+      group: 'charm-break',
+      victim: this.resolve(event.target).display,
+      ts: event.ts,
+      ttlMs: CHARM_BREAK_TTL_MS,
+    });
+    this.revision++;
   }
 
   /**
