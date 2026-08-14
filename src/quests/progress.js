@@ -242,10 +242,11 @@ export class QuestProgress {
    *
    * @param {{kind: string, item: string, npc?: string, disposition?: string,
    *   qty?: number, ts: number}} event
-   * @returns {{refs: Array, needed: Array}|null} the slots the event touched and the
-   *   slots that still wanted the item, or null when nothing was counted — not a
-   *   quest item, not a quest NPC, no character yet, or a line already counted by a
-   *   previous run.
+   * @returns {{kind: 'loot'|'offer', refs: Array, needed: Array}|null} what was
+   *   counted, the slots the event touched, and the slots that still wanted the
+   *   item; null when nothing was counted — not a quest item, not a quest NPC, no
+   *   character yet, or a line already counted by a previous run. `kind` is what
+   *   lets the caller chip loot and never chip a hand-in.
    */
   feed(event) {
     if (!this.state || !event) return null;
@@ -261,7 +262,7 @@ export class QuestProgress {
       this.state.lastTs = Math.max(this.state.lastTs ?? 0, event.ts);
       this.revision++;
       this.persist();
-      return { refs: [chosen], needed: [] };
+      return { kind: 'offer', refs: [chosen], needed: [] };
     }
 
     if (event.kind !== 'loot') return null;
@@ -276,7 +277,48 @@ export class QuestProgress {
     this.state.lastTs = Math.max(this.state.lastTs ?? 0, event.ts);
     this.revision++;
     this.persist();
-    return { refs, needed };
+    return { kind: 'loot', refs, needed };
+  }
+
+  /**
+   * The loot chip for a counted drop, or null for the one case that stays silent.
+   *
+   * The chip IDENTIFIES every counted quest drop — "what can be made from this" is
+   * the question the player is actually asking mid-farm — and carries the ledger's
+   * coverage in its wording instead of being silenced by it. The original need-only
+   * filter had a failure mode James hit the day it shipped: one eqlposky import
+   * marked fifty quests done and the surface went mute entirely, which reads as the
+   * feature being gone, not as fifty questions answered.
+   *
+   * The one exception is a fully-covered RUNE. Runes fall zone-wide all night and
+   * serve up to seven classes each; re-announcing "all covered" on every one of them
+   * is the noise that teaches a player to stop reading alerts — the failure an alert
+   * surface cannot survive. A rune chips only while some class still needs it.
+   *
+   * @param {Array} refs    every slot the item satisfies, as lookup() answers
+   * @param {Array} needed  the slots still needed, judged BEFORE the drop landed
+   * @returns {{text: string, sub: string}|null}
+   */
+  lootChip(refs, needed) {
+    if (!refs?.length) return null;
+    const first = refs[0];
+    if (first.rune && !needed.length) return null;
+    let sub;
+    if (needed.length === 1) {
+      sub = `${needed[0].className} — ${needed[0].reward}${refs.length > 1 ? ' · rest covered' : ''}`;
+    } else if (needed.length > 1) {
+      sub = needed.length === refs.length
+        ? `${refs.length} class tests want this`
+        : `${needed.length} of ${refs.length} class tests still need this`;
+    } else if (refs.length === 1) {
+      // Covered, and the wording says HOW: a turned-in quest and an already-owned
+      // item are different reasons to relax about the drop.
+      const done = this.doneState(first.classId, first.questIndex).value;
+      sub = `${first.className} — ${first.reward} · already ${done ? 'turned in' : 'owned'}`;
+    } else {
+      sub = `${refs.length} class tests want this — all covered`;
+    }
+    return { text: first.itemName, sub };
   }
 
   /**

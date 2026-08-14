@@ -343,9 +343,65 @@ test('rune-in-currency arithmetic: stored loot derives owned, an offer takes it 
 test('the loot chip is judged before the loot lands: the first pickup is news, the second is not', () => {
   const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
   const first = store.feed(loot('Crude Wooden Flute', { ts: 1000 }));
+  assert.equal(first.kind, 'loot');
   assert.equal(first.needed.length, 1, 'the flute was needed at the moment it dropped');
   const second = store.feed(loot('Crude Wooden Flute', { ts: 2000 }));
   assert.equal(second.needed.length, 0, 'a second flute while one survives is not news');
+  assert.equal(store.feed(offer('Crude Wooden Flute', 'Cilin Spellsinger', { ts: 3000 })).kind, 'offer',
+    'the kind is what lets the caller chip loot and never chip a hand-in');
+});
+
+// ------------------------------------------------------------------- the loot chip
+
+test('the chip identifies every counted drop; coverage rides in the wording', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  const fed = (item) => store.feed(loot(item, { ts: (store.state.lastTs ?? 0) + 1000 }));
+
+  // A fresh single-quest item: class and reward outright, exactly as before.
+  const fresh = fed('Crude Wooden Flute');
+  assert.deepEqual(store.lootChip(fresh.refs, fresh.needed),
+    { text: 'Crude Wooden Flute', sub: 'Bard — Ervaj\'s Flute of Flight' });
+
+  // The same drop after the quest is turned in still chips — that is the point:
+  // an import that marks fifty quests done must not read as the feature being gone.
+  store.setDone('bard:0', true);
+  const covered = fed('Crude Wooden Flute');
+  assert.deepEqual(store.lootChip(covered.refs, covered.needed),
+    { text: 'Crude Wooden Flute', sub: 'Bard — Ervaj\'s Flute of Flight · already turned in' });
+
+  // Covered by possession rather than a turn-in: the wording says which.
+  const owned = fed('Light Woolen Mantle');
+  assert.equal(store.lootChip(owned.refs, store.needed(owned.refs)).sub,
+    'Bard — Mantle of the Songweaver · already owned');
+});
+
+test('a rune chips only while some class still needs it', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  const first = store.feed(loot('Wind Rune Azia', { disposition: 'stored', ts: 1000 }));
+  assert.equal(store.lootChip(first.refs, first.needed).sub, '7 class tests want this');
+
+  // Some classes covered: the chip counts what is left.
+  store.setDone('bard:0', true);
+  store.setDone('warrior:2', true);
+  const partial = store.feed(loot('Wind Rune Azia', { disposition: 'stored', ts: 2000 }));
+  // Owning a surviving rune covers every slot — judge against a hypothetical fresh
+  // drop by asking needed() with the surviving rune notionally spent.
+  assert.match(store.lootChip(partial.refs, [partial.refs[2], partial.refs[3]]).sub,
+    /2 of 7 class tests still need this/);
+
+  // Fully covered: silence, by design — runes fall all night and serve seven
+  // classes; re-announcing "all covered" teaches the player to stop reading alerts.
+  assert.equal(store.lootChip(partial.refs, []), null);
+});
+
+test('a covered NON-rune still chips — only runes earn the silence', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  // Silken Wrap serves two class tests; cover both.
+  const fed = store.feed(loot('Silken Wrap', { ts: 1000 }));
+  assert.equal(fed.refs.length, 2);
+  for (const slot of fed.refs) store.setDone(`${slot.classId}:${slot.questIndex}`, true);
+  assert.deepEqual(store.lootChip(fed.refs, store.needed(fed.refs)),
+    { text: 'Silken Wrap', sub: '2 class tests want this — all covered' });
 });
 
 test('a manual un-check survives a replay of the very lines that derived the claim', () => {

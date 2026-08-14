@@ -458,16 +458,17 @@ async function startTailing(logPath) {
       // player quoting "You have slain a froglok shin knight!" in guild chat arrives
       // already labelled and never reaches the night's kill count.
       session?.feed(line, event);
-      // The fourth consumer, same contract. It counts loot AND hand-ins now, and
-      // answers with what it counted plus the slots that still NEEDED the item — a
-      // judgement the store makes BEFORE the event lands, so the first pickup of a
-      // wanted item chips and the tenth after every box is ticked stays silent. An
-      // offer always arrives with an empty `needed`: handing an item in is ledger
-      // movement worth a window refresh, never a "you need this" chip.
+      // The fourth consumer, same contract. It counts loot AND hand-ins, and answers
+      // with what it counted plus the slots that still NEEDED the item — a judgement
+      // the store makes BEFORE the event lands, so the first pickup of a wanted item
+      // reads as needed rather than deriving "owned" and silencing itself. Every
+      // counted LOOT chips (the store words the coverage and keeps the one silence,
+      // fully-covered runes); a hand-in is ledger movement worth a window refresh,
+      // never a chip.
       const questCounted = quests?.feedLine(line, event);
       if (questCounted) {
         notifyQuestsChanged();
-        if (questCounted.needed.length) noteQuestLoot(questCounted.needed);
+        if (questCounted.kind === 'loot') noteQuestLoot(questCounted);
       }
     }
     // The parser learns the character's own name from the log rather than only from the
@@ -1019,18 +1020,19 @@ function buildSnapshot() {
 }
 
 /**
- * A looted quest item, as an alert chip: the item up top, who wants it underneath.
+ * A looted quest item, as an alert chip: the item up top, what it builds underneath.
  *
- * A single-quest item names the class and the reward outright. A rune serves up to
- * seven class tests, and listing them would be a chip nobody can read mid-fight, so it
- * carries the count — the full answer is one Quests window away.
+ * Every counted quest drop chips — identification, not need-alerting: "what can be
+ * made from this" is the question being asked mid-farm, and the ledger's coverage
+ * rides in the wording ("· already turned in") rather than muting the surface. See
+ * `QuestProgress#lootChip` for the wording rules and the one deliberate silence.
  */
-function noteQuestLoot(refs) {
-  const first = refs[0];
-  const sub = refs.length === 1
-    ? `${first.className} — ${first.reward}`
-    : `${refs.length} class tests want this`;
-  questChips.push({ id: ++questChipSeq, text: first.itemName, sub, ts: Date.now() });
+function noteQuestLoot({ refs, needed }) {
+  // The store decides the wording and the one silence (a fully-covered rune) —
+  // this is just the push into the chip stack.
+  const chip = quests?.lootChip(refs, needed);
+  if (!chip) return;
+  questChips.push({ id: ++questChipSeq, ...chip, ts: Date.now() });
   questChipsRevision++;
 }
 
