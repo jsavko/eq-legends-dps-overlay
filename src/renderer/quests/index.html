@@ -9,30 +9,46 @@
 </head>
 <body>
   <!-- Three fixed panes on the History model. Every click swaps CONTENT inside a
-       pane; no pane ever resizes, expands, or pushes another around. -->
+       pane; no pane ever resizes, expands, or pushes another around. A collapse in
+       the rail is user-performed display inside its one scrolling pane — nothing
+       outside the rail moves when a group folds. Built against the approved Pencil
+       mock "Quests Window — cleanup" (pencil-new.pen). -->
   <header id="titlebar">
     <h1>Plane of Sky Quests</h1>
     <span id="who"></span>
     <span class="spacer"></span>
     <span id="total"></span>
-    <button id="import">Import eqlposky export…</button>
+    <span id="total-bar"><i id="total-fill"></i></span>
+    <!-- Demoted from requirement to fallback: the log proves turn-ins and an
+         inventory dump proves the rest, so the export covers only pre-log history
+         whose evidence is gone. -->
+    <button id="import" title="The fallback for history neither the log nor an inventory dump can prove">Import eqlposky export…</button>
   </header>
 
-  <aside id="rail"><ol id="quests"></ol></aside>
+  <aside id="rail">
+    <div id="filters">
+      <button data-filter="all">All</button>
+      <button data-filter="progress">In progress</button>
+      <button data-filter="done">Done</button>
+    </div>
+    <ol id="quests"></ol>
+  </aside>
 
   <main id="quest">
     <div id="quest-empty" class="pane-empty" hidden></div>
     <div id="quest-body" hidden>
       <h2 id="q-reward"></h2>
       <p id="q-npc"></p>
+      <!-- The hint is set per quest: it names the source that decided the checkmark
+           (the log's hand-ins, an inventory dump, an import, or the player's own claim). -->
       <button id="q-done" class="donebox">
         <span class="box"></span>
         <span class="lbl">Turned in</span>
-        <span class="hint">your claim — the log cannot see turn-ins</span>
+        <span class="hint"></span>
       </button>
-      <div id="q-stats"><span class="shead">Reward</span><pre id="q-stats-text"></pre></div>
+      <div id="q-cards"></div>
       <!-- Always in flow, even with nothing imported: a stamp that appears only after
-           an import would shift the stats pane above it. -->
+           an import would shift the cards pane above it. -->
       <p id="q-stamp"></p>
     </div>
   </main>
@@ -40,11 +56,12 @@
   <section id="items">
     <div class="ihead"><span>Turn-in items</span><span id="i-owned"></span></div>
     <ol id="item-list"></ol>
-    <p class="legend"><b>Looted</b> counts what the log shows, every wording (bags,
-      auto-stored, upgrades, auto-sells). <b>Owned ✓</b> is a claim — yours or an
-      import's — because loot from before logging, trades and turn-ins are invisible
-      to the log.</p>
+    <p class="legend" title="Looted and handed in count what the log shows, every wording (bags, auto-stored, upgrades, auto-sells, offers to the sixteen quest NPCs). Owned ✓ and Turned in fill themselves from the evidence — the log, your inventory dumps, an import — and every checkmark names its source. Your own click always wins, in both directions.">Looted is the log's count. ✓ marks are claims — yours, an import's, or read from your log's hand-ins and inventory dumps.</p>
   </section>
+
+  <!-- The one floating popup: effect tooltips on the cards, reward-card previews on
+       rail rows. Hover shows, leave hides, click pins until Escape or a click away. -->
+  <div id="popup" hidden></div>
 
   <script type="module" src="quests.js"></script>
 </body>

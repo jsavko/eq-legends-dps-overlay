@@ -261,6 +261,10 @@ export class SessionTracker {
 
     const event = matchSessionRule(parsed.body, this.isOn);
     if (!event) return null;
+    // The `offer` rule shares the loot category so the quest ledger's filter runs it,
+    // but no session pane shows gives — and handing an NPC a flute between sittings
+    // must not open a session or hold one alive. Dropped here, before the clock moves.
+    if (event.kind === 'offer') return null;
     event.ts = parsed.ts;
     if (this.minTs !== null && event.ts <= this.minTs) return null;
 

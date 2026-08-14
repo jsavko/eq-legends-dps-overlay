@@ -1,15 +1,22 @@
 /**
- * The per-character quest ledger: what the log has shown being looted, and the flags
- * the log can never set.
+ * The per-character quest ledger: what the log and the player's own dumps have shown,
+ * and the claims derived from it.
  *
- * The honesty rule this store lives by: LOOTED COUNTS ARE FACTS, OWNED AND DONE ARE
- * CLAIMS. The log states that an item was looted, so counts accumulate from it alone
- * and nothing else may touch them. The log cannot know inventory — items looted before
- * logging began, traded away, or already turned in — so "I own this piece" and "this
- * quest is done" are flags, set only by the player's own hand (a toggle in the Quests
- * window) or by importing an eqlposky.com progress export, and never guessed from the
- * counts sitting beside them. Both kinds of truth render side by side; neither
- * overwrites the other.
+ * The honesty rule this store lives by: COUNTS ARE FACTS, OWNED AND DONE ARE CLAIMS —
+ * and facts are never edited, only accumulated. Three kinds of fact land here:
+ * loot counts (an item arrived), offer counts (an item was handed to one of the
+ * sixteen quest NPCs — the log's own record of a turn-in), and inventory counts
+ * (a `/outputfile inventory` dump said the item was in the bags as of its date).
+ *
+ * Claims are TRI-STATE: explicitly true, explicitly false, or unset. An explicit
+ * value comes from the player's own toggle, an eqlposky import, and nothing else;
+ * derivation fills only the unset, at READ time, from the facts — a quest whose every
+ * slot has been offered to its NPC is done; an item with surviving loot arithmetic
+ * (kept + stored + created, minus what was offered away) is owned; a NO DROP reward
+ * sitting in the inventory dump proves its turn-in even from before logging began.
+ * Precedence, both flags: the player's hand > the inventory dump > the log > the
+ * import — a manual un-check STICKS against any amount of derivation, and every
+ * effective value names its source so the window can say where a checkmark came from.
  *
  * Storage is one plain JSON file per character (`<dir>/<Char>_<server>.json`), whole-file
  * rewritten on each change — the state is a few KB and loot arrives at human speed, so
@@ -25,17 +32,27 @@ import { parseTimestamp } from '../parser/timestamp.js';
 import { CHAT_RULE_IDS } from '../parser/rules.js';
 import { matchSessionRule } from '../session/rules.js';
 import {
-  lookup, questItemKey, isRune, POSKY, itemRef, questRef, VALID_ITEM_REFS, VALID_QUEST_REFS,
+  lookup, questItemKey, isRune, POSKY, EFFECTS, itemRef, questRef,
+  VALID_ITEM_REFS, VALID_QUEST_REFS,
+  offerSlots, rewardLookup, allItemKeys, allRewardKeys,
 } from './index.js';
 
 /** The parser's chat verdicts — the same guard the session tracker keys on. */
 const SPEECH = new Set(CHAT_RULE_IDS);
 
-/** Only the loot family runs for this tracker, whatever the session categories say. */
+/**
+ * Only the loot family runs for this tracker, whatever the session categories say.
+ * The `offer` rule lives in that category on purpose — an item leaving the bags is the
+ * same ledger read in reverse — so this one filter admits both kinds this store eats.
+ */
 const LOOT_ONLY = (category) => category === 'loot';
 
-/** Bumped if the file shape ever changes incompatibly. */
-export const QUEST_STORE_VERSION = 1;
+/**
+ * Bumped if the file shape ever changes incompatibly. v2 made the claims tri-state
+ * (`{ value, source }` objects instead of bare `true`) and added the `offers` and
+ * `inventory` fact stores; `load` migrates a v1 file in place.
+ */
+export const QUEST_STORE_VERSION = 2;
 
 /** "Rhale", "oggok" -> "Rhale_oggok" — the same key convention every store here uses. */
 export function questStoreKey(character, server) {
@@ -45,6 +62,37 @@ export function questStoreKey(character, server) {
 
 /** The dispositions a loot event can arrive with; anything else counts as 'kept'. */
 const DISPOSITIONS = ['kept', 'stored', 'created', 'sold'];
+
+/** classId → the dataset class, for the derivations that walk a quest's slots. */
+const CLASS_BY_ID = new Map(POSKY.classes.map((cls) => [cls.id, cls]));
+
+/**
+ * Lift a v1 file into the tri-state shape.
+ *
+ * v1 stored bare `true` for both a manual toggle and an import — the two were
+ * interchangeable then, so the file cannot say which hand set a given flag. The best
+ * available label: a file that records an import gets `import` (the one real import
+ * set ~150 flags in a stroke; manual toggles were the correction of the odd one), a
+ * file that never imported can only have been clicked. A flag mislabeled by this guess
+ * costs a provenance caption, never a value — every source only ever asserts `true`,
+ * so precedence between them cannot flip a checkmark.
+ */
+function migrateV1(old) {
+  const source = old.import ? 'import' : 'manual';
+  const lift = (flags) => Object.fromEntries(
+    Object.entries(flags ?? {})
+      .filter(([, value]) => value === true)
+      .map(([ref]) => [ref, { value: true, source }]),
+  );
+  return {
+    ...old,
+    v: QUEST_STORE_VERSION,
+    offers: {},
+    inventory: { asOf: null, items: {} },
+    owned: lift(old.owned),
+    done: lift(old.done),
+  };
+}
 
 export class QuestProgress {
   /**
@@ -98,6 +146,7 @@ export class QuestProgress {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.fileFor(character, server), 'utf8'));
       if (parsed?.v === QUEST_STORE_VERSION) return parsed;
+      if (parsed?.v === 1) return migrateV1(parsed);
     } catch {
       // No file yet, or an unreadable one: start clean rather than refuse to track.
       // The file is rewritten whole on the next counted loot, so a torn write from a
@@ -110,9 +159,25 @@ export class QuestProgress {
       lastTs: null,
       /** item key → per-disposition counts, e.g. { "wind rune azia": { kept: 1, stored: 4 } } */
       items: {},
-      /** positional item ref ("bard:0:0") → true; the player's or an import's claim. */
+      /** positional item ref ("bard:0:0") → { count, lastTs }: hand-ins the log saw. */
+      offers: {},
+      /**
+       * What the last `/outputfile inventory` dumps have shown, scoped to the item and
+       * reward names the dataset knows. `items` maps item key → { count, asOf }; each
+       * entry keeps the date of the dump that SAW it, because a dump only ever speaks
+       * for what it contains — a key absent from a newer dump keeps its older entry and
+       * its older date (traded? on the cursor? destroyed? absence is weak evidence),
+       * exactly the only-ever-SETS rule the import lives by.
+       */
+      inventory: { asOf: null, items: {} },
+      /**
+       * positional item ref ("bard:0:0") → { value: boolean, source: 'manual'|'import' }.
+       * EXPLICIT claims only — absence is the unset third state that derivation fills
+       * at read time. A stored `false` is a real statement (the player un-checked it)
+       * and outweighs every derivation.
+       */
       owned: {},
-      /** positional quest ref ("bard:0") → true; same. */
+      /** positional quest ref ("bard:0") → same tri-state shape. */
       done: {},
       /** What the last eqlposky import said about itself, shown in the window. */
       import: null,
@@ -143,37 +208,66 @@ export class QuestProgress {
    * who turned that pane off has not asked the quest ledger to go blind, so this
    * tracker runs the loot rules for itself, whatever the categories say.
    *
-   * @returns {Array|null} the quest slots the loot satisfies, exactly as feed() answers.
+   * @returns {{refs: Array, needed: Array}|null} exactly as feed() answers.
    */
   feedLine(line, parserEvent) {
     if (parserEvent && SPEECH.has(parserEvent.rule)) return null;
     const parsed = parseTimestamp(line);
     if (!parsed) return null;
     const event = matchSessionRule(parsed.body, LOOT_ONLY);
-    if (!event || event.kind !== 'loot') return null;
+    if (!event || (event.kind !== 'loot' && event.kind !== 'offer')) return null;
     event.ts = parsed.ts;
     return this.feed(event);
   }
 
   /**
-   * Feed one session loot event (`kind: 'loot'` from `src/session/rules.js`).
+   * Feed one session event — `loot` or `offer`, both from `src/session/rules.js`.
    *
-   * Counts are kept PER DISPOSITION because a Wind Rune genuinely arrives two ways —
-   * looted to bags or auto-stored to currency — and both count toward the total while
-   * the split ("2 in bags · 5 in currency") is worth showing. Items no quest wants are
-   * dropped without a trace: this is a quest ledger, not a second loot pane.
+   * Loot counts are kept PER DISPOSITION because a Wind Rune genuinely arrives two
+   * ways — looted to bags or auto-stored to currency — and both count toward the total
+   * while the split ("2 in bags · 5 in currency") is worth showing. Items no quest
+   * wants are dropped without a trace: this is a quest ledger, not a second loot pane.
    *
-   * @param {{kind: string, item: string, disposition?: string, qty?: number, ts: number}} event
-   * @returns {Array|null} the quest slots the item satisfies (for the loot chip), or
-   *   null when nothing was counted — not a quest item, no character yet, or a line
-   *   already counted by a previous run.
+   * An offer counts only when the recipient is one of the sixteen quest NPCs AND the
+   * item is on that class's list — which silences the vendor quantity dumps and trades
+   * to other players without this store having to know anything about either. Where
+   * the item could fill two of the class's slots the unsatisfied one is credited, so a
+   * second hand-in of the same name never buries the quest still waiting for it.
+   *
+   * `needed` in the answer is the loot chip's input, and it is computed BEFORE the
+   * event lands: "did the player need this when it dropped?" is the chip's question,
+   * and counting first would make every first pickup answer "no, you own one now".
+   * Offers answer with an empty `needed` always — handing an item IN is the opposite
+   * of news that an item is wanted.
+   *
+   * @param {{kind: string, item: string, npc?: string, disposition?: string,
+   *   qty?: number, ts: number}} event
+   * @returns {{refs: Array, needed: Array}|null} the slots the event touched and the
+   *   slots that still wanted the item, or null when nothing was counted — not a
+   *   quest item, not a quest NPC, no character yet, or a line already counted by a
+   *   previous run.
    */
   feed(event) {
-    if (!this.state || !event || event.kind !== 'loot') return null;
+    if (!this.state || !event) return null;
     if (this.minTs !== null && event.ts <= this.minTs) return null;
 
+    if (event.kind === 'offer') {
+      const slots = offerSlots(event.npc, event.item);
+      if (!slots.length) return null;
+      const chosen = slots.find((s) => (this.state.offers[s.ref]?.count ?? 0) === 0) ?? slots[0];
+      const rec = this.state.offers[chosen.ref] ?? (this.state.offers[chosen.ref] = { count: 0, lastTs: 0 });
+      rec.count += event.qty ?? 1;
+      rec.lastTs = Math.max(rec.lastTs, event.ts);
+      this.state.lastTs = Math.max(this.state.lastTs ?? 0, event.ts);
+      this.revision++;
+      this.persist();
+      return { refs: [chosen], needed: [] };
+    }
+
+    if (event.kind !== 'loot') return null;
     const refs = lookup(event.item);
     if (!refs.length) return null;
+    const needed = this.needed(refs);
 
     const key = questItemKey(event.item);
     const disposition = DISPOSITIONS.includes(event.disposition) ? event.disposition : 'kept';
@@ -182,7 +276,7 @@ export class QuestProgress {
     this.state.lastTs = Math.max(this.state.lastTs ?? 0, event.ts);
     this.revision++;
     this.persist();
-    return refs;
+    return { refs, needed };
   }
 
   /**
@@ -195,8 +289,8 @@ export class QuestProgress {
   needed(refs) {
     if (!this.state) return [];
     return (refs ?? []).filter((slot) =>
-      this.state.done[questRef(slot.classId, slot.questIndex)] !== true &&
-      this.state.owned[slot.ref] !== true);
+      !this.doneState(slot.classId, slot.questIndex).value &&
+      !this.ownedState(slot.ref, questItemKey(slot.itemName)).value);
   }
 
   /** Total looted count for an item, all dispositions summed. */
@@ -210,25 +304,102 @@ export class QuestProgress {
     return this.state?.items[questItemKey(itemName)] ?? {};
   }
 
+  // ------------------------------------------------------------------ derived claims
+
+  /**
+   * How many hand-ins the log has seen of this item, across every slot that wants it.
+   * Global on purpose: offering a rune to the wizard's NPC removed it from the bags
+   * whatever class the player looted it hoping for.
+   */
+  offeredTotal(key) {
+    let total = 0;
+    for (const slot of lookup(key)) total += this.state?.offers[slot.ref]?.count ?? 0;
+    return total;
+  }
+
+  /**
+   * The loot arithmetic behind the derived "owned": what arrived and stayed (kept,
+   * auto-stored, consumed on the spot into its own upgrade) minus what was handed to a
+   * quest NPC. Auto-sold loot never joins the sum — it left at the corpse. What this
+   * cannot see: a trade to another player, a destroy, a merchant sale from the bags —
+   * which is why the answer only ever FILLS an unset claim and a manual un-check
+   * outranks it.
+   */
+  survivingCount(key) {
+    const counts = this.state?.items[key] ?? {};
+    const arrived = (counts.kept ?? 0) + (counts.stored ?? 0) + (counts.created ?? 0);
+    return arrived - this.offeredTotal(key);
+  }
+
+  /**
+   * The effective owned flag for one slot, with the source that decided it.
+   *
+   * Precedence is the file's doctrine in four lines: the player's own toggle beats
+   * everything (both ways — an explicit false STICKS); then the inventory dump (the
+   * item is sitting in the bags, dated); then the log's surviving-loot arithmetic;
+   * then an import's claim, last because it is the stalest thing here — a dated
+   * website snapshot the two live sources exist to replace.
+   *
+   * @returns {{value: boolean, source: 'manual'|'inventory'|'log'|'import'|null}}
+   */
+  ownedState(ref, key) {
+    const explicit = this.state?.owned[ref];
+    if (explicit?.source === 'manual') return { value: explicit.value === true, source: 'manual' };
+    if ((this.state?.inventory.items[key]?.count ?? 0) > 0) return { value: true, source: 'inventory' };
+    if (this.survivingCount(key) > 0) return { value: true, source: 'log' };
+    if (explicit?.value === true) return { value: true, source: 'import' };
+    return { value: false, source: null };
+  }
+
+  /**
+   * The effective done flag for one quest, same contract as `ownedState`.
+   *
+   * Two derivations can prove a turn-in. The log's: every slot of the quest has been
+   * offered to the class's NPC at least once since logging began. The inventory's: the
+   * quest's reward is IN the dump and the reward is NO DROP — an item that could not
+   * have been bought or traded got into the bags exactly one way, so holding it proves
+   * the turn-in even one from before the first log line. A tradeable reward proves
+   * nothing and derives nothing (two of the 95 are, both necromancer's).
+   */
+  doneState(classId, questIndex) {
+    const qref = questRef(classId, questIndex);
+    const explicit = this.state?.done[qref];
+    if (explicit?.source === 'manual') return { value: explicit.value === true, source: 'manual' };
+    const quest = CLASS_BY_ID.get(classId)?.quests[questIndex];
+    if (quest) {
+      const allOffered = quest.items.every(
+        (_, ii) => (this.state?.offers[itemRef(classId, questIndex, ii)]?.count ?? 0) > 0,
+      );
+      if (allOffered) return { value: true, source: 'log' };
+      const reward = rewardLookup(quest.reward);
+      if (reward?.noDrop &&
+          (this.state?.inventory.items[questItemKey(quest.reward)]?.count ?? 0) > 0) {
+        return { value: true, source: 'inventory' };
+      }
+    }
+    if (explicit?.value === true) return { value: true, source: 'import' };
+    return { value: false, source: null };
+  }
+
   /**
    * The player's own claim about one item, toggled in the Quests window. Manual toggles
-   * go BOTH ways — the player may correct an import — which is exactly what an import
-   * itself is forbidden from doing.
+   * go BOTH ways — the player may correct an import or a derivation — which is exactly
+   * what those two are forbidden from doing back. Both directions are stored EXPLICITLY:
+   * a false written here is what makes an un-check stick when the log still shows a
+   * surviving rune, rather than the checkbox snapping back on the next repaint.
    */
   setOwned(ref, owned) {
     // The ref arrives from a renderer; one that names no dataset slot writes nothing,
     // so a typo cannot grow the file with keys no quest will ever read.
     if (!this.state || !VALID_ITEM_REFS.has(ref)) return;
-    if (owned) this.state.owned[ref] = true;
-    else delete this.state.owned[ref];
+    this.state.owned[ref] = { value: owned === true, source: 'manual' };
     this.revision++;
     this.persist();
   }
 
   setDone(ref, done) {
     if (!this.state || !VALID_QUEST_REFS.has(ref)) return;
-    if (done) this.state.done[ref] = true;
-    else delete this.state.done[ref];
+    this.state.done[ref] = { value: done === true, source: 'manual' };
     this.revision++;
     this.persist();
   }
@@ -265,21 +436,22 @@ export class QuestProgress {
     for (const [ref, value] of Object.entries(data.looted ?? {})) {
       // Positional refs resolve against OUR copy of the dataset; one we don't know —
       // the site adding a quest ahead of our next refresh — is skipped rather than
-      // stored as a key nothing will ever read.
+      // stored as a key nothing will ever read. Any EXISTING explicit entry is left
+      // alone whichever way it points: an import fills blanks, it never argues.
       if (value !== true || !VALID_ITEM_REFS.has(ref) || this.state.owned[ref]) continue;
-      this.state.owned[ref] = true;
+      this.state.owned[ref] = { value: true, source: 'import' };
       owned++;
     }
     for (const [ref, value] of Object.entries(data.turnedIn ?? {})) {
       if (value !== true || !VALID_QUEST_REFS.has(ref) || this.state.done[ref]) continue;
-      this.state.done[ref] = true;
+      this.state.done[ref] = { value: true, source: 'import' };
       done++;
     }
     for (const [name, value] of Object.entries(data.currencyOwned ?? {})) {
       if (value !== true) continue;
       for (const slot of lookup(name)) {
         if (this.state.owned[slot.ref]) continue;
-        this.state.owned[slot.ref] = true;
+        this.state.owned[slot.ref] = { value: true, source: 'import' };
         owned++;
       }
     }
@@ -294,10 +466,45 @@ export class QuestProgress {
   }
 
   /**
+   * Record what a `/outputfile inventory` dump showed, scoped to the names the dataset
+   * knows — the other ~500 rows of a real dump are bank clutter this ledger has no
+   * question about. Keys present in the dump are SET (count and the dump's own date);
+   * keys absent are left exactly as an older dump recorded them, because a dump only
+   * ever speaks for what it contains. Re-applying the same dump (matched by its stamp)
+   * is a no-op, which is what lets the watcher poll dumbly.
+   *
+   * @param {Map<string, number>|Object} items  normalized item key → count, as
+   *   `parseInventory` answers
+   * @param {number|null} asOf  the dump file's mtime, the date every fact it sets carries
+   * @returns {{ok: boolean, matched: number, unchanged?: boolean}}
+   */
+  applyInventory(items, asOf = null) {
+    if (!this.state || !items) return { ok: false, matched: 0 };
+    if (asOf !== null && this.state.inventory.asOf === asOf) {
+      return { ok: true, matched: 0, unchanged: true };
+    }
+    const relevant = new Set([...allItemKeys(), ...allRewardKeys()]);
+    const entries = items instanceof Map ? items.entries() : Object.entries(items);
+    let matched = 0;
+    for (const [rawKey, count] of entries) {
+      const key = questItemKey(rawKey);
+      if (!relevant.has(key) || !(Number(count) > 0)) continue;
+      this.state.inventory.items[key] = { count: Number(count), asOf };
+      matched++;
+    }
+    this.state.inventory.asOf = asOf;
+    this.revision++;
+    this.persist();
+    return { ok: true, matched };
+  }
+
+  /**
    * Everything the Quests window renders, resolved against the dataset: per class, per
    * quest, per item — the data's own names and sources joined with this character's
-   * counts and flags. Built fresh on every call; the window asks over IPC when it opens
-   * or when told something changed, not four times a second.
+   * counts, facts and effective flags. `owned`/`done` arrive DECIDED, with the source
+   * that decided each riding along, so the window renders a checkbox and a caption and
+   * never re-implements the precedence. Built fresh on every call; the window asks over
+   * IPC when it opens or when told something changed, not four times a second.
    */
   snapshot() {
     if (!this.state) return null;
@@ -305,6 +512,9 @@ export class QuestProgress {
       character: this.character,
       server: this.server,
       import: this.state.import,
+      inventoryAsOf: this.state.inventory.asOf,
+      /** Static spell data for the effect tooltips — a few KB, cheaper than a channel. */
+      effects: EFFECTS,
       classes: POSKY.classes.map((cls) => ({
         id: cls.id,
         name: cls.name,
@@ -313,6 +523,10 @@ export class QuestProgress {
           const qref = questRef(cls.id, qi);
           const items = quest.items.map((item, ii) => {
             const ref = itemRef(cls.id, qi, ii);
+            const key = questItemKey(item.name);
+            const offer = this.state.offers[ref];
+            const inv = this.state.inventory.items[key];
+            const owned = this.ownedState(ref, key);
             return {
               ref,
               name: item.name,
@@ -320,15 +534,24 @@ export class QuestProgress {
               rune: isRune(item.name),
               looted: this.lootedCount(item.name),
               split: this.lootedSplit(item.name),
-              owned: this.state.owned[ref] === true,
+              offered: offer?.count ?? 0,
+              lastOffered: offer?.lastTs ?? null,
+              inventory: inv?.count ?? 0,
+              inventoryAsOf: inv?.asOf ?? null,
+              owned: owned.value,
+              ownedSource: owned.source,
             };
           });
+          const done = this.doneState(cls.id, qi);
           return {
             ref: qref,
             reward: quest.reward,
             rewardStats: quest.rewardStats,
+            icon: quest.icon ?? null,
+            cardIcons: quest.cardIcons ?? null,
             items,
-            done: this.state.done[qref] === true,
+            done: done.value,
+            doneSource: done.source,
           };
         }),
       })),

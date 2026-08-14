@@ -283,6 +283,33 @@ export const SESSION_RULES = [
     }),
   },
 
+  {
+    // (confirmed) "You offered 1 Crude Wooden Flute to Cilin Spellsinger."
+    // (confirmed) "You offered 262 Metal Bits to Crusader Iktra."
+    // (confirmed) "You offered 1 Slaver`s Lash +1 to Foalya."
+    //
+    // The give-item line — the log's own record of a hand-in, and the reason the quest
+    // tracker no longer needs a website export to know a turn-in happened. It fires for
+    // EVERY give: quest turn-ins, vendor quantity dumps, trades to other players. This
+    // rule does not try to tell those apart, deliberately — the recipient arrives raw
+    // and deciding whether that name is a quest NPC takes the dataset, which is the
+    // quest ledger's to consult, not this table's. Item names keep their backticks and
+    // `+N` upgrade suffixes; the quest index normalizes those away at lookup time.
+    //
+    // The item group is GREEDY on purpose: " to " can appear inside an item name but
+    // not inside a recipient's, so when the sentence contains it twice the split
+    // belongs at the last one — a lazy group would hand half the item to the NPC.
+    //
+    // Filed under `loot` because it is the same ledger read in reverse — an item
+    // leaving the bags it arrived in — and because the quest tracker's rule filter
+    // runs exactly that category. The session tracker itself drops the event on
+    // arrival: no session pane shows gives, and a turn-in must not open a session.
+    id: 'offer',
+    category: 'loot',
+    re: /^You offered (\d+) (.+) to (.+?)\.$/,
+    make: (m) => ({ kind: 'offer', qty: Number(m[1]), item: itemKey(m[2]), npc: m[3] }),
+  },
+
   // ------------------------------------------------------- experience, levels and AA
   {
     // (confirmed) "You gain experience! (8.001%)"

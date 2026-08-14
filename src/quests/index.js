@@ -33,6 +33,21 @@ export const POSKY = JSON.parse(
 );
 
 /**
+ * Effect descriptions for the reward cards' tooltips, fetched from the spells' own
+ * P99 wiki pages by `fetch-posky.js --write`. `effects` maps spell name → { url,
+ * lines }; `missing` names the Legends-only effects the wiki lacks — those render
+ * with NO tooltip, because a hand-authored description would be a guess wearing a
+ * tooltip's clothes. Absence of the whole file just means no tooltips anywhere.
+ */
+export const EFFECTS = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(new URL('./effects.json', import.meta.url), 'utf8'));
+  } catch {
+    return { attribution: null, effects: {}, missing: [] };
+  }
+})();
+
+/**
  * Collapse an item name to the key everything matches on.
  *
  * Three normalizations, each earned by a real mismatch: the article the log puts in
@@ -114,6 +129,72 @@ export function lookup(itemName) {
 /** Every distinct item key the dataset wants, for offline cross-checks. */
 export function allItemKeys() {
   return [...ITEM_INDEX.keys()];
+}
+
+/**
+ * quest NPC name → the class whose tests that NPC runs.
+ *
+ * Sixteen names, one per class, spelled in the log exactly as the dataset spells them
+ * (confirmed against 171 live `You offered` lines). This map is what turns the offer
+ * rule's raw recipient into "a turn-in" or "not our business": an offer to a name not
+ * in it — a vendor eating Metal Bits, a trade to another player — is the ledger's cue
+ * to record nothing at all.
+ */
+const NPC_INDEX = new Map(POSKY.classes.map((cls) => [cls.npc, cls.id]));
+
+/** Whether this raw recipient name is one of the sixteen quest NPCs. */
+export function isQuestNpc(npc) {
+  return NPC_INDEX.has(String(npc ?? '').trim());
+}
+
+/**
+ * The quest slots an offered item can be filling: slots in the RECIPIENT'S class only.
+ *
+ * This is the offer's whole advantage over a loot line. A looted Wind Rune Izah could
+ * be for any of seven classes and lookup() must answer with all of them — but the same
+ * rune handed to Holwin can only be the monk test's, so the answer here is scoped to
+ * the one class the NPC runs. Usually that is a single slot; if a future dataset ever
+ * wants one item in two of a class's quests, the caller holds the offered counts and
+ * gets the list to prefer the unsatisfied one.
+ *
+ * @returns {Array} the same slot shape lookup() answers with, possibly empty — an
+ *   empty answer means the NPC is not a quest NPC or the item is not on their list.
+ */
+export function offerSlots(npc, itemName) {
+  const classId = NPC_INDEX.get(String(npc ?? '').trim());
+  if (!classId) return [];
+  return (ITEM_INDEX.get(questItemKey(itemName)) ?? []).filter((slot) => slot.classId === classId);
+}
+
+/**
+ * reward name key → the quest that pays it, with the one fact the inventory derivation
+ * turns on: whether the reward can be traded. All 95 reward names are distinct, so the
+ * map is one-to-one. `noDrop` reads the reward's own stats text — NO DROP or NO TRADE,
+ * both live in the data — because possession only proves a turn-in for an item that
+ * could not have arrived any other way; a tradeable reward in the bags proves nothing,
+ * and its entry says so rather than being left out and looking like an oversight.
+ */
+const REWARD_INDEX = new Map();
+for (const cls of POSKY.classes) {
+  for (const [qi, quest] of cls.quests.entries()) {
+    REWARD_INDEX.set(questItemKey(quest.reward), {
+      classId: cls.id,
+      questIndex: qi,
+      ref: questRef(cls.id, qi),
+      reward: quest.reward,
+      noDrop: /NO DROP|NO ?TRADE/i.test(quest.rewardStats ?? ''),
+    });
+  }
+}
+
+/** The quest a reward name pays out from, or null for an item that rewards nothing. */
+export function rewardLookup(itemName) {
+  return REWARD_INDEX.get(questItemKey(itemName)) ?? null;
+}
+
+/** Every distinct reward key, for scoping an inventory dump to what the ledger reads. */
+export function allRewardKeys() {
+  return [...REWARD_INDEX.keys()];
 }
 
 /**

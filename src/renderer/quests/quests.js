@@ -3,27 +3,50 @@
  * judgement that isn't painting lives in organize.js where WSL can test it.
  *
  * One fetch shape: `api.get()` returns the whole resolved picture (every class, quest
- * and item, data names joined with this character's counts and flags — a few tens of
- * KB), refetched whenever main says the ledger moved. No deltas: the failure mode of a
- * delta protocol is a checklist that silently disagrees with the file, and the payload
- * is small enough that correctness costs nothing visible.
+ * and item, data names joined with this character's counts and effective flags — a few
+ * tens of KB), refetched whenever main says the ledger moved. No deltas: the failure
+ * mode of a delta protocol is a checklist that silently disagrees with the file, and
+ * the payload is small enough that correctness costs nothing visible.
+ *
+ * Three pieces of view state persist across openings, all display-only: the selected
+ * quest, which class groups the player has folded, and the rail filter. None of them
+ * touch the ledger — closing the window forgets nothing that matters.
  */
 
 import {
-  classGroups, doneTotals, questByRef, firstQuestRef, splitLine, statsText, importStamp,
+  classGroups, doneTotals, questByRef, firstQuestRef, splitLine, importStamp,
+  doneCaption, ownedTitle, ownedLabel,
+  parseRewardStats, parseSources, railFilter, effectName, effectMeta,
 } from './organize.js';
 
 const $ = (id) => document.getElementById(id);
+const ICONS = '../../quests/icons/';
 
 let snapshot = null;
 /** The selected quest's ref. Remembered across openings — a reading surface should
  *  reopen on what you were reading. */
 let selected = localStorage.getItem('quests.selected') ?? null;
+/** Class ids the player has folded shut. The selected quest's class ignores this —
+ *  a restored selection must never be hidden by a remembered fold. */
+let collapsed = new Set(JSON.parse(localStorage.getItem('quests.collapsed') ?? '[]'));
+/** The rail filter: 'all' | 'progress' | 'done'. */
+let filter = localStorage.getItem('quests.filter') ?? 'all';
 
 init();
 
 async function init() {
   $('import').addEventListener('click', runImport);
+  for (const btn of $('filters').querySelectorAll('button')) {
+    btn.addEventListener('click', () => {
+      filter = btn.dataset.filter;
+      localStorage.setItem('quests.filter', filter);
+      render();
+    });
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hidePopup(true); });
+  document.addEventListener('click', (e) => {
+    if (popupPinned && !$('popup').contains(e.target) && e.target !== popupAnchor) hidePopup(true);
+  });
   window.api.onChanged(refresh);
   await refresh();
 }
@@ -38,9 +61,13 @@ function render() {
   $('quest-empty').hidden = !empty;
   $('quest-body').hidden = empty;
   if (empty) {
-    $('quest-empty').textContent = 'Waiting for the log to name a character…';
+    $('quest-empty').replaceChildren(
+      text('Waiting for the log to name a character…'), document.createElement('br'),
+      text('Log in and the ledger follows along on its own.'),
+    );
     $('who').textContent = '';
     $('total').textContent = '';
+    $('total-fill').style.width = '0';
     $('quests').replaceChildren();
     $('item-list').replaceChildren();
     $('i-owned').textContent = '';
@@ -51,21 +78,54 @@ function render() {
     ? `${snapshot.character} · ${snapshot.server}` : snapshot.character;
   const totals = doneTotals(snapshot);
   $('total').replaceChildren(strong(String(totals.done)), text(` of ${totals.total} tests turned in`));
+  const fill = $('total-fill');
+  fill.style.width = `${totals.total ? (100 * totals.done) / totals.total : 0}%`;
+  fill.classList.toggle('complete', totals.done === totals.total && totals.total > 0);
 
   if (!questByRef(snapshot, selected)) selected = firstQuestRef(snapshot);
   renderRail();
   renderQuest();
 }
 
+// ---------------------------------------------------------------------------- rail
+
 function renderRail() {
+  for (const btn of $('filters').querySelectorAll('button')) {
+    btn.setAttribute('aria-pressed', String(btn.dataset.filter === filter));
+  }
+
+  const selectedClass = selected?.split(':')[0] ?? null;
   const list = $('quests');
   list.replaceChildren();
-  for (const cls of classGroups(snapshot)) {
+  for (const cls of railFilter(classGroups(snapshot), filter)) {
+    // The selected quest's class force-expands: a fold must never hide the selection.
+    const folded = collapsed.has(cls.id) && cls.id !== selectedClass;
+
     const head = document.createElement('li');
-    head.className = 'chead';
-    head.append(text(cls.name), span('n', `${cls.doneCount} / ${cls.total} done`));
+    head.className = `chead${folded ? ' folded' : ''}`;
+    const row = span('crow', '');
+    row.append(
+      span('chev', folded ? '▸' : '▾'),
+      span('cname', cls.name),
+      span('n', `${cls.doneCount} / ${cls.total} done`),
+    );
+    const bar = span('bar', '');
+    const barFill = document.createElement('i');
+    barFill.style.width = `${cls.total ? (100 * cls.doneCount) / cls.total : 0}%`;
+    if (cls.doneCount === cls.total && cls.total > 0) barFill.className = 'complete';
+    bar.append(barFill);
+    head.append(row, bar);
+    head.addEventListener('click', () => {
+      // Toggling records the player's intent even for the force-expanded class, so
+      // selecting elsewhere later leaves it the way the player last set it.
+      if (collapsed.has(cls.id)) collapsed.delete(cls.id);
+      else collapsed.add(cls.id);
+      localStorage.setItem('quests.collapsed', JSON.stringify([...collapsed]));
+      render();
+    });
     list.append(head);
 
+    if (folded) continue;
     for (const q of cls.quests) {
       const li = document.createElement('li');
       li.className = `qrow${q.done ? ' done' : ''}`;
@@ -76,10 +136,26 @@ function renderRail() {
         localStorage.setItem('quests.selected', selected);
         render();
       });
+      // The rail does not show the reward card, so hovering is where it earns its
+      // keep: the full parsed card floats beside the row. No pin — a click selects.
+      bindPopup(li, () => railPreview(q.ref), { pinOnClick: false, side: 'right' });
       list.append(li);
     }
   }
 }
+
+/** The floating reward preview for one rail row: the same cards the quest pane shows. */
+function railPreview(ref) {
+  const found = questByRef(snapshot, ref);
+  const box = document.createElement('div');
+  if (!found) return box;
+  for (const card of parseRewardStats(found.quest.rewardStats)) {
+    box.append(buildCard(card, found.quest, { tooltips: false }));
+  }
+  return box;
+}
+
+// ---------------------------------------------------------------------- quest pane
 
 function renderQuest() {
   const found = questByRef(snapshot, selected);
@@ -91,21 +167,126 @@ function renderQuest() {
 
   const done = $('q-done');
   done.setAttribute('aria-pressed', String(quest.done));
+  // The caption names the source that decided the checkmark — the receipt for every
+  // box the app ticked on the player's behalf. Rendered in every state (the hint is
+  // always in flow), so toggling never shifts the cards below.
+  done.querySelector('.hint').textContent = doneCaption(quest);
   done.onclick = async () => {
     await window.api.setDone(quest.ref, !quest.done);
     await refresh();
   };
 
-  $('q-stats-text').textContent = statsText(quest.rewardStats);
-  // Always in flow: the stamp holds its space empty so toggling an import cannot
-  // shift the stats pane — the History window's no-reflow contract.
+  const cards = $('q-cards');
+  cards.replaceChildren();
+  for (const card of parseRewardStats(quest.rewardStats)) {
+    cards.append(buildCard(card, quest, { tooltips: true }));
+  }
+
   const stamp = importStamp(snapshot.import);
   $('q-stamp').textContent = stamp
-    ? `${stamp} · an export is a snapshot: the log keeps counting past it, and every checkbox stays editable.`
-    : '';
+    ? `${stamp} — it only fills in what predates your log; every mark stays editable.`
+    : 'Turn-ins are read from your log; run /outputfile inventory in game to prove pre-log '
+      + 'history. An import is the last resort, and every mark stays editable.';
 
   renderItems(quest);
 }
+
+/**
+ * One parsed reward card: icon, name, flag chips, weapon/meta line, stat pairs, save
+ * pairs, effect lines, the verbatim fallback, and the WT/size/class footer. Shared by
+ * the quest pane (tooltips live) and the rail preview popup (tooltips off — a popup
+ * inside a popup helps nobody).
+ */
+function buildCard(card, quest, { tooltips }) {
+  const el = document.createElement('div');
+  el.className = 'card';
+
+  const head = span('chead-row', '');
+  const iconFile = (card.name && quest.cardIcons?.[card.name]) || quest.icon;
+  if (iconFile) {
+    const img = document.createElement('img');
+    img.className = 'icon';
+    img.alt = '';
+    img.src = ICONS + iconFile;
+    // A missing file renders as no icon at all rather than a broken-image glyph.
+    img.addEventListener('error', () => img.remove());
+    head.append(img);
+  }
+  head.append(span('iname', card.name ?? quest.reward));
+  for (const flag of card.flags) head.append(span('flag', flag));
+  el.append(head);
+
+  const meta = [
+    card.slot,
+    card.skill,
+    card.delay !== null ? `delay ${card.delay}` : null,
+    card.dmg !== null ? `DMG ${card.dmg}` : null,
+    card.instrument ? `${card.instrument.kind} ${card.instrument.value}` : null,
+    card.ac !== null ? `AC ${card.ac}` : null,
+    card.haste !== null ? `Haste ${card.haste}` : null,
+    card.charges !== null ? `Charges ${card.charges}` : null,
+    card.range !== null ? `Range ${card.range}` : null,
+  ].filter(Boolean);
+  if (meta.length) el.append(span('meta', meta.join(' · ')));
+
+  for (const rows of [card.stats, card.saves]) {
+    if (!rows.length) continue;
+    const grid = span('stats', '');
+    for (const { k, v } of rows) {
+      const pair = span('pair', '');
+      pair.append(span('k', `${k} `), span('v', v));
+      grid.append(pair);
+    }
+    el.append(grid);
+  }
+
+  for (const effect of card.effects) {
+    const line = document.createElement('div');
+    line.className = 'effect';
+    const name = effectName(effect.text);
+    const ename = span('ename', name ?? effect.text);
+    const entry = name ? snapshot.effects?.effects?.[name] : null;
+    if (entry && tooltips) {
+      // Underlined only when a tooltip actually exists — an underline with nothing
+      // under it teaches the player to stop hovering.
+      ename.classList.add('tip');
+      ename.tabIndex = 0;
+      bindPopup(ename, () => effectTip(name, entry, effect));
+    }
+    line.append(ename);
+    const detail = [effectMeta(effect.text), ...effect.details.map((d) => d.toLowerCase())]
+      .filter(Boolean).join(' · ');
+    if (detail) line.append(span('emeta', detail));
+    el.append(line);
+  }
+
+  // The verbatim fallback: lines the parser has not met render styled but unparsed —
+  // muted, whole, and never dropped. Today the corpus has none; a wiki refresh may.
+  for (const line of card.other) el.append(divOf('odd', line));
+
+  const foot = [
+    card.wt !== null ? `WT ${card.wt}` : null,
+    card.size,
+    card.classes,
+    card.races && card.races !== 'ALL' ? card.races : null,
+  ].filter(Boolean);
+  if (foot.length) el.append(divOf('foot', foot.join(' · ')));
+
+  return el;
+}
+
+/** The effect tooltip: the spell's own wiki lines, never a summary written here. */
+function effectTip(name, entry, effect) {
+  const box = document.createElement('div');
+  box.append(divOf('pname', name));
+  for (const line of entry.lines) box.append(divOf('pline', line));
+  const meta = effectMeta(effect.text);
+  if (meta) box.append(divOf('pmeta', meta));
+  box.append(divOf('pfoot', 'P99 wiki snapshot — an effect with no entry gets no tooltip'));
+  return box;
+}
+
+// ---------------------------------------------------------------------- items pane
 
 function renderItems(quest) {
   $('i-owned').textContent =
@@ -120,28 +301,39 @@ function renderItems(quest) {
     const own = document.createElement('button');
     own.className = 'own';
     own.setAttribute('aria-pressed', String(item.owned));
-    own.title = item.owned ? 'Owned — click to clear your claim' : 'Mark as owned';
+    own.title = ownedTitle(item);
     own.addEventListener('click', async () => {
       await window.api.setOwned(item.ref, !item.owned);
       await refresh();
     });
 
+    const name = span('name', item.name);
+    // The claim's receipt, visible: "owned — seen in the log" beside the name says
+    // why the box is ticked without a hover.
+    const label = ownedLabel(item);
+    if (label) name.append(span('why', label));
+
+    const src = span('src', '');
+    for (const chip of parseSources(item.source)) {
+      const c = span('chip', '');
+      if (chip.zoneWide) c.append(strong('ZONE-WIDE'), text(' any Sky mob'));
+      else if (chip.island) c.append(strong(`ISL ${chip.island}`), text(` ${chip.mob}`));
+      else c.append(text(chip.mob));
+      src.append(c);
+    }
+
     const count = span('count', '');
     count.append(span('cap', 'looted'));
-    const big = span(`big${item.looted ? '' : ' zero'}`, String(item.looted));
-    count.append(big);
-    const split = splitLine(item.split, item.rune);
+    count.append(span(`big${item.looted ? '' : ' zero'}`, String(item.looted)));
+    const split = splitLine(item.split, item.rune, item.offered);
     if (split) count.append(span('split', split));
 
-    li.append(
-      own,
-      span('name', item.name),
-      span('src', item.rune ? `${item.source} — any Sky mob` : item.source),
-      count,
-    );
+    li.append(own, name, src, count);
     list.append(li);
   }
 }
+
+// -------------------------------------------------------------------------- import
 
 async function runImport() {
   const result = await window.api.importExport();
@@ -154,6 +346,77 @@ async function runImport() {
   await refresh();
 }
 
+// -------------------------------------------------------------------------- popup
+
+/**
+ * The one floating popup, the eqlposky grammar exactly: mouseenter shows, mouseleave
+ * hides, click pins until Escape or a click away, focus/blur mirror enter/leave for
+ * the keyboard. This window takes real mouse input, so no polling machinery — plain
+ * DOM events, one element, repositioned per anchor and clamped to the viewport.
+ */
+let popupPinned = false;
+let popupAnchor = null;
+
+function showPopup(anchor, build) {
+  if (popupPinned) return;
+  const popup = $('popup');
+  popup.replaceChildren(build());
+  popup.hidden = false;
+  positionPopup(anchor);
+  popupAnchor = anchor;
+}
+
+function positionPopup(anchor) {
+  const popup = $('popup');
+  const r = anchor.getBoundingClientRect();
+  popup.style.left = '0px';
+  popup.style.top = '0px';
+  const pw = popup.offsetWidth;
+  const ph = popup.offsetHeight;
+  let left;
+  let top;
+  if (anchor.dataset.popside === 'right') {
+    left = Math.min(r.right + 10, window.innerWidth - pw - 12);
+    top = Math.min(r.top, window.innerHeight - ph - 12);
+  } else {
+    left = Math.min(r.left, window.innerWidth - pw - 12);
+    top = r.bottom + 8;
+    if (top + ph > window.innerHeight - 8) top = r.top - ph - 8;
+  }
+  popup.style.left = `${Math.max(8, left)}px`;
+  popup.style.top = `${Math.max(8, top)}px`;
+}
+
+function hidePopup(force = false) {
+  if (popupPinned && !force) return;
+  popupPinned = false;
+  const popup = $('popup');
+  popup.classList.remove('pinned');
+  popup.hidden = true;
+  popupAnchor = null;
+}
+
+function bindPopup(el, build, { pinOnClick = true, side = null } = {}) {
+  if (side) el.dataset.popside = side;
+  el.addEventListener('mouseenter', () => showPopup(el, build));
+  el.addEventListener('mouseleave', () => hidePopup());
+  el.addEventListener('focus', () => showPopup(el, build));
+  el.addEventListener('blur', () => hidePopup());
+  if (pinOnClick) {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (popupPinned && popupAnchor === el) { hidePopup(true); return; }
+      hidePopup(true);
+      showPopup(el, build);
+      popupPinned = true;
+      $('popup').classList.add('pinned');
+      popupAnchor = el;
+    });
+  }
+}
+
+// ------------------------------------------------------------------------- helpers
+
 function text(value) { return document.createTextNode(value); }
 function strong(value) {
   const b = document.createElement('b');
@@ -162,6 +425,12 @@ function strong(value) {
 }
 function span(className, value) {
   const el = document.createElement('span');
+  el.className = className;
+  el.textContent = value;
+  return el;
+}
+function divOf(className, value) {
+  const el = document.createElement('div');
   el.className = className;
   el.textContent = value;
   return el;

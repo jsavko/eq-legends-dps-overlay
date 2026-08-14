@@ -23,7 +23,8 @@
               "name": "Wind Rune Azia",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_751.png"
         },
         {
           "reward": "Mantle of the Songweaver",
@@ -37,7 +38,8 @@
               "name": "Wind Rune Kala",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_668.png"
         },
         {
           "reward": "Mask of Song",
@@ -51,7 +53,8 @@
               "name": "Wind Rune Meda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_771.png"
         },
         {
           "reward": "Amulet of the Fae",
@@ -65,7 +68,8 @@
               "name": "Wind Rune Caza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1043.png"
         },
         {
           "reward": "Denon's Horn of Disaster",
@@ -83,7 +87,8 @@
               "name": "Wind Rune Fana",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_594.png"
         },
         {
           "reward": "Spear of Harmony",
@@ -101,7 +106,8 @@
               "name": "Wind Rune Heda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_776.png"
         }
       ]
     },
@@ -122,7 +128,8 @@
               "name": "Wind Rune Heda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_637.png"
         },
         {
           "reward": "Diaphonous Waistband",
@@ -136,7 +143,8 @@
               "name": "Wind Rune Geza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_718.png"
         },
         {
           "reward": "Griffin-Hide Armguards",
@@ -150,7 +158,8 @@
               "name": "Wind Rune Kala",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_634.png"
         },
         {
           "reward": "Spiroc Beak Earcuff",
@@ -164,7 +173,8 @@
               "name": "Wind Rune Beza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_501.png"
         },
         {
           "reward": "Windhowl / Spirit Render",
@@ -186,7 +196,12 @@
               "name": "Wind Rune Izah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_975.png",
+          "cardIcons": {
+            "Windhowl": "Item_975.png",
+            "Spirit Render": "Item_975.png"
+          }
         }
       ]
     },
@@ -207,7 +222,8 @@
               "name": "Wind Rune Lena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_797.png"
         },
         {
           "reward": "Cudgel of the Fool",
@@ -225,7 +241,8 @@
               "name": "Wind Rune Dena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_602.png"
         },
         {
           "reward": "Molten Coil",
@@ -239,7 +256,8 @@
               "name": "Wind Rune Ena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_765.png"
         },
         {
           "reward": "Sash of Ferocity",
@@ -253,7 +271,8 @@
               "name": "Wind Rune Ozah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_935.png"
         },
         {
           "reward": "Shroud of the Sky",
@@ -267,7 +286,8 @@
               "name": "Wind Rune Azia",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_769.png"
         },
         {
           "reward": "Skycleaver",
@@ -285,7 +305,8 @@
               "name": "Wind Rune Jaka",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_568.png"
         }
       ]
     },
@@ -306,7 +327,8 @@
               "name": "Wind Rune Meda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_758.png"
         },
         {
           "reward": "Pauldrons of Piety",
@@ -320,7 +342,8 @@
               "name": "Wind Rune Caza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_798.png"
         },
         {
           "reward": "Truewind Earring",
@@ -334,7 +357,8 @@
               "name": "Wind Rune Lena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1042.png"
         },
         {
           "reward": "Baton of the Sky",
@@ -352,7 +376,8 @@
               "name": "Wind Rune Ena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_822.png"
         },
         {
           "reward": "Necklace of Resolution",
@@ -366,7 +391,8 @@
               "name": "Wind Rune Neza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1043.png"
         },
         {
           "reward": "Theurgist's Star",
@@ -384,7 +410,8 @@
               "name": "Wind Rune Kala",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_578.png"
         }
       ]
     },
@@ -405,7 +432,8 @@
               "name": "Wind Rune Meda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_771.png"
         },
         {
           "reward": "Nature Walker's Mantle",
@@ -419,7 +447,8 @@
               "name": "Wind Rune Kala",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_668.png"
         },
         {
           "reward": "Shillelagh",
@@ -437,7 +466,8 @@
               "name": "Wind Rune Azia",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1083.png"
         },
         {
           "reward": "Espri",
@@ -455,7 +485,8 @@
               "name": "Wind Rune Izah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1169.png"
         },
         {
           "reward": "Honeycomb Belt",
@@ -469,7 +500,8 @@
               "name": "Wind Rune Dena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_505.png"
         },
         {
           "reward": "Spiroc Banisher Focus",
@@ -487,7 +519,8 @@
               "name": "Wind Rune Ena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_895.png"
         }
       ]
     },
@@ -508,7 +541,8 @@
               "name": "Wind Rune Caza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_544.png"
         },
         {
           "reward": "Necklace of Whispering Winds",
@@ -522,7 +556,8 @@
               "name": "Wind Rune Fana",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1043.png"
         },
         {
           "reward": "Rod of the Protecting Winds",
@@ -540,7 +575,8 @@
               "name": "Wind Rune Izah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_811.png"
         },
         {
           "reward": "Ivory Mask",
@@ -554,7 +590,8 @@
               "name": "Wind Rune Beza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_770.png"
         },
         {
           "reward": "Sphinx Hair Cord",
@@ -568,7 +605,8 @@
               "name": "Wind Rune Meda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_572.png"
         },
         {
           "reward": "Wind Walker's Mantle",
@@ -582,7 +620,8 @@
               "name": "Wind Rune Ozah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_665.png"
         }
       ]
     },
@@ -603,7 +642,8 @@
               "name": "Wind Rune Lena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1040.png"
         },
         {
           "reward": "Gold White Pendant",
@@ -617,7 +657,8 @@
               "name": "Wind Rune Azia",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1058.png"
         },
         {
           "reward": "Mask of Empowerment",
@@ -631,7 +672,8 @@
               "name": "Wind Rune Neza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_771.png"
         },
         {
           "reward": "Drake-Hide Amice",
@@ -645,7 +687,8 @@
               "name": "Wind Rune Dena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_668.png"
         },
         {
           "reward": "Duennan Shielding Ring",
@@ -659,7 +702,8 @@
               "name": "Wind Rune Ena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1052.png"
         },
         {
           "reward": "Staff of Elemental Mastery: Air",
@@ -681,7 +725,8 @@
               "name": "Wind Rune Heda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_811.png"
         },
         {
           "reward": "Staff of the Magister",
@@ -699,7 +744,8 @@
               "name": "Wind Rune Jaka",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_811.png"
         }
       ]
     },
@@ -720,7 +766,8 @@
               "name": "Wind Rune Caza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_665.png"
         },
         {
           "reward": "Sandals of Alacrity",
@@ -734,7 +781,8 @@
               "name": "Wind Rune Jaka",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_558.png"
         },
         {
           "reward": "Ton Po's Eye Patch",
@@ -748,7 +796,8 @@
               "name": "Wind Rune Geza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_595.png"
         },
         {
           "reward": "Golden Sash of Tranquility",
@@ -762,7 +811,8 @@
               "name": "Wind Rune Lena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_933.png"
         },
         {
           "reward": "Ton Po's Shoulder Wraps",
@@ -776,7 +826,8 @@
               "name": "Wind Rune Beza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_665.png"
         },
         {
           "reward": "Wu's Fist of Mastery",
@@ -794,7 +845,8 @@
               "name": "Wind Rune Neza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_971.png"
         }
       ]
     },
@@ -815,7 +867,8 @@
               "name": "Wind Rune Caza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1148.png"
         },
         {
           "reward": "Gorgon Head Staff",
@@ -833,7 +886,8 @@
               "name": "Wind Rune Fana",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_887.png"
         },
         {
           "reward": "Sphinx Heart Amulet",
@@ -847,7 +901,8 @@
               "name": "Wind Rune Azia",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1043.png"
         },
         {
           "reward": "Bloodsoaked Raiment",
@@ -861,7 +916,8 @@
               "name": "Wind Rune Ozah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_665.png"
         },
         {
           "reward": "Bloody Griffon-Hide Wrist Guard",
@@ -875,7 +931,8 @@
               "name": "Wind Rune Lena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_560.png"
         },
         {
           "reward": "Cloak of Spiroc Feathers",
@@ -889,7 +946,8 @@
               "name": "Wind Rune Neza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_658.png"
         }
       ]
     },
@@ -910,7 +968,8 @@
               "name": "Wind Rune Ozah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_890.png"
         },
         {
           "reward": "Thelvorn, Blade of Light",
@@ -928,7 +987,8 @@
               "name": "Wind Rune Geza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_575.png"
         },
         {
           "reward": "Truvinan",
@@ -946,7 +1006,8 @@
               "name": "Wind Rune Izah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_519.png"
         },
         {
           "reward": "Girdle of Faith",
@@ -960,7 +1021,8 @@
               "name": "Wind Rune Lena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_560.png"
         }
       ]
     },
@@ -985,7 +1047,8 @@
               "name": "Wind Rune Ena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_575.png"
         },
         {
           "reward": "Thunderforged Earring",
@@ -999,7 +1062,8 @@
               "name": "Wind Rune Azia",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_619.png"
         },
         {
           "reward": "Windstriker",
@@ -1017,7 +1081,8 @@
               "name": "Wind Rune Heda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1104.png"
         },
         {
           "reward": "Dark Cloak of the Sky",
@@ -1031,7 +1096,8 @@
               "name": "Wind Rune Neza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_659.png"
         },
         {
           "reward": "Earthshaker's Mantle",
@@ -1045,7 +1111,8 @@
               "name": "Wind Rune Kala",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_668.png"
         },
         {
           "reward": "Griffon Talon Necklace",
@@ -1059,7 +1126,8 @@
               "name": "Wind Rune Meda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1043.png"
         }
       ]
     },
@@ -1080,7 +1148,8 @@
               "name": "Wind Rune Dena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_771.png"
         },
         {
           "reward": "Shimmering Bracer of Protection",
@@ -1094,7 +1163,8 @@
               "name": "Wind Rune Geza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1055.png"
         },
         {
           "reward": "Thornstinger",
@@ -1112,7 +1182,8 @@
               "name": "Wind Rune Jaka",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_574.png"
         },
         {
           "reward": "Griffon Wing Spaulders",
@@ -1126,7 +1197,8 @@
               "name": "Wind Rune Ena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_668.png"
         },
         {
           "reward": "Renard's Belt of Quickness",
@@ -1140,7 +1212,8 @@
               "name": "Wind Rune Izah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_572.png"
         },
         {
           "reward": "Wispy Choker of Vigor",
@@ -1154,7 +1227,8 @@
               "name": "Wind Rune Ozah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_501.png"
         }
       ]
     },
@@ -1175,7 +1249,8 @@
               "name": "Wind Rune Meda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1043.png"
         },
         {
           "reward": "Bracelet of the Spirits",
@@ -1189,7 +1264,8 @@
               "name": "Wind Rune Kala",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_560.png"
         },
         {
           "reward": "Fairy-Hide Mantle",
@@ -1203,7 +1279,8 @@
               "name": "Wind Rune Beza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_668.png"
         },
         {
           "reward": "Garduk",
@@ -1221,7 +1298,8 @@
               "name": "Wind Rune Geza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_740.png"
         },
         {
           "reward": "Vermilion Sky Ring",
@@ -1239,7 +1317,8 @@
               "name": "Wind Rune Heda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_617.png"
         },
         {
           "reward": "Warhammer of the Wind",
@@ -1257,7 +1336,8 @@
               "name": "Wind Rune Ena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_567.png"
         }
       ]
     },
@@ -1278,7 +1358,8 @@
               "name": "Wind Rune Ozah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_753.png"
         },
         {
           "reward": "Crimson Ring of the Djinni",
@@ -1292,7 +1373,8 @@
               "name": "Wind Rune Beza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_872.png"
         },
         {
           "reward": "Pegasus-Hide Belt",
@@ -1306,7 +1388,8 @@
               "name": "Wind Rune Dena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_560.png"
         },
         {
           "reward": "Blood Sky Face Plate",
@@ -1320,7 +1403,8 @@
               "name": "Wind Rune Fana",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_770.png"
         },
         {
           "reward": "Khyldorn the Blood Drinker",
@@ -1338,7 +1422,8 @@
               "name": "Wind Rune Kala",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_847.png"
         },
         {
           "reward": "Obtenebrate Mithril Guard",
@@ -1352,7 +1437,8 @@
               "name": "Wind Rune Heda",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_970.png"
         },
         {
           "reward": "Pearlescent Pauldrons",
@@ -1370,7 +1456,8 @@
               "name": "Wind Rune Izah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_798.png"
         }
       ]
     },
@@ -1391,7 +1478,8 @@
               "name": "Wind Rune Neza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_612.png"
         },
         {
           "reward": "Pauldrons of the Blue Sky",
@@ -1405,7 +1493,8 @@
               "name": "Wind Rune Beza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_798.png"
         },
         {
           "reward": "Runed Wind Amulet",
@@ -1419,7 +1508,8 @@
               "name": "Wind Rune Azia",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_566.png"
         },
         {
           "reward": "Belt of the Four Winds",
@@ -1437,7 +1527,8 @@
               "name": "Wind Rune Fana",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_503.png"
         },
         {
           "reward": "Dagas",
@@ -1455,7 +1546,8 @@
               "name": "Wind Rune Jaka",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_576.png"
         },
         {
           "reward": "Fangol",
@@ -1473,7 +1565,8 @@
               "name": "Wind Rune Dena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_1167.png"
         }
       ]
     },
@@ -1494,7 +1587,8 @@
               "name": "Wind Rune Fana",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_641.png"
         },
         {
           "reward": "Augmentor's Mask",
@@ -1508,7 +1602,8 @@
               "name": "Wind Rune Dena",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_528.png"
         },
         {
           "reward": "Raiment of Thunder",
@@ -1522,7 +1617,8 @@
               "name": "Wind Rune Geza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_665.png"
         },
         {
           "reward": "Amulet of the Void",
@@ -1536,7 +1632,8 @@
               "name": "Wind Rune Jaka",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_566.png"
         },
         {
           "reward": "Nargon's Staff",
@@ -1554,7 +1651,8 @@
               "name": "Wind Rune Caza",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_811.png"
         },
         {
           "reward": "Solidate Mithril Ring",
@@ -1572,7 +1670,8 @@
               "name": "Wind Rune Izah",
               "source": "Random zone-wide drop"
             }
-          ]
+          ],
+          "icon": "Item_872.png"
         }
       ]
     }

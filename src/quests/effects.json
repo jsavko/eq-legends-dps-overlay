@@ -1,0 +1,271 @@
+{
+  "attribution": {
+    "source": "https://wiki.project1999.com/ spell pages (\"Details\" effect tables)",
+    "fetched": "2026-08-14",
+    "note": "Classic-era wiki data; Legends-only effects the wiki lacks are listed under missing and render without a tooltip rather than with a guessed one."
+  },
+  "effects": {
+    "Alacrity": {
+      "url": "https://wiki.project1999.com/Alacrity",
+      "lines": [
+        "Increase Attack Speed by 34% (L24) to 40% (L36)"
+      ]
+    },
+    "Alter Plane: Sky": {
+      "url": "https://wiki.project1999.com/Alter_Plane:_Sky",
+      "lines": [
+        "Teleport group to 1384,539,-664 in Plane of Sky."
+      ]
+    },
+    "Blessing of the Theurgist": {
+      "url": "https://wiki.project1999.com/Blessing_of_the_Theurgist",
+      "lines": [
+        "Increase Mana by 75"
+      ]
+    },
+    "Bonds of Force": {
+      "url": "https://wiki.project1999.com/Bonds_of_Force",
+      "lines": [
+        "Decrease Movement Speed by 55%"
+      ]
+    },
+    "Burnout III": {
+      "url": "https://wiki.project1999.com/Burnout_III",
+      "lines": [
+        "Increase STR by 50",
+        "Increase Attack Speed by 60%"
+      ]
+    },
+    "Cajoling Whispers": {
+      "url": "https://wiki.project1999.com/Cajoling_Whispers",
+      "lines": [
+        "Charm up to level 46"
+      ]
+    },
+    "Careless Lightning": {
+      "url": "https://wiki.project1999.com/Careless_Lightning",
+      "lines": [
+        "Decrease Hitpoints by 94 (L19) to 99 (L24)"
+      ]
+    },
+    "Chant of Battle": {
+      "url": "https://wiki.project1999.com/Chant_of_Battle",
+      "lines": [
+        "Increase AC by 1 (L1) to 6 (L60)",
+        "Increase STR by 5 (L1) to 20 (L60)",
+        "Increase DEX by 5 (L1) to 20 (L60)",
+        "Yes"
+      ]
+    },
+    "Combust": {
+      "url": "https://wiki.project1999.com/Combust",
+      "lines": [
+        "Decrease Hitpoints by 171 (L29) to 182 (L33)"
+      ]
+    },
+    "Complete Heal": {
+      "url": "https://wiki.project1999.com/Complete_Heal",
+      "lines": [
+        "Complete Heal (with duration)"
+      ]
+    },
+    "Dismiss Summoned": {
+      "url": "https://wiki.project1999.com/Dismiss_Summoned",
+      "lines": [
+        "Decrease Hitpoints by 140 (L24) to 162 (L35)"
+      ]
+    },
+    "Dismiss Undead": {
+      "url": "https://wiki.project1999.com/Dismiss_Undead",
+      "lines": [
+        "Decrease Hitpoints by 140 (L24) to 162 (L35)"
+      ]
+    },
+    "Earthquake": {
+      "url": "https://wiki.project1999.com/Earthquake",
+      "lines": [
+        "Decrease Hitpoints by 226 (L34) to 246 (L39)"
+      ]
+    },
+    "Fangol's Breath": {
+      "url": "https://wiki.project1999.com/Fangol's_Breath",
+      "lines": [
+        "Decrease Hitpoints by 120"
+      ]
+    },
+    "Feign Death": {
+      "url": "https://wiki.project1999.com/Feign_Death",
+      "lines": [
+        "Feign Death"
+      ]
+    },
+    "Fury": {
+      "url": "https://wiki.project1999.com/Fury",
+      "lines": [
+        "Increase AC by 12 (L34) to 15 (L50)",
+        "Increase STR by 37",
+        "Increase Health Regen by 10 per tick"
+      ]
+    },
+    "Gather Shadows": {
+      "url": "https://wiki.project1999.com/Gather_Shadows",
+      "lines": [
+        "Invisibility(1)"
+      ]
+    },
+    "Gravity Flux": {
+      "url": "https://wiki.project1999.com/Gravity_Flux",
+      "lines": [
+        "Decrease Hitpoints by 214 (L44)",
+        "Toss Up(100)"
+      ]
+    },
+    "Guardian Spirit": {
+      "url": "https://wiki.project1999.com/Guardian_Spirit",
+      "lines": [
+        "Summon Pet: SpiritWolf230"
+      ]
+    },
+    "Harmshield": {
+      "url": "https://wiki.project1999.com/Harmshield",
+      "lines": [
+        "Decrease HP when cast by 20",
+        "Invulnerability"
+      ]
+    },
+    "Haste": {
+      "url": "https://wiki.project1999.com/Haste",
+      "lines": [
+        "Increase Attack Speed by 2% (L1) to 35% (L49) [ref]"
+      ]
+    },
+    "Healing": {
+      "url": "https://wiki.project1999.com/Healing",
+      "lines": [
+        "Increase Hitpoints by 84 (L14) to 100 (L30)"
+      ]
+    },
+    "Invoke Fear": {
+      "url": "https://wiki.project1999.com/Invoke_Fear",
+      "lines": [
+        "Fear(1)"
+      ]
+    },
+    "Levitate": {
+      "url": "https://wiki.project1999.com/Levitate",
+      "lines": [
+        "Levitate(1)"
+      ]
+    },
+    "Malaise": {
+      "url": "https://wiki.project1999.com/Malaise",
+      "lines": [
+        "Decrease Fire Resist by 15 (L19) to 20 (L28)",
+        "Decrease Cold Resist by 15 (L19) to 20 (L28)",
+        "Decrease Magic Resist by 15 (L19) to 20 (L28)",
+        "Decrease Poison Resist by 15 (L19) to 20 (L28)"
+      ]
+    },
+    "Raging Strength": {
+      "url": "https://wiki.project1999.com/Raging_Strength",
+      "lines": [
+        "Increase STR by 23 (L29) to 26 (L34)"
+      ]
+    },
+    "Rampage": {
+      "url": "https://wiki.project1999.com/Rampage",
+      "lines": [
+        "Increase STR by 29 (L39) to 42 (L65)",
+        "Increase Absorb Damage by 79 (L39) to 90 (L50)",
+        "Decrease AGI by 20"
+      ]
+    },
+    "Reclaim Energy": {
+      "url": "https://wiki.project1999.com/Reclaim_Energy",
+      "lines": [
+        "Reclaim Energy"
+      ]
+    },
+    "Rune III": {
+      "url": "https://wiki.project1999.com/Rune_III",
+      "lines": [
+        "UNKNOWN CALC 113 base 168 max 230 attrib Absorb Damage"
+      ]
+    },
+    "See Invisible": {
+      "url": "https://wiki.project1999.com/See_Invisible",
+      "lines": [
+        "See Invisible(1)"
+      ]
+    },
+    "Shield of Brambles": {
+      "url": "https://wiki.project1999.com/Shield_of_Brambles",
+      "lines": [
+        "Increase Damage Shield by 11 (L29) to 12 (L32)"
+      ]
+    },
+    "Siphon": {
+      "url": "https://wiki.project1999.com/Siphon",
+      "lines": [
+        "Decrease Hitpoints by 80",
+        "Increase Hitpoints by 80 (Self)"
+      ]
+    },
+    "Spirit of Cheetah": {
+      "url": "https://wiki.project1999.com/Spirit_of_Cheetah",
+      "lines": [
+        "Increase Movement Speed by 99% (L24) to 115% (L40)"
+      ]
+    },
+    "Steelskin": {
+      "url": "https://wiki.project1999.com/Steelskin",
+      "lines": [
+        "UNKNOWN CALC 113 base 168 max 230 attrib Absorb Damage"
+      ]
+    },
+    "Tagar's Insects": {
+      "url": "https://wiki.project1999.com/Tagar's_Insects",
+      "lines": [
+        "Decrease Attack Speed by 34% (L29) to 50% (L60)",
+        "Increase Disease Counter by 9"
+      ]
+    },
+    "Thunder Strike": {
+      "url": "https://wiki.project1999.com/Thunder_Strike",
+      "lines": [
+        "Decrease Hitpoints by 247 (L29) to 263 (L35)",
+        "Stun for 0.0 seconds"
+      ]
+    },
+    "Tishan's Clash": {
+      "url": "https://wiki.project1999.com/Tishan's_Clash",
+      "lines": [
+        "Stun for 5.0* seconds",
+        "Decrease Hitpoints by 30 (L20) to 50 (L40)"
+      ]
+    },
+    "Ultravision": {
+      "url": "https://wiki.project1999.com/Ultravision",
+      "lines": [
+        "Ultravision(1)"
+      ]
+    },
+    "Whirlwind": {
+      "url": "https://wiki.project1999.com/Whirlwind",
+      "lines": [
+        "Levitate(1)",
+        "SpinStun",
+        "Decrease HP when cast by 100"
+      ]
+    }
+  },
+  "missing": [
+    "Blessing of the Lord Commander",
+    "Fury of the Chosen",
+    "Herikol's Soothing",
+    "Servant of Air",
+    "Sha's Lethargy",
+    "Vigor of Zehkes",
+    "Whirl Bolt"
+  ]
+}

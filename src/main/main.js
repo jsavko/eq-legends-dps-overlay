@@ -28,6 +28,7 @@ import { EncounterStore, RECORD_VERSION, storeKey, combatBetween } from './histo
 import { SessionStore, sessionKey, listEntry, CHECKPOINT_INTERVAL_MS } from './session-store.js';
 import { SessionTracker } from '../session/session.js';
 import { QuestProgress } from '../quests/progress.js';
+import { parseInventory } from '../quests/inventory.js';
 import { TriggerStore } from './triggers-store.js';
 import { builtinPack, builtinPatch, builtinPresetPatch } from './builtin-pack.js';
 import { TriggerEngine } from '../triggers/engine.js';
@@ -106,6 +107,9 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {QuestProgress|null} */ let quests = null;
 /** @type {BrowserWindow|null} */ let questsWindow = null;
 let saveQuestsBoundsTimer = null;
+/** Polls for a fresh `/outputfile inventory` dump beside the log. */
+let inventoryPollTimer = null;
+const INVENTORY_POLL_MS = 5000;
 
 /**
  * Quest-loot chips in flight, merged into the warning stack by buildSnapshot. Kept
@@ -402,6 +406,7 @@ app.on('will-quit', () => {
   stopUpdater?.();
   // setTimeout and setInterval handles alike — clearInterval accepts both.
   for (const timer of quietUpdateTimers) clearInterval(timer);
+  clearInterval(inventoryPollTimer);
   tray?.destroy();
 });
 
@@ -453,17 +458,16 @@ async function startTailing(logPath) {
       // player quoting "You have slain a froglok shin knight!" in guild chat arrives
       // already labelled and never reaches the night's kill count.
       session?.feed(line, event);
-      // The fourth consumer, same contract. It answers with the quest slots a looted
-      // item satisfies — and the chip fires only for the slots still NEEDED (quest not
-      // done, item not owned): a chip for loot already checked off is noise that
-      // teaches the player to stop reading the window.
-      const questRefs = quests?.feedLine(line, event);
-      if (questRefs?.length) {
-        // Any counted loot moves the ledger, so an open window refetches; the chip
-        // additionally requires that some slot still NEEDS the item.
+      // The fourth consumer, same contract. It counts loot AND hand-ins now, and
+      // answers with what it counted plus the slots that still NEEDED the item — a
+      // judgement the store makes BEFORE the event lands, so the first pickup of a
+      // wanted item chips and the tenth after every box is ticked stays silent. An
+      // offer always arrives with an empty `needed`: handing an item in is ledger
+      // movement worth a window refresh, never a "you need this" chip.
+      const questCounted = quests?.feedLine(line, event);
+      if (questCounted) {
         notifyQuestsChanged();
-        const needed = quests.needed(questRefs);
-        if (needed.length) noteQuestLoot(needed);
+        if (questCounted.needed.length) noteQuestLoot(questCounted.needed);
       }
     }
     // The parser learns the character's own name from the log rather than only from the
@@ -510,7 +514,53 @@ async function startTailing(logPath) {
 
   await tailer.start();
   startPushLoop();
+  clearInterval(inventoryPollTimer);
+  inventoryPollTimer = setInterval(pollInventoryDump, INVENTORY_POLL_MS);
+  pollInventoryDump();
   refreshTrayMenu();
+}
+
+/**
+ * Watch for a fresh `/outputfile inventory` dump and feed it to the quest ledger.
+ *
+ * The in-game flow this exists for is two keystrokes: run the command, alt-tab. The
+ * game writes `<Char>_<server>-Inventory.txt` into its own directory — the parent of
+ * the Logs folder being tailed (confirmed live) — so every few seconds this stats the
+ * file belonging to the character being followed and applies one whose mtime the
+ * ledger has not seen. The ledger dedups on that mtime itself, so a poll, a relaunch
+ * and a character switch-and-back all re-offer the same dump for free. Everything is
+ * re-derived per tick (path included) rather than cached, because the tailer can
+ * switch characters under a running app and a poll must follow it.
+ */
+function pollInventoryDump() {
+  if (!quests || !parser?.selfName) return;
+  const logPath = tailer?.filePath ?? config.get('logPath');
+  if (!logPath) return;
+  const name = `${parser.selfName}_${parser.server ?? 'unknown'}-Inventory.txt`;
+  const logDir = path.dirname(logPath);
+  // The EQ install dir first (where the game writes), then beside the log itself as a
+  // fallback for a log that does not live in the standard Logs/ folder.
+  for (const file of [path.join(path.dirname(logDir), name), path.join(logDir, name)]) {
+    let stat;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      continue;   // no dump written yet — the normal case, not an error
+    }
+    try {
+      // Same encoding rule as the log itself: EQ writes single-byte text.
+      const result = quests.applyInventory(
+        parseInventory(fs.readFileSync(file, 'latin1')), stat.mtimeMs,
+      );
+      if (result.ok && !result.unchanged) {
+        notifyQuestsChanged();
+        toast(`Inventory snapshot read — ${result.matched} quest item${result.matched === 1 ? '' : 's'}`);
+      }
+    } catch (err) {
+      toast(`Inventory snapshot failed: ${err.message}`);
+    }
+    return;   // first existing file wins; the fallback is for when the first is absent
+  }
 }
 
 /**
@@ -1511,7 +1561,9 @@ function createSession() {
  * Fourth of the reading surfaces, built exactly like History, Triggers and Session —
  * a real window with three fixed panes that take mouse input and scroll internally,
  * its own bounds key, and no part in the click-through HUD. Its shape was approved as
- * docs/design/2026-08-14-quests-window-mockups.html.
+ * docs/design/2026-08-14-quests-window-mockups.html; the 2026-08-14 cleanup pass was
+ * approved as the Pencil mock "Quests Window — cleanup" (collapsible rail, parsed
+ * reward cards, provenance labels).
  */
 function createQuests() {
   if (questsWindow && !questsWindow.isDestroyed()) {
@@ -1519,12 +1571,14 @@ function createQuests() {
     return;
   }
 
+  // Sized for the rebuilt type scale (15px body, nothing under 12px): the window
+  // grows so the type never has to shrink, per the approved Pencil mock at 1:1.
   questsWindow = new BrowserWindow({
-    width: 1160,
-    height: 720,
+    width: 1280,
+    height: 960,
     ...(config.get('questsBounds') ?? {}),
-    minWidth: 980,
-    minHeight: 540,
+    minWidth: 1160,
+    minHeight: 640,
     title: 'EQL DPS Overlay — Plane of Sky Quests',
     backgroundColor: '#100d0a',
     icon: path.join(ASSETS, 'icon-256.png'),

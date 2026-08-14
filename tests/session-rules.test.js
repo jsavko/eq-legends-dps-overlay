@@ -26,6 +26,7 @@ const SAMPLES = {
   'loot-stored': "You looted a Wind Rune Lena from a blade storm's corpse and stored it in your currency",
   'loot-created': "You looted a Shin Gauntlets +2 from a froglok shin knight's corpse to create a Shin Gauntlets +3",
   'loot-sold': "You looted 2 Phosphorous Powder from a zol ghoul knight's corpse and sold it for 3 platinum, 2 gold, 1 silver and 4 copper.",
+  offer: 'You offered 1 Crude Wooden Flute to Cilin Spellsinger.',
   'xp-solo': 'You gain experience! (8.001%)',
   'xp-party': 'You gain party experience! (0.769%)',
   'level-up': 'You have gained a level! Welcome to level 28!',
@@ -278,6 +279,51 @@ test('loot survives backtick mob names and latin1 accents', () => {
   const accented = matchSessionRule("--You have looted a Crépon Sash from a Grimling Prêtre's corpse.--");
   assert.equal(accented.item, 'Crépon Sash');
   assert.equal(accented.from, 'Grimling Prêtre');
+});
+
+// ---------------------------------------------------------------------------- offers
+
+test('an offer captures quantity, item and recipient raw — vendor and trade forms included', () => {
+  // The quest turn-in, the reason the rule exists.
+  const turnin = matchSessionRule('You offered 1 Wind Rune Azia to Cilin Spellsinger.');
+  assert.equal(turnin?.rule, 'offer');
+  assert.deepEqual(
+    { kind: turnin.kind, qty: turnin.qty, item: turnin.item, npc: turnin.npc },
+    { kind: 'offer', qty: 1, item: 'Wind Rune Azia', npc: 'Cilin Spellsinger' },
+  );
+
+  // The vendor quantity dump and the player trade MUST still parse — deciding they are
+  // not turn-ins is the quest ledger's job, and a rule that pre-filtered them would be
+  // duplicating the NPC list somewhere it can go stale.
+  const vendor = matchSessionRule('You offered 262 Metal Bits to Crusader Iktra.');
+  assert.equal(vendor?.qty, 262);
+  assert.equal(vendor.npc, 'Crusader Iktra');
+  const trade = matchSessionRule('You offered 1 Embroidered Black Cape +2 to Emalina.');
+  assert.equal(trade?.npc, 'Emalina');
+});
+
+test('offered item names keep their backticks and upgrade suffixes', () => {
+  // Normalizing is the quest index's job; the rule hands the name over as written.
+  const lash = matchSessionRule('You offered 1 Slaver`s Lash +1 to Foalya.');
+  assert.equal(lash?.item, 'Slaver`s Lash +1');
+
+  // Names with internal periods survive the sentence-final anchor.
+  const page = matchSessionRule('You offered 1 Torn Page of Magi`kot pg. 4 to Kadomony.');
+  assert.equal(page?.item, 'Torn Page of Magi`kot pg. 4');
+  assert.equal(page.npc, 'Kadomony');
+});
+
+test('an item containing " to " splits at the last one, not the first', () => {
+  const e = matchSessionRule('You offered 1 Words to the Wise to Wizard Schrock.');
+  assert.equal(e?.item, 'Words to the Wise');
+  assert.equal(e.npc, 'Wizard Schrock');
+});
+
+test('the session tracker drops offers on the floor — they open nothing and count nothing', () => {
+  const tracker = new SessionTracker({ character: 'Rhale' });
+  const e = tracker.feed('[Thu Aug 06 01:39:10 2026] You offered 1 Crude Wooden Flute to Cilin Spellsinger.');
+  assert.equal(e, null);
+  assert.equal(tracker.current, null, 'a turn-in between sittings must not open a session');
 });
 
 // ------------------------------------------------------- experience, levels and ability points
