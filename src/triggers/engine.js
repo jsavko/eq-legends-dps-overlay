@@ -105,6 +105,20 @@ export class TriggerEngine {
     this.nextWarningId = WARNING_ID_BASE + 1;
     /** Bumped whenever anything visible changes, so main can skip an unchanged push. */
     this.revision = 0;
+
+    /**
+     * How long a chip this engine raises stays up, in ms. Instance state for the same
+     * reason the parser's alertTtls is: the Durations dialog can retune a running
+     * session, and the exported constant stays the default so nothing changes for a
+     * caller that never passes the option. Stamped per warning at fire time, so a
+     * change applies from the next chip — never under one already being read.
+     */
+    this.warnTtlMs = options.warnTtlMs ?? TRIGGER_WARN_TTL_MS;
+  }
+
+  /** Retune the chip lifetime at runtime. Chips already up keep their stamped ttlMs. */
+  setWarnTtl(ms) {
+    if (Number.isFinite(ms) && ms > 0) this.warnTtlMs = ms;
   }
 
   /**
@@ -219,7 +233,7 @@ export class TriggerEngine {
           pack: packName,
           trigger: trigger.name,
           ts,
-          ttlMs: TRIGGER_WARN_TTL_MS,
+          ttlMs: this.warnTtlMs,
         });
         this.revision++;
       }

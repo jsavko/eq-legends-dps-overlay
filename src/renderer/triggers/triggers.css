@@ -513,3 +513,55 @@ input[aria-invalid="true"] { border-color: var(--bad); background: #160d0b; }
 .measure-of { font-size: 15px; color: var(--ink-dim); }
 .measure-bar { height: 8px; border-radius: 999px; background: #2a211a; overflow: hidden; }
 .measure-bar i { display: block; height: 8px; background: var(--balm); }
+
+/* ---------------------------------------------------------------- durations */
+
+/* Narrower than the shared dialog width: seven short rows do not need 760px, and a
+   stepper floating a foot away from its label reads as belonging to nothing. */
+#durations { width: min(520px, 92vw); }
+
+.duration-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+.duration-rows li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.duration-rows li:last-child { border-bottom: none; }
+.d-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.d-name { font-size: 13px; font-weight: 600; }
+.d-sub { font-size: 11px; color: var(--ink-faint); }
+.d-step { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.d-step button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+/* Overrides the shared 100%-width input rule: this one sits in a row of controls. */
+.duration-rows input {
+  width: 56px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  text-align: right;
+}
+.d-unit { font-size: 11px; color: var(--ink-faint); }
+
+/* "reset to defaults" — an action quiet enough that Save stays the loud one. */
+.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ink-faint);
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linkish:hover { color: var(--ink); }

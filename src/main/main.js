@@ -23,6 +23,7 @@ import { Tailer, listLogs } from './tailer.js';
 import {
   ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, alertsEnabled, timersEnabled, partyListFor,
   ALERT_PRESETS, warnKeyFor, presetOf, sessionEnabled, sessionCategories,
+  DURATION_KEYS, DURATION_DEFAULTS, durationSec, alertTtls,
 } from './config.js';
 import { EncounterStore, RECORD_VERSION, storeKey, combatBetween } from './history.js';
 import { SessionStore, sessionKey, listEntry, CHECKPOINT_INTERVAL_MS } from './session-store.js';
@@ -120,7 +121,6 @@ const INVENTORY_POLL_MS = 5000;
  */
 let questChips = [];
 let questChipSeq = 2_000_000_000;
-const QUEST_CHIP_TTL_MS = 6000;
 /** Bumped when a chip arrives or expires, so the push loop cannot strand a stale one. */
 let questChipsRevision = 0;
 let lastQuestChipsRevision = -1;
@@ -206,7 +206,9 @@ async function main() {
   });
   triggerStore = new TriggerStore(path.join(app.getPath('userData'), 'triggers'));
   installSeedTimers();
-  triggers = new TriggerEngine();
+  triggers = new TriggerEngine({
+    warnTtlMs: durationSec(config.all, 'triggerChipSec') * 1000,
+  });
   reloadTriggerPacks();
 
   registerIpc();
@@ -1058,10 +1060,19 @@ function notifyQuestsChanged() {
   }
 }
 
-/** Live quest chips in the warning shape, pruned in place on the way out. */
+/**
+ * Live quest chips in the warning shape, pruned in place on the way out.
+ *
+ * The lifetime is read from config on every call rather than held anywhere, so the
+ * Durations dialog needs no hook here — the next 4 Hz push simply measures against
+ * the new value. A chip mid-flight when the number shrinks may leave early; quest
+ * chips are the one category where that is fine, because unlike the parser's stamped
+ * ttlMs there is no per-chip claim to honor.
+ */
 function questWarnings(now) {
+  const ttlMs = durationSec(config.all, 'questChipSec') * 1000;
   const before = questChips.length;
-  questChips = questChips.filter((c) => now - c.ts <= QUEST_CHIP_TTL_MS);
+  questChips = questChips.filter((c) => now - c.ts <= ttlMs);
   if (questChips.length !== before) questChipsRevision++;
   return questChips.map((c) => ({
     id: c.id,
@@ -1070,7 +1081,7 @@ function questWarnings(now) {
     tier: 2,
     text: c.text,
     sub: c.sub,
-    remainingMs: Math.max(0, QUEST_CHIP_TTL_MS - (now - c.ts)),
+    remainingMs: Math.max(0, ttlMs - (now - c.ts)),
   }));
 }
 
@@ -2061,7 +2072,13 @@ function toggleMetric() {
 // ---------------------------------------------------------------------------
 
 function toast(message, ms) {
-  overlayWindow?.webContents.send(CHANNELS.TOAST, { message, ms });
+  // A caller that names no duration gets the player's configured default. The callers
+  // that DO pass one (update notices, the first-run hint, error toasts) sized it to
+  // their message, and the Durations dialog deliberately does not reach them.
+  overlayWindow?.webContents.send(CHANNELS.TOAST, {
+    message,
+    ms: ms ?? (config ? durationSec(config.all, 'toastSec') * 1000 : undefined),
+  });
 }
 
 /**
@@ -2106,6 +2123,7 @@ function pushStatus() {
 
 function registerIpc() {
   ipcMain.handle(CHANNELS.CONFIG_GET, () => config.all);
+  ipcMain.handle(CHANNELS.CONFIG_DURATION_DEFAULTS, () => ({ ...DURATION_DEFAULTS }));
 
   ipcMain.handle(CHANNELS.CONFIG_SET, async (_e, patch) => {
     const before = config.all;
@@ -2122,6 +2140,14 @@ function registerIpc() {
         postKillGraceMs: after.postKillGraceSec * 1000,
         rollingWindowMs: after.rollingWindowSec * 1000,
       });
+    }
+    if (DURATION_KEYS.some((key) => patch[key] !== undefined)) {
+      // The same contract as encounter tuning: a chip already up keeps the ttlMs it
+      // was stamped with, and the new length applies from the next one. Quest chips
+      // and the toast default read config live, so only the parser and the trigger
+      // engine hold copies that need refreshing.
+      if (parser) Object.assign(parser.alertTtls, alertTtls(after));
+      triggers?.setWarnTtl(durationSec(after, 'triggerChipSec') * 1000);
     }
     if (patch.logPath && patch.logPath !== before.logPath) {
       await startTailing(patch.logPath);

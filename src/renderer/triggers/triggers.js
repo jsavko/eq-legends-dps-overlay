@@ -740,6 +740,96 @@ function measureBlock(dry) {
 
 /* ------------------------------------------------------------------ events */
 
+/* ------------------------------------------------------------ durations dialog */
+
+/**
+ * The seven duration categories, in the order the dialog lists them. Each names the
+ * config key it edits; the numbers themselves come from config (current values) and
+ * from main (defaults, via getDurationDefaults) — nothing numeric is stated here, so
+ * this table cannot drift from what the app actually does.
+ *
+ * Crowd control is deliberately not a row: its chips report a state and clear on the
+ * log's own end-lines, so a duration for them would be a number that lies. The dialog
+ * says so in prose instead, because a category silently missing from a list that
+ * claims "every category" reads as a bug.
+ */
+const DURATION_CATEGORIES = [
+  { key: 'castChipSec', name: 'Interrupt warnings', sub: 'enemy casts and the interrupt calls' },
+  { key: 'summonChipSec', name: 'Summons', sub: 'who the boss just yanked to it' },
+  { key: 'charmBreakChipSec', name: 'Charm breaks', sub: 'your charm wore off — the mob is loose' },
+  { key: 'questChipSec', name: 'Quest loot', sub: 'a drop matches a Plane of Sky class test' },
+  { key: 'noticeChipSec', name: 'Pet & command feedback', sub: 'pet-id answers and mapping confirmations' },
+  { key: 'triggerChipSec', name: 'Trigger-pack chips', sub: 'chips from imported and authored packs' },
+  { key: 'toastSec', name: 'Meter toasts', sub: 'confirmations and errors on the meter' },
+];
+
+/** Fetched once — defaults cannot change while the app runs. */
+let durationDefaults = null;
+
+/** The same clamp main applies at read time, so the dialog never shows a value the
+    app would then quietly refuse to honor. */
+const clampSec = (v, fallback) =>
+  Number.isFinite(v) ? Math.min(30, Math.max(1, v)) : fallback;
+
+async function openDurations() {
+  durationDefaults ??= await window.api.getDurationDefaults();
+  // Fresh config rather than state.cfg: the tray or another window may have written
+  // since the last refresh, and a dialog opening on stale numbers would overwrite a
+  // change the player just made elsewhere.
+  const cfg = await window.api.getConfig();
+  renderDurationRows((key) => clampSec(Number(cfg?.[key]), durationDefaults[key]));
+  $('durations').showModal();
+}
+
+/** @param {(key: string) => number} valueFor where each row's number comes from */
+function renderDurationRows(valueFor) {
+  const list = $('d-rows');
+  list.textContent = '';
+  for (const cat of DURATION_CATEGORIES) {
+    const li = document.createElement('li');
+
+    const wrap = document.createElement('div');
+    wrap.className = 'd-text';
+    wrap.append(text('div', cat.name, 'd-name'), text('div', cat.sub, 'd-sub'));
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    input.dataset.key = cat.key;
+    input.value = String(valueFor(cat.key));
+
+    // ±1s per press, clamped. A garbled typed value nudges from the default rather
+    // than from NaN, so the buttons always do something visible.
+    const nudge = (delta) => {
+      input.value = String(clampSec(Number(input.value) + delta, durationDefaults[cat.key]));
+    };
+    const btn = (label, delta) => {
+      const b = text('button', label);
+      b.type = 'button';
+      b.addEventListener('click', () => nudge(delta));
+      return b;
+    };
+
+    const step = document.createElement('div');
+    step.className = 'd-step';
+    step.append(btn('−', -1), input, text('span', 's', 'd-unit'), btn('+', 1));
+
+    li.append(wrap, step);
+    list.append(li);
+  }
+}
+
+async function saveDurations() {
+  const patch = {};
+  for (const input of document.querySelectorAll('#d-rows input')) {
+    patch[input.dataset.key] = clampSec(
+      Number(input.value), durationDefaults[input.dataset.key],
+    );
+  }
+  await window.api.setConfig(patch);
+  $('durations').close();
+}
+
 function wire() {
   $('surface-chips').addEventListener('click', async () => {
     await window.api.setConfig({ triggerAlerts: state.cfg.triggerAlerts === false });
@@ -749,6 +839,14 @@ function wire() {
     await window.api.setConfig({ triggerTimers: state.cfg.triggerTimers === false });
     await refresh();
   });
+
+  $('open-durations').addEventListener('click', openDurations);
+  $('d-save').addEventListener('click', saveDurations);
+  $('d-cancel').addEventListener('click', () => $('durations').close());
+  // Reset fills the fields and stops — Save is still the only thing that writes, so
+  // a mis-click here is recoverable with Cancel.
+  $('d-reset').addEventListener('click', () =>
+    renderDurationRows((key) => durationDefaults[key]));
 
   for (const btn of document.querySelectorAll('.preset')) {
     btn.addEventListener('click', async () => {

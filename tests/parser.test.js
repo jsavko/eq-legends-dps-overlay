@@ -2007,3 +2007,73 @@ test('a spell rank on the cast line still matches the unranked damage line', () 
   assert.equal(row.abilities[0].name, 'Frost Storm');
   assert.equal(row.procDamage, 0);
 });
+
+// ------------------------------------------------- configurable chip durations
+
+test('alertTtls options override per category and default to the shipped constants', () => {
+  const p = makeParser({ alertTtls: { hostileCastMs: 12_000, summonMs: 2000 } });
+  assert.equal(p.alertTtls.hostileCastMs, 12_000);
+  assert.equal(p.alertTtls.summonMs, 2000);
+  // Unnamed categories keep the shipped defaults — the option is a tweak, not a
+  // wholesale replacement, so main can pass only what the player changed.
+  assert.equal(p.alertTtls.charmBreakMs, 6000);
+  assert.equal(p.alertTtls.noticeMs, 6000);
+});
+
+test('a cast warning lives exactly as long as its configured window', () => {
+  const p = makeParser({ alertTtls: { hostileCastMs: 12_000 } });
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Instill.`);
+  assert.equal(p.snapshot(T(18, 48, 21)).hostileCasts[0].remainingMs, 11_000);
+
+  // Past the shipped 6s window but inside the configured one: still up.
+  p.setNow(T(18, 48, 28));
+  p.tick();
+  assert.equal(p.snapshot(T(18, 48, 28)).hostileCasts.length, 1);
+
+  p.setNow(T(18, 48, 33));
+  p.tick();
+  assert.equal(p.snapshot(T(18, 48, 33)).hostileCasts.length, 0);
+});
+
+test('a summon chip honors its configured window', () => {
+  const p = makeParser({ alertTtls: { summonMs: 9000 } });
+  p.feed(`${D(18, 48, 20)} Master Yael says, 'You will not evade me, Emalina!'`);
+  assert.equal(p.snapshot(T(18, 48, 20)).hostileCasts[0].remainingMs, 9000);
+});
+
+test('a charm-break chip honors its configured window', () => {
+  const p = makeParser({ alertTtls: { charmBreakMs: 10_000 } });
+  p.feed(`${D(19, 20, 0)} Emalina slashes a ghoul savant for 100 points of damage.`);
+  p.feed(`${D(19, 20, 1)} Rhain begins casting Beguile.`);
+  p.feed(`${D(19, 20, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 20, 30)} Your Beguile spell has worn off of a tal ghoul wizard.`);
+
+  const warn = p.snapshot(T(19, 20, 31)).hostileCasts.find((c) => c.category === 'charm-break');
+  assert.equal(warn.remainingMs, 9000);
+});
+
+test('a notice honors its configured window', () => {
+  const p = makeParser({ alertTtls: { noticeMs: 3000 } });
+  p.noteNotice('Gann = Rhain', T(18, 48, 20));
+  assert.equal(p.snapshot(T(18, 48, 21)).notices[0].remainingMs, 2000);
+
+  p.setNow(T(18, 48, 24));
+  p.tick();
+  assert.equal(p.snapshot(T(18, 48, 24)).notices.length, 0);
+});
+
+test('retuning alertTtls mid-session leaves a stamped chip alone and governs the next', () => {
+  // The Durations dialog Object.assigns a live parser exactly like this.
+  const p = makeParser();
+  p.feed(`${D(18, 48, 20)} A cyclops begins casting Instill.`);
+  Object.assign(p.alertTtls, { hostileCastMs: 20_000 });
+
+  // The chip up when the number changed keeps the 6s it was stamped with…
+  p.setNow(T(18, 48, 27));
+  p.tick();
+  assert.equal(p.snapshot(T(18, 48, 27)).hostileCasts.length, 0);
+
+  // …and the next one is born with the new window.
+  p.feed(`${D(18, 48, 30)} A cyclops begins casting Instill.`);
+  assert.equal(p.snapshot(T(18, 48, 30)).hostileCasts[0].remainingMs, 20_000);
+});

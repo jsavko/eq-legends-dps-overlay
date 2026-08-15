@@ -53,6 +53,13 @@ export const CHANNELS = {
   // renderer -> main (invoke, returns a value)
   CONFIG_GET: 'config:get',
   CONFIG_SET: 'config:set',
+  /**
+   * The notification-duration defaults, for the Durations dialog's "reset to
+   * defaults". Fetched rather than restated in the renderer so the numbers live in
+   * exactly one place (config.js) — a copy over there would drift the first time a
+   * default is retuned, and the failure would be a reset button that quietly lies.
+   */
+  CONFIG_DURATION_DEFAULTS: 'config:duration-defaults',
   LOGS_LIST: 'logs:list',
   LOGS_PICK: 'logs:pick',
   LOGS_VALIDATE: 'logs:validate',

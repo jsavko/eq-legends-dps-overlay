@@ -8,9 +8,14 @@ import {
   ALERT_CATEGORIES, ALERT_PRESETS, TIMER_KEYS, WARN_GROUPS, WARN_KEYS,
   warnKeyFor, warnGroupOn, presetOf,
   SESSION_CATEGORIES, sessionEnabled, sessionLineEnabled, sessionCategories, partyListFor,
+  DURATION_DEFAULTS, DURATION_KEYS, durationSec, alertTtls,
 } from '../src/main/config.js';
 import { GROUPS, UNKNOWN_GROUP } from '../src/parser/spellwatch.js';
 import { SESSION_RULES } from '../src/session/rules.js';
+import {
+  HOSTILE_CAST_TTL_MS, SUMMON_TTL_MS, CHARM_BREAK_TTL_MS, NOTICE_TTL_MS,
+} from '../src/parser/index.js';
+import { TRIGGER_WARN_TTL_MS } from '../src/triggers/engine.js';
 
 function tmpdir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'eqcfg-'));
@@ -116,6 +121,9 @@ test('parserOptions converts seconds to the milliseconds the parser wants', () =
     postKillGraceMs: 4_000,
     rollingWindowMs: 6_000,
     petOwners: {},
+    alertTtls: {
+      hostileCastMs: 6000, summonMs: 5000, charmBreakMs: 6000, noticeMs: 6000,
+    },
   });
 });
 
@@ -463,4 +471,69 @@ test('the session window has its own bounds key, derived from nobody', () => {
   const keys = ['bounds', 'alertsBounds', 'timersBounds', 'historyBounds', 'triggersBounds', 'sessionBounds'];
   assert.equal(new Set(keys).size, keys.length);
   for (const k of keys) assert.equal(k in DEFAULTS, true);
+});
+
+// ------------------------------------------------------- notification durations
+
+test('the seven duration keys are in DEFAULTS, at exactly the values they replaced', () => {
+  // Behavior-preserving is the whole promise: each default IS the constant it
+  // replaced, so a config that never opens the Durations dialog changes nothing.
+  assert.deepEqual(DURATION_DEFAULTS, {
+    castChipSec: 6,
+    summonChipSec: 5,
+    charmBreakChipSec: 6,
+    questChipSec: 6,
+    noticeChipSec: 6,
+    triggerChipSec: 8,
+    toastSec: 2.6,
+  });
+  assert.deepEqual(DURATION_KEYS, Object.keys(DURATION_DEFAULTS));
+  for (const key of DURATION_KEYS) assert.equal(DEFAULTS[key], DURATION_DEFAULTS[key]);
+});
+
+test('the duration defaults match the constants they replaced, by import', () => {
+  assert.equal(DURATION_DEFAULTS.castChipSec * 1000, HOSTILE_CAST_TTL_MS);
+  assert.equal(DURATION_DEFAULTS.summonChipSec * 1000, SUMMON_TTL_MS);
+  assert.equal(DURATION_DEFAULTS.charmBreakChipSec * 1000, CHARM_BREAK_TTL_MS);
+  assert.equal(DURATION_DEFAULTS.noticeChipSec * 1000, NOTICE_TTL_MS);
+  assert.equal(DURATION_DEFAULTS.triggerChipSec * 1000, TRIGGER_WARN_TTL_MS);
+});
+
+test('durationSec clamps at read time, so a hand-edited config cannot smuggle a zero', () => {
+  assert.equal(durationSec({ castChipSec: 12 }, 'castChipSec'), 12);
+  assert.equal(durationSec({ castChipSec: 0 }, 'castChipSec'), 1, 'a 0s chip reads as broken alerts');
+  assert.equal(durationSec({ castChipSec: 600 }, 'castChipSec'), 30);
+  assert.equal(durationSec({ castChipSec: 'fast' }, 'castChipSec'), 6, 'garbage reads as the default');
+  assert.equal(durationSec({}, 'toastSec'), 2.6);
+  assert.equal(durationSec(null, 'summonChipSec'), 5);
+});
+
+test('alertTtls hands the parser its four lifetimes in ms, clamped', () => {
+  assert.deepEqual(alertTtls({}), {
+    hostileCastMs: 6000, summonMs: 5000, charmBreakMs: 6000, noticeMs: 6000,
+  });
+  const tuned = alertTtls({ castChipSec: 10, noticeChipSec: 0 });
+  assert.equal(tuned.hostileCastMs, 10_000);
+  assert.equal(tuned.noticeMs, 1000, 'the clamp rides along');
+});
+
+test('parserOptions carries alertTtls, so a new parser is born with the tuned values', () => {
+  const store = new ConfigStore(tmpdir());
+  store.load();
+  store.set({ castChipSec: 9 });
+  assert.equal(store.parserOptions().alertTtls.hostileCastMs, 9000);
+  assert.equal(store.parserOptions().alertTtls.summonMs, 5000);
+});
+
+test('duration values round-trip through disk like any other setting', () => {
+  const dir = tmpdir();
+  const a = new ConfigStore(dir);
+  a.load();
+  a.set({ questChipSec: 15, toastSec: 4 });
+
+  const b = new ConfigStore(dir);
+  b.load();
+  assert.equal(b.get('questChipSec'), 15);
+  assert.equal(b.get('toastSec'), 4);
+  assert.equal(b.get('summonChipSec'), 5, 'untouched categories keep their defaults');
 });

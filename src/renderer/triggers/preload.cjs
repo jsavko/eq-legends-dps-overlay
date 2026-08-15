@@ -8,6 +8,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const CH = {
   CONFIG_GET: 'config:get',
   CONFIG_SET: 'config:set',
+  CONFIG_DURATION_DEFAULTS: 'config:duration-defaults',
   TRIGGERS_LIST: 'triggers:list',
   TRIGGERS_GET: 'triggers:get',
   TRIGGERS_IMPORT: 'triggers:import',
@@ -26,8 +27,10 @@ const CH = {
 
 contextBridge.exposeInMainWorld('api', {
   getConfig: () => ipcRenderer.invoke(CH.CONFIG_GET),
-  /** Only the two surface switches are ever written from here — see triggers.js. */
+  /** Only the two surface switches and the seven duration keys are ever written from
+      here — see triggers.js. */
   setConfig: (patch) => ipcRenderer.invoke(CH.CONFIG_SET, patch),
+  getDurationDefaults: () => ipcRenderer.invoke(CH.CONFIG_DURATION_DEFAULTS),
 
   list: () => ipcRenderer.invoke(CH.TRIGGERS_LIST),
   get: (id) => ipcRenderer.invoke(CH.TRIGGERS_GET, id),

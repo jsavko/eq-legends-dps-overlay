@@ -15,6 +15,57 @@ import { storeKey } from './history.js';
 export const DEFAULT_LOG_DIR =
   'C:\\Users\\Public\\Daybreak Game Company\\Installed Games\\EverQuest Legends\\Logs';
 
+/**
+ * The seven notification-duration defaults, in seconds, in the order the Durations
+ * dialog lists them.
+ *
+ * Each value IS the hard-coded constant it replaced (HOSTILE_CAST_TTL_MS and friends
+ * in the parser, TRIGGER_WARN_TTL_MS in the trigger engine, QUEST_CHIP_TTL_MS in
+ * main.js, the 2600ms toast default in the overlay renderer) — the whole promise of
+ * making these configurable is that an untouched config changes nothing. Declared
+ * before DEFAULTS because DEFAULTS spreads it.
+ */
+export const DURATION_DEFAULTS = Object.freeze({
+  castChipSec: 6,
+  summonChipSec: 5,
+  charmBreakChipSec: 6,
+  questChipSec: 6,
+  noticeChipSec: 6,
+  triggerChipSec: 8,
+  toastSec: 2.6,
+});
+
+/** The duration keys, for the dialog and for "is this patch a duration change" tests. */
+export const DURATION_KEYS = Object.keys(DURATION_DEFAULTS);
+
+/**
+ * One duration in seconds, clamped to a range a chip can survive being set to.
+ *
+ * The clamp lives at READ time rather than at save time so a hand-edited config.json
+ * cannot smuggle a 0 (a chip that dies before the 4 Hz push ever draws it — reads as
+ * "alerts are broken", the failure the identify-don't-mute rule exists to prevent) or
+ * a 10-minute banner past the dialog. Anything non-numeric reads as the default.
+ */
+export function durationSec(cfg, key) {
+  const v = Number(cfg?.[key]);
+  if (!Number.isFinite(v)) return DURATION_DEFAULTS[key];
+  return Math.min(30, Math.max(1, v));
+}
+
+/**
+ * The parser's four chip lifetimes in the shape LogParser takes them (ms), derived
+ * here so main.js never does seconds-to-ms arithmetic inline — the same reason
+ * parserOptions() exists.
+ */
+export function alertTtls(cfg) {
+  return {
+    hostileCastMs: durationSec(cfg, 'castChipSec') * 1000,
+    summonMs: durationSec(cfg, 'summonChipSec') * 1000,
+    charmBreakMs: durationSec(cfg, 'charmBreakChipSec') * 1000,
+    noticeMs: durationSec(cfg, 'noticeChipSec') * 1000,
+  };
+}
+
 export const DEFAULTS = {
   /** Absolute path to the eqlog_*.txt being followed; null forces the setup screen. */
   logPath: null,
@@ -146,6 +197,18 @@ export const DEFAULTS = {
    * sound is opt-in, always.
    */
   charmBreakSound: false,
+  /**
+   * How long each notification category stays on screen, in seconds.
+   *
+   * Flat keys spread from DURATION_DEFAULTS below so the defaults live once, next to
+   * the clamp that guards them. Every default equals the constant it replaced —
+   * including the odd-looking 2.6 for toasts — so a player who never opens the
+   * Durations dialog sees timing bit-for-bit what it was when these were hard-coded.
+   * Edited only by that dialog (Triggers window); the settings form deliberately does
+   * not touch these, for the same one-place reason it lost its ALERTS section.
+   */
+  ...DURATION_DEFAULTS,
+
   /**
    * Session mute, deliberately separate from the four category switches.
    *
@@ -485,13 +548,14 @@ export class ConfigStore {
     return Boolean(this.data.logPath) && fs.existsSync(this.data.logPath);
   }
 
-  /** Encounter tuning in the shape the parser wants (seconds -> ms). */
+  /** Encounter tuning and chip lifetimes in the shape the parser wants (seconds -> ms). */
   parserOptions() {
     return {
       timeoutMs: this.data.combatTimeoutSec * 1000,
       postKillGraceMs: this.data.postKillGraceSec * 1000,
       rollingWindowMs: this.data.rollingWindowSec * 1000,
       petOwners: this.data.petOwners,
+      alertTtls: alertTtls(this.data),
     };
   }
 }

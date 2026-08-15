@@ -379,3 +379,53 @@ test('an authored trigger runs exactly like an imported one', () => {
   assert.equal(engine.timers(T0)[0].ability, 'Slow on a froglok shin knight');
   assert.equal(engine.timers(T0)[0].dueMs, 310_000);
 });
+
+// ------------------------------------------------- configurable chip duration
+
+test('warnTtlMs option stretches a chip past the shipped default', () => {
+  const engine = new TriggerEngine({ character: 'Rhale', warnTtlMs: 15_000 });
+  engine.setPacks([pack([
+    { id: 't1', name: 'Slain', pattern: '^You have slain', warn: { text: 'down' } },
+  ])]);
+
+  engine.feed(line('You have slain a froglok shin knight!'));
+  engine.expire(at(10_000));
+  const [chip] = engine.warnings(at(10_000));
+  assert.ok(chip, 'still up past the 8s default');
+  assert.equal(chip.remainingMs, 5000);
+});
+
+test('a default-constructed engine stamps TRIGGER_WARN_TTL_MS, as ever', () => {
+  const engine = engineWith(pack([
+    { id: 't1', name: 'Slain', pattern: '^You have slain', warn: { text: 'down' } },
+  ]));
+  engine.feed(line('You have slain a froglok shin knight!'));
+  assert.equal(engine.warnings(T0)[0].remainingMs, TRIGGER_WARN_TTL_MS);
+});
+
+test('setWarnTtl governs the next chip and leaves a stamped one alone', () => {
+  const engine = engineWith(pack([
+    { id: 't1', name: 'Slain', pattern: '^You have slain', warn: { text: 'down' } },
+  ]));
+
+  engine.feed(line('You have slain a froglok shin knight!'));
+  engine.setWarnTtl(20_000);
+
+  // The chip already up keeps the 8s it was stamped with…
+  engine.expire(at(9000));
+  assert.equal(engine.warnings(at(9000)).length, 0);
+
+  // …and the next one is born with the new window.
+  engine.feed(line('You have slain a froglok shin knight!', at(10_000)));
+  engine.expire(at(10_000));
+  assert.equal(engine.warnings(at(10_000))[0].remainingMs, 20_000);
+});
+
+test('setWarnTtl ignores values a chip could not survive', () => {
+  const engine = engineWith(pack([
+    { id: 't1', name: 'Slain', pattern: '^You have slain', warn: { text: 'down' } },
+  ]));
+  engine.setWarnTtl(0);
+  engine.setWarnTtl(NaN);
+  assert.equal(engine.warnTtlMs, TRIGGER_WARN_TTL_MS);
+});

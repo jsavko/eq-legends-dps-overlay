@@ -179,6 +179,8 @@ export class LogParser {
    * @param {string} [options.logFilename]  e.g. "eqlog_Rhale_oggok.txt"
    * @param {string[]} [options.partyMembers] exactly whose rows to show; empty shows all
    * @param {number} [options.timeoutMs]    encounter idle timeout
+   * @param {{hostileCastMs?: number, summonMs?: number, charmBreakMs?: number,
+   *          noticeMs?: number}} [options.alertTtls] chip lifetimes; see this.alertTtls
    * @param {() => number} [options.clock]  time source; replay overrides this
    * @param {(enc: Encounter) => void} [options.onEncounterEnd]
    *   Called with each encounter as it CLOSES (timeout, kill, zone) — the hook main
@@ -197,6 +199,21 @@ export class LogParser {
       postKillGraceMs: options.postKillGraceMs ?? DEFAULTS.postKillGraceMs,
       rollingWindowMs: options.rollingWindowMs ?? DEFAULTS.rollingWindowMs,
       npcStaleMs: options.npcStaleMs ?? DEFAULTS.npcStaleMs,
+    };
+
+    /**
+     * How long each chip category stays on screen, in ms. Instance state rather than
+     * the module constants so the player's Durations dialog can retune a running
+     * session (main Object.assigns this the way it does encounterOptions); the
+     * exported constants remain the defaults, so nothing changes for a caller that
+     * never passes the option. A chip already up keeps the ttlMs it was stamped
+     * with — a change applies from the next chip, never under one being read.
+     */
+    this.alertTtls = {
+      hostileCastMs: options.alertTtls?.hostileCastMs ?? HOSTILE_CAST_TTL_MS,
+      summonMs: options.alertTtls?.summonMs ?? SUMMON_TTL_MS,
+      charmBreakMs: options.alertTtls?.charmBreakMs ?? CHARM_BREAK_TTL_MS,
+      noticeMs: options.alertTtls?.noticeMs ?? NOTICE_TTL_MS,
     };
 
     this.onEncounterEnd = options.onEncounterEnd ?? null;
@@ -1103,7 +1120,9 @@ export class LogParser {
 
   pruneNotices(now) {
     const before = this.notices.length;
-    this.notices = this.notices.filter((n) => now - n.ts <= NOTICE_TTL_MS && n.ts <= now);
+    this.notices = this.notices.filter(
+      (n) => now - n.ts <= this.alertTtls.noticeMs && n.ts <= now,
+    );
     if (this.notices.length !== before) this.revision++;
   }
 
@@ -1260,6 +1279,7 @@ export class LogParser {
       // parser must not be the thing deciding what the player wants to see.
       group: cls?.group ?? UNKNOWN_GROUP,
       ts: event.ts,
+      ttlMs: this.alertTtls.hostileCastMs,
     });
     this.revision++;
   }
@@ -1313,7 +1333,7 @@ export class LogParser {
       group: 'summon',
       victim,
       ts: event.ts,
-      ttlMs: SUMMON_TTL_MS,
+      ttlMs: this.alertTtls.summonMs,
     });
     this.revision++;
   }
@@ -1406,7 +1426,7 @@ export class LogParser {
   pruneHostileCasts(now) {
     const before = this.hostileCasts.length;
     this.hostileCasts = this.hostileCasts.filter(
-      (c) => now - c.ts <= (c.ttlMs ?? HOSTILE_CAST_TTL_MS) && c.ts <= now,
+      (c) => now - c.ts <= (c.ttlMs ?? this.alertTtls.hostileCastMs) && c.ts <= now,
     );
     if (this.hostileCasts.length !== before) this.revision++;
   }
@@ -1594,7 +1614,7 @@ export class LogParser {
       group: 'charm-break',
       victim: this.resolve(event.target).display,
       ts: event.ts,
-      ttlMs: CHARM_BREAK_TTL_MS,
+      ttlMs: this.alertTtls.charmBreakMs,
     });
     this.revision++;
   }
@@ -1789,7 +1809,7 @@ export class LogParser {
     // damage line has created an encounter — precisely the moment a warning matters.
     // `remainingMs` is computed here so the renderer needs no notion of log time.
     const hostileCasts = this.hostileCasts.map((c) => {
-      const ttl = c.ttlMs ?? HOSTILE_CAST_TTL_MS;
+      const ttl = c.ttlMs ?? this.alertTtls.hostileCastMs;
       return {
         id: c.id,
         caster: c.caster,
@@ -1818,7 +1838,7 @@ export class LogParser {
     const notices = this.notices.map((n) => ({
       id: n.id,
       text: n.text,
-      remainingMs: Math.max(0, NOTICE_TTL_MS - (now - n.ts)),
+      remainingMs: Math.max(0, this.alertTtls.noticeMs - (now - n.ts)),
     }));
 
     const enc = this.current ?? this.last;

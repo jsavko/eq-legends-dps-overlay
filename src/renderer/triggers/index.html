@@ -32,6 +32,13 @@
       <button id="surface-timers" class="surface" aria-pressed="true">timers</button>
     </div>
 
+    <!-- Every category's on-screen lifetime, one dialog. Beside the surfaces rather
+         than among the rows because a duration is a property of the OUTPUT, like the
+         surfaces themselves — and because the first design scattered per-row steppers
+         through the list, which failed the actual requirement: the categories listed
+         together, each with its own number. -->
+    <button id="open-durations" class="secondary">Durations…</button>
+
     <button id="import" class="primary">Import…</button>
   </header>
 
@@ -252,6 +259,37 @@
         <button type="button" id="i-close" class="primary">Close</button>
         <span class="spacer"></span>
         <button type="button" id="i-start-from" class="secondary">Start a trigger from this…</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- ------------------------------------------------------------ durations -->
+  <!-- The rows are built by triggers.js from its category table (name, sub, config
+       key) — markup here would be a second copy of that list to keep in sync. Crowd
+       control is deliberately absent as a row: its chips report a state and clear on
+       the log's own end-lines, so a timer for them would be a number that lies. -->
+  <dialog id="durations">
+    <div class="dialog-form">
+      <header class="dialog-head">
+        <p class="kicker ember">EVERY CATEGORY, ONE PLACE</p>
+        <h3>Durations</h3>
+        <p class="muted small">
+          How long each kind of notification stays on screen. A change applies to the
+          next chip, never one already up.
+        </p>
+      </header>
+      <div class="dialog-body">
+        <ol id="d-rows" class="duration-rows"></ol>
+        <p class="muted small faint">
+          Crowd control has no timer here — those chips report a state and clear when
+          the log says the effect ended.
+        </p>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" id="d-save" class="primary">Save</button>
+        <button type="button" id="d-cancel" class="secondary">Cancel</button>
+        <span class="spacer"></span>
+        <button type="button" id="d-reset" class="linkish">reset to defaults</button>
       </footer>
     </div>
   </dialog>
