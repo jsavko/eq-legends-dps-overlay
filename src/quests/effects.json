@@ -2,7 +2,7 @@
   "attribution": {
     "source": "https://wiki.project1999.com/ spell pages (\"Details\" effect tables)",
     "fetched": "2026-08-14",
-    "note": "Classic-era wiki data; Legends-only effects the wiki lacks are listed under missing and render without a tooltip rather than with a guessed one."
+    "note": "Classic-era wiki data; Legends-only effects the wiki lacks are listed under missing — effects-legends.json supplements what a real source covers, and the rest render an honest no-description popup, never a guessed one."
   },
   "effects": {
     "Alacrity": {

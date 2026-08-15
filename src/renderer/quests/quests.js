@@ -253,12 +253,16 @@ function buildCard(card, quest, { tooltips }) {
     const name = effectName(effect.text);
     const ename = span('ename', name ?? effect.text);
     const entry = name ? snapshot.effects?.effects?.[name] : null;
-    if (entry && tooltips) {
-      // Underlined only when a tooltip actually exists — an underline with nothing
-      // under it teaches the player to stop hovering.
+    if (tooltips) {
+      // Every effect answers the hover, entry or not. The old rule — no entry, no
+      // underline, no popup — was honest per effect and a lie per class: the P99
+      // wiki is classic-era and has no beastlord, so on a beastlord's own quest
+      // pages the feature was 100% silent and indistinguishable from broken.
+      // Nothing is guessed even now; an entry-less effect pops a card that says
+      // exactly why it has no description.
       ename.classList.add('tip');
       ename.tabIndex = 0;
-      bindPopup(ename, () => effectTip(name, entry, effect));
+      bindPopup(ename, () => effectTip(name ?? effect.text, entry, effect));
     }
     line.append(ename);
     const detail = [effectMeta(effect.text), ...effect.details.map((d) => d.toLowerCase())]
@@ -282,14 +286,26 @@ function buildCard(card, quest, { tooltips }) {
   return el;
 }
 
-/** The effect tooltip: the spell's own wiki lines, never a summary written here. */
+/**
+ * The effect tooltip: the spell's own source lines, never a summary written here.
+ * An entry-less effect still answers — with why it has nothing — because a hover
+ * that silently does nothing is indistinguishable from a broken feature. The footer
+ * names the entry's OWN source: the P99 snapshot and the hand-transcribed Legends
+ * supplement are different claims, and the popup says which one it is making.
+ */
 function effectTip(name, entry, effect) {
   const box = document.createElement('div');
   box.append(divOf('pname', name));
-  for (const line of entry.lines) box.append(divOf('pline', line));
+  if (entry) {
+    for (const line of entry.lines ?? []) box.append(divOf('pline', line));
+  } else {
+    box.append(divOf('pnone',
+      'No description — the classic-era P99 wiki has no page for this spell, and no '
+      + 'other source has been transcribed for it yet. Nothing is guessed here.'));
+  }
   const meta = effectMeta(effect.text);
   if (meta) box.append(divOf('pmeta', meta));
-  box.append(divOf('pfoot', 'P99 wiki snapshot — an effect with no entry gets no tooltip'));
+  if (entry) box.append(divOf('pfoot', `${entry.source ?? 'P99 wiki'} snapshot`));
   return box;
 }
 

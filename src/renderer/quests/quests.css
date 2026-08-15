@@ -310,6 +310,9 @@ button:hover { border-color: var(--ember); }
 #popup.pinned { pointer-events: auto; }
 #popup .pname { color: var(--gold); font-weight: 700; font-size: 14.5px; margin-bottom: 4px; }
 #popup .pline { color: var(--ink); }
+/* The honest-absence card: an effect no snapshot covers explains itself instead of
+   ignoring the hover. Dimmed and italic — it is a statement about the data, not data. */
+#popup .pnone { color: var(--ink-dim); font-style: italic; }
 #popup .pmeta { color: var(--ink-dim); font-size: 12.5px; margin-top: 4px; }
 #popup .pfoot { color: var(--ink-faint); font-size: 12px; margin-top: 8px; }
 #popup .card { margin: 0; padding: 0; background: none; border: none; }

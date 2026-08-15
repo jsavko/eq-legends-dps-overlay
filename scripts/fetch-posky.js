@@ -243,8 +243,11 @@ for (const base of missingIcons) {
  * Effect descriptions, from each spell's own P99 wiki page: the "Details" table rows
  * ("Increase STR by 37", "Increase Attack Speed by 40%") are exactly what a tooltip
  * should say. A page the wiki does not have — the Luclin-era Legends effects 404
- * there — lands in `missing`, and an effect with no entry gets NO tooltip: absence
- * honest, nothing guessed.
+ * there — lands in `missing`. Those are picked up by src/quests/effects-legends.json,
+ * a hand-transcribed supplement merged at load in src/quests/index.js; whatever
+ * neither file covers renders an honest "no description" popup, never a guessed one.
+ * This script rewrites ONLY effects.json — the supplement is deliberately outside
+ * its blast radius, so a wiki refresh can never clobber the hand-transcribed entries.
  */
 function spellLines(html) {
   const at = html.indexOf('id="Details"');
@@ -274,7 +277,8 @@ for (const name of [...effectNames].sort()) {
     console.log(`effect ${name}: ${lines.length} line(s)`);
   } else {
     missingEffects.push(name);
-    console.warn(`effect ${name}: no wiki page or no Details table — no tooltip`);
+    console.warn(`effect ${name}: no wiki page or no Details table — `
+      + 'covered by effects-legends.json if transcribed, else the no-description popup');
   }
   await new Promise((r) => setTimeout(r, 150));
 }
@@ -284,7 +288,8 @@ fs.writeFileSync(EFFECTS_OUT, JSON.stringify({
     source: `${WIKI}/ spell pages ("Details" effect tables)`,
     fetched: new Date().toISOString().slice(0, 10),
     note: 'Classic-era wiki data; Legends-only effects the wiki lacks are listed under '
-      + 'missing and render without a tooltip rather than with a guessed one.',
+      + 'missing — effects-legends.json supplements what a real source covers, and the '
+      + 'rest render an honest no-description popup, never a guessed one.',
   },
   effects,
   missing: missingEffects,

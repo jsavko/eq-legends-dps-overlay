@@ -1,0 +1,80 @@
+{
+  "attribution": {
+    "source": "eqlwiki.com spell pages (client-mined EverQuest Legends data); Servant of Air from everquest.allakhazam.com",
+    "transcribed": "2026-08-15",
+    "note": "Hand-transcribed verbatim, one URL per entry — never authored. Fills the gap the classic-era P99 wiki cannot cover (it predates beastlords entirely); merged at load in src/quests/index.js, where the fetched P99 snapshot wins any name both files know. Where live-EQ sources disagree with eqlwiki (Sha's Lethargy slows 40% on Legends vs 30% on live), the eqlwiki value is the one this overlay's server actually runs — the per-entry notes record the divergences."
+  },
+  "effects": {
+    "Blessing of the Lord Commander": {
+      "url": "https://eqlwiki.com/Blessing_of_the_Lord_Commander",
+      "source": "EverQuest Legends wiki",
+      "lines": [
+        "1: Strikes heal for 6"
+      ],
+      "note": "EQL-original cleric spell — no live-EQ entry exists. Cross-checked against eqlbuildforge.com."
+    },
+    "Fury of the Chosen": {
+      "url": "https://eqlwiki.com/Fury_of_the_Chosen",
+      "source": "EverQuest Legends wiki",
+      "lines": [
+        "3: Increase AC by 20",
+        "5: Increase AGI by 35",
+        "6: Increase Stamina by 1",
+        "7: Increase DEX by 20"
+      ],
+      "note": "Self-only short buff, combat proc on Cudgel of the Fool. EQL slots differ substantially from live EQ (Allakhazam spell 2278)."
+    },
+    "Herikol's Soothing": {
+      "url": "https://eqlwiki.com/Herikol%27s_Soothing",
+      "source": "EverQuest Legends wiki",
+      "lines": [
+        "1: Increase Current Hit Points by 274 (L27) to 298 (L35)",
+        "2: Decrease Disease Counter by 10",
+        "3: Decrease Poison Counter by 10",
+        "4: Decrease curse Counter by 10"
+      ],
+      "note": "Beastlord pet heal. Live EQ (Allakhazam spell 2615) prints slot 1 as 'Increase Hitpoints by 193. Max: 298'. Lowercase 'curse' is as printed."
+    },
+    "Servant of Air": {
+      "url": "https://everquest.allakhazam.com/db/spell.html?spell=4400",
+      "source": "Allakhazam",
+      "lines": [
+        "1: Pet Power Increase (10)",
+        "2: Limit: Max Level(60)",
+        "3: Limit: Min Level (46)",
+        "4: Limit: Resist (Magic allowed)"
+      ],
+      "note": "Worn focus effect, not a castable spell — eqlwiki has no spell page for it, so live-EQ Allakhazam is primary. EQL devs state pet foci swap in predefined stronger pets rather than buffing stats."
+    },
+    "Sha's Lethargy": {
+      "url": "https://eqlwiki.com/Sha%27s_Lethargy",
+      "source": "EverQuest Legends wiki",
+      "lines": [
+        "2: Decrease Melee Haste by 40%",
+        "3: Increase Disease Counter by 12"
+      ],
+      "note": "Beastlord slow, magic resist. Live EQ (Allakhazam spell 2634, Lazarus allaclone) slows 30%; the EQL server value is 40%."
+    },
+    "Vigor of Zehkes": {
+      "url": "https://eqlwiki.com/Vigor_of_Zehkes",
+      "source": "EverQuest Legends wiki",
+      "lines": [
+        "1: Increase Current Hit Points by 671",
+        "2: Decrease Disease Counter by 10",
+        "3: Decrease Poison Counter by 10",
+        "4: Decrease curse Counter by 10"
+      ],
+      "note": "Beastlord pet heal. Live EQ (Allakhazam spell 2620) prints slot 1 as 'Increase Hitpoints by 431. Max: 671'. Cross-checked against eqlbuildforge.com."
+    },
+    "Whirl Bolt": {
+      "url": "https://eqlwiki.com/Whirl_Bolt",
+      "source": "EverQuest Legends wiki",
+      "lines": [
+        "1: Root",
+        "2: Decrease Hitpoints by 200 per tick",
+        "3: Levitate(1)"
+      ],
+      "note": "NPC-cast on EQL; click effect on Azarack Skin Wristwraps. Identical lines on live EQ (Allakhazam spell 825)."
+    }
+  }
+}

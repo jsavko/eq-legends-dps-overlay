@@ -33,18 +33,39 @@ export const POSKY = JSON.parse(
 );
 
 /**
- * Effect descriptions for the reward cards' tooltips, fetched from the spells' own
- * P99 wiki pages by `fetch-posky.js --write`. `effects` maps spell name → { url,
- * lines }; `missing` names the Legends-only effects the wiki lacks — those render
- * with NO tooltip, because a hand-authored description would be a guess wearing a
- * tooltip's clothes. Absence of the whole file just means no tooltips anywhere.
+ * Effect descriptions for the reward cards' tooltips, from two snapshots merged at
+ * load. `effects.json` is fetched from the spells' own P99 wiki pages by
+ * `fetch-posky.js --write`; `effects-legends.json` is hand-TRANSCRIBED (copied
+ * verbatim, URL recorded per entry — never authored, which would be a guess wearing
+ * a tooltip's clothes) from a real spell database, covering the Luclin-era spells a
+ * classic-era wiki cannot have. The supplement exists because P99 has no beastlord:
+ * without it, every effect on a beastlord's own quest pages lacked an entry and the
+ * tooltip surface went 100% silent for the one class the player plays.
+ *
+ * Merge rules, both load-bearing: the fetcher only ever rewrites effects.json, so a
+ * wiki refresh cannot clobber the supplement; and where both files know a spell the
+ * fetched snapshot wins, keeping the supplement strictly a gap-filler. `effects`
+ * maps spell name → { url, lines, source? }; `missing` is what neither file covers —
+ * those render an honest "no description" popup, never a guessed one.
  */
 export const EFFECTS = (() => {
-  try {
-    return JSON.parse(fs.readFileSync(new URL('./effects.json', import.meta.url), 'utf8'));
-  } catch {
-    return { attribution: null, effects: {}, missing: [] };
-  }
+  const read = (file) => {
+    try {
+      return JSON.parse(fs.readFileSync(new URL(file, import.meta.url), 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+  const wiki = read('./effects.json') ?? { attribution: null, effects: {}, missing: [] };
+  const legends = read('./effects-legends.json');
+  if (!legends) return wiki;
+  const effects = { ...legends.effects, ...wiki.effects };
+  return {
+    attribution: wiki.attribution,
+    legendsAttribution: legends.attribution ?? null,
+    effects,
+    missing: (wiki.missing ?? []).filter((name) => !effects[name]),
+  };
 })();
 
 /**
