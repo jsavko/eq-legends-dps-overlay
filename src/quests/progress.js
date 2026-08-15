@@ -242,11 +242,13 @@ export class QuestProgress {
    *
    * @param {{kind: string, item: string, npc?: string, disposition?: string,
    *   qty?: number, ts: number}} event
-   * @returns {{kind: 'loot'|'offer', refs: Array, needed: Array}|null} what was
-   *   counted, the slots the event touched, and the slots that still wanted the
-   *   item; null when nothing was counted — not a quest item, not a quest NPC, no
-   *   character yet, or a line already counted by a previous run. `kind` is what
-   *   lets the caller chip loot and never chip a hand-in.
+   * @returns {{kind: 'loot'|'offer', refs: Array, needed: Array,
+   *   completed?: Object|null}|null} what was counted, the slots the event touched,
+   *   and the slots that still wanted the item; null when nothing was counted — not
+   *   a quest item, not a quest NPC, no character yet, or a line already counted by
+   *   a previous run. `kind` is what lets the caller chip loot and not ordinary
+   *   hand-ins; `completed` (offers only) names the quest this hand-in finished, the
+   *   one hand-in that DOES chip.
    */
   feed(event) {
     if (!this.state || !event) return null;
@@ -256,13 +258,22 @@ export class QuestProgress {
       const slots = offerSlots(event.npc, event.item);
       if (!slots.length) return null;
       const chosen = slots.find((s) => (this.state.offers[s.ref]?.count ?? 0) === 0) ?? slots[0];
+      // Judged before the offer lands, like `needed` is for loot and for the same
+      // reason: "did this hand-in finish the quest?" compares the quest's state
+      // across the event, and counting first erases the before.
+      const wasDone = this.doneState(chosen.classId, chosen.questIndex).value;
       const rec = this.state.offers[chosen.ref] ?? (this.state.offers[chosen.ref] = { count: 0, lastTs: 0 });
       rec.count += event.qty ?? 1;
       rec.lastTs = Math.max(rec.lastTs, event.ts);
       this.state.lastTs = Math.max(this.state.lastTs ?? 0, event.ts);
       this.revision++;
       this.persist();
-      return { kind: 'offer', refs: [chosen], needed: [] };
+      // Only a flip is a completion: a quest an import or a dump already proved done
+      // stays quiet, and so does every hand-in before the last one.
+      const completed = !wasDone && this.doneState(chosen.classId, chosen.questIndex).value
+        ? { classId: chosen.classId, className: chosen.className, questIndex: chosen.questIndex, reward: chosen.reward }
+        : null;
+      return { kind: 'offer', refs: [chosen], needed: [], completed };
     }
 
     if (event.kind !== 'loot') return null;
@@ -319,6 +330,24 @@ export class QuestProgress {
       sub = `${refs.length} class tests want this — all covered`;
     }
     return { text: first.itemName, sub };
+  }
+
+  /**
+   * The chip for the hand-in that finished a quest — the one exception to hand-ins
+   * being chipless. An ordinary offer is ledger movement the window refresh covers;
+   * the offer that flips a quest to done is the moment the whole grind existed for,
+   * and the ring that exposed the backtick bug went un-toasted at exactly this moment.
+   * The reward leads because it is what the player just earned; the class underneath
+   * says which of the sixteen tests closed. Announced once by construction: feed()
+   * reports `completed` only on the not-done → done flip, so the tenth re-offer of a
+   * finished quest's rune says nothing.
+   *
+   * @param {{className: string, reward: string}|null} completed  feed()'s answer
+   * @returns {{text: string, sub: string}|null}
+   */
+  completionChip(completed) {
+    if (!completed) return null;
+    return { text: completed.reward, sub: `${completed.className} quest complete` };
   }
 
   /**

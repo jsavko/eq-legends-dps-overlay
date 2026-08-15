@@ -464,11 +464,13 @@ async function startTailing(logPath) {
       // reads as needed rather than deriving "owned" and silencing itself. Every
       // counted LOOT chips (the store words the coverage and keeps the one silence,
       // fully-covered runes); a hand-in is ledger movement worth a window refresh,
-      // never a chip.
+      // never a chip — except the one that flips its quest to done, which is the
+      // moment the grind existed for and the store announces exactly once.
       const questCounted = quests?.feedLine(line, event);
       if (questCounted) {
         notifyQuestsChanged();
         if (questCounted.kind === 'loot') noteQuestLoot(questCounted);
+        else if (questCounted.completed) noteQuestComplete(questCounted.completed);
       }
     }
     // The parser learns the character's own name from the log rather than only from the
@@ -1031,6 +1033,19 @@ function noteQuestLoot({ refs, needed }) {
   // The store decides the wording and the one silence (a fully-covered rune) —
   // this is just the push into the chip stack.
   const chip = quests?.lootChip(refs, needed);
+  if (!chip) return;
+  questChips.push({ id: ++questChipSeq, ...chip, ts: Date.now() });
+  questChipsRevision++;
+}
+
+/**
+ * The hand-in that finished a quest, as a chip: the reward earned up top, the class
+ * test it closes underneath. Fires only on the not-done → done flip — feed() reports
+ * `completed` exactly once per quest — so unlike the loot chip this one never has to
+ * word its own repetition away.
+ */
+function noteQuestComplete(completed) {
+  const chip = quests?.completionChip(completed);
   if (!chip) return;
   questChips.push({ id: ++questChipSeq, ...chip, ts: Date.now() });
   questChipsRevision++;

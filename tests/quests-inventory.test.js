@@ -24,7 +24,7 @@ const snapQuest = (store, classId, qi) =>
 
 test('the real dump parses: header and Empty rows skipped, names normalized, counts summed', () => {
   const items = parseInventory(DUMP);
-  assert.equal(items.size, 161, 'the fixture holds 161 distinct item keys');
+  assert.equal(items.size, 253, 'the fixture holds 253 distinct item keys');
   assert.equal(items.has('empty'), false);
   assert.equal(items.has('location'), false);
 
@@ -35,6 +35,22 @@ test('the real dump parses: header and Empty rows skipped, names normalized, cou
   assert.equal(items.has('ornament of the oracle +2'), false);
   // The same name across several slots sums into one count.
   assert.equal(items.get('golem metal wand (exaltation)'), 3);
+});
+
+test("a dump row spelled with EQ's backtick folds onto the dataset's apostrophe key", () => {
+  // The real dump writes "Al`Kabor's Cap of Binding" — backtick AND apostrophe in one
+  // name — where the dataset says "Al'Kabor's Cap of Binding". Two bugs stacked on
+  // this one row: the backtick key matched nothing, and the row itself is one of the
+  // three-column Equipment rows the old four-column minimum skipped. Either alone kept
+  // the wizard turn-in unproven.
+  const items = parseInventory(DUMP);
+  assert.equal(items.get(questItemKey("Al'Kabor's Cap of Binding")), 1);
+});
+
+test('three-column rows — equipment sets, augments — parse with an implicit count of 1', () => {
+  const items = parseInventory('Location\tName\tID\tCount\tSlots\nEquipment\tGhoulbane +5\t5403\nAugmentation\tGhoulbane (Exaltation)\t5403');
+  assert.equal(items.get('ghoulbane'), 1);
+  assert.equal(items.get('ghoulbane (exaltation)'), 1);
 });
 
 test('a half-written dump yields the rows it has instead of throwing', () => {
@@ -50,9 +66,11 @@ test('applyInventory keeps only the names the dataset knows, stamped with the du
   const store = freshStore();
   const result = store.applyInventory(parseInventory(DUMP), 1000);
   assert.equal(result.ok, true);
-  // 36 turn-in items and 7 quest rewards, measured off the real dump — the rest of the
-  // 161 keys are bank clutter the ledger has no question about.
-  assert.equal(result.matched, 43);
+  // 37 turn-in items and 53 quest rewards, measured off the real dump — the rest of
+  // the 253 keys are bank clutter the ledger has no question about. The reward count
+  // dwarfs the old 7 because the Equipment section, where finished rewards actually
+  // live, is three-column rows the parser used to skip.
+  assert.equal(result.matched, 90);
 
   const flute = snapItem(store, 'monk', 0, 0);
   assert.equal(typeof flute.inventory, 'number');
@@ -111,8 +129,11 @@ test('a tradeable reward in the bags proves nothing and derives nothing', () => 
   assert.equal(quest.doneSource, null);
 });
 
-test('the real dump proves seven turn-ins and forty owned slots', () => {
+test('the real dump proves fifty-two turn-ins and forty-one owned slots', () => {
   // The headline: one in-game /outputfile against a fresh ledger, before any log line.
+  // Fifty-two agrees with the player's own eqlposky import (~fifty quests marked done)
+  // — the seven this test used to assert was the fraction visible before the
+  // three-column Equipment rows and the backtick fold landed.
   const store = freshStore();
   store.applyInventory(parseInventory(DUMP), 1000);
   const snap = store.snapshot();
@@ -124,9 +145,10 @@ test('the real dump proves seven turn-ins and forty owned slots', () => {
       for (const item of quest.items) if (item.ownedSource === 'inventory') ownedByInventory.push(item.ref);
     }
   }
-  assert.equal(doneByInventory.length, 7);
+  assert.equal(doneByInventory.length, 52);
   assert.ok(doneByInventory.includes("Ton Po's Shoulder Wraps"));
-  assert.equal(ownedByInventory.length, 40);
+  assert.ok(doneByInventory.includes("Al'Kabor's Cap of Binding"), 'the two-bug row proves its turn-in');
+  assert.equal(ownedByInventory.length, 41);
 });
 
 // -------------------------------------------------------------------- the precedence

@@ -50,15 +50,28 @@ export const EFFECTS = (() => {
 /**
  * Collapse an item name to the key everything matches on.
  *
- * Three normalizations, each earned by a real mismatch: the article the log puts in
- * front of a looted item ("a Mote of Lesser Potential"), the ` +N` upgrade suffix
- * Legends appends to drops the data names bare, and case — the eqlposky progress
- * export lowercases its `currencyOwned` and `inventoryCounts` keys, so the index
- * lowercases everything rather than special-casing an import format at lookup time.
+ * Four normalizations, each earned by a real mismatch: the article the log puts in
+ * front of a looted item ("a Mote of Lesser Potential"); the ` +N` upgrade suffix
+ * Legends appends to drops the data names bare; the backtick EQ's item database
+ * spells some names with where the dataset writes an apostrophe; and case — the
+ * eqlposky progress export lowercases its `currencyOwned` and `inventoryCounts`
+ * keys, so the index lowercases everything rather than special-casing an import
+ * format at lookup time.
+ *
+ * The backtick fold needs its evidence stated, because the glyph choice is PER-ITEM,
+ * not a convention either side follows: the same live log loots "Griffon's Beak"
+ * with a real apostrophe but "Spiritualist`s Ring" with a backtick, and the
+ * inventory dump writes "Al`Kabor's Cap of Binding" with both glyphs in one name
+ * (the dataset: "Al'Kabor's Cap of Binding"). The dataset contains no backticks at
+ * all, so folding toward the apostrophe is lossless — and it is a fold, not a strip,
+ * because apostrophes already live in persisted ledger keys ("griffon's beak") that
+ * deleting the glyph would orphan. The ring cost a night's tracking: looted and
+ * handed in on 2026-08-14, and neither line matched anything.
  */
 export function questItemKey(raw) {
   return stripArticle(String(raw ?? '').trim())
     .replace(/\s\+\d+$/, '')
+    .replace(/`/g, "'")
     .toLowerCase();
 }
 

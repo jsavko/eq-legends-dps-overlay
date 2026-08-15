@@ -13,9 +13,19 @@
  * skipped by NAME, not by count, because their count column is 0 anyway and a real
  * item named by the dataset can never be called Empty. Names carry the same ` +N`
  * upgrade suffixes the log's loot lines do, so the same normalization
- * (`questItemKey`: article + suffix strip, lowercase) folds them onto dataset names —
- * which also means a base item and its upgraded twin sum into one count, exactly what
- * a "do I have this turn-in" question wants.
+ * (`questItemKey`: article + suffix strip, backtick fold, lowercase) folds them onto
+ * dataset names — which also means a base item and its upgraded twin sum into one
+ * count, exactly what a "do I have this turn-in" question wants.
+ *
+ * Not every row fills the header's columns. The `Equipment`, `Augmentation` and
+ * `Activated` sections — 109 of the live dump's 637 rows — write only
+ * `Location	Name	ID`, and those sections are inherently unstacked, so a row IS one
+ * item and parses with an implicit count of 1. The check that admits them (a numeric
+ * ID) is also what keeps a torn write out: the game writes this file live, and a line
+ * cut off mid-name has no ID column to show. This mattered in practice: 45 of the live
+ * character's 52 provable turn-ins — NO DROP rewards sitting in Equipment rows — were
+ * invisible to the old four-column minimum, and the count the ledger could derive
+ * agreed with the player's eqlposky import only after these rows joined in.
  *
  * What the dump does NOT contain, confirmed live: currency-stored Wind Runes. Their
  * owned state stays log-derived (stored-loot counts minus offers); nothing here may be
@@ -38,10 +48,12 @@ export function parseInventory(text) {
   const items = new Map();
   for (const line of String(text ?? '').split(/\r?\n/)) {
     const cols = line.split('\t');
-    if (cols.length < 4) continue;
-    const [location, name, , count] = cols;
+    if (cols.length < 3) continue;
+    const [location, name, id, count] = cols;
     if (location === 'Location' || !name || name === 'Empty') continue;
-    const qty = Number(count);
+    // Three columns is the unstacked sections' whole row; the numeric ID separates
+    // that real shape from a line the game had not finished writing.
+    const qty = cols.length >= 4 ? Number(count) : (/^\d+$/.test(id) ? 1 : NaN);
     if (!Number.isFinite(qty) || qty <= 0) continue;
     const key = questItemKey(name);
     items.set(key, (items.get(key) ?? 0) + qty);

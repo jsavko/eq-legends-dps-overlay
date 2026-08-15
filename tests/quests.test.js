@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  POSKY, questItemKey, isRune, lookup, itemRef, questRef, allItemKeys,
+  POSKY, questItemKey, isRune, lookup, offerSlots, rewardLookup, itemRef, questRef,
+  allItemKeys,
 } from '../src/quests/index.js';
 import { QuestProgress, questStoreKey, QUEST_STORE_VERSION } from '../src/quests/progress.js';
 
@@ -51,11 +52,15 @@ test('every quest names exactly one rune, and every rune is a real Wind Rune', (
 
 // --------------------------------------------------------------------- normalization
 
-test('questItemKey folds the three spellings the log can wrap around one item', () => {
+test('questItemKey folds the four spellings the log can wrap around one item', () => {
   const base = questItemKey('Light Woolen Mantle');
   assert.equal(questItemKey('a Light Woolen Mantle'), base);      // looted with article
   assert.equal(questItemKey('Light Woolen Mantle +2'), base);     // Legends upgrade suffix
   assert.equal(questItemKey('LIGHT WOOLEN MANTLE'), base);        // export files lowercase
+  // The backtick EQ's item database spells some names with, folded onto the
+  // apostrophe the dataset writes — and the folds compose with the other three.
+  assert.equal(questItemKey('Spiritualist`s Ring'), questItemKey("Spiritualist's Ring"));
+  assert.equal(questItemKey('a Spiritualist`s Ring +1'), questItemKey("Spiritualist's Ring"));
   // The suffix strip is anchored: a name that legitimately ends in a number keeps it.
   assert.notEqual(questItemKey('Torn Page of Magi`kot pg. 4'), questItemKey('Torn Page of Magi`kot'));
 });
@@ -64,6 +69,23 @@ test('lookup answers through the same normalization the index was built with', (
   assert.deepEqual(lookup('a Crude Wooden Flute').map((r) => r.ref), ['bard:0:0']);
   assert.equal(lookup('Light Woolen Mantle +2').length, 1);
   assert.equal(lookup('Rusty Short Sword').length, 0);
+});
+
+test("the log's backtick spelling reaches the slots the dataset names with apostrophes", () => {
+  // The two lines that exposed the mismatch, spelled as the live log spelled them on
+  // 2026-08-14 — the ring was looted and handed in and neither line matched anything,
+  // because the dataset writes "Spiritualist's Ring".
+  assert.deepEqual(lookup('a Spiritualist`s Ring').map((r) => r.ref), ['shaman:4:1']);
+  assert.deepEqual(
+    offerSlots('Medicine Man Veetra', 'Spiritualist`s Ring').map((r) => r.ref),
+    ['shaman:4:1'],
+  );
+  // The glyph is per-item, not a convention: the same log loots this one with a real
+  // apostrophe, so the apostrophe spelling must keep working untouched.
+  assert.deepEqual(lookup("Griffon's Beak").map((r) => r.ref), ['necromancer:4:0']);
+  // And one inventory-dump name carries BOTH glyphs at once, which is what rules out
+  // any per-side rewrite: only a fold at the key can make this match.
+  assert.equal(rewardLookup("Al`Kabor's Cap of Binding")?.reward, "Al'Kabor's Cap of Binding");
 });
 
 test('one rune serves many classes and lookup names every one of them', () => {
@@ -322,6 +344,34 @@ test('a quest with every slot offered derives done, and the caption credits the 
   const quest = snapQuest(store, 'bard', 0);
   assert.equal(quest.done, true);
   assert.equal(quest.doneSource, 'log');
+});
+
+test('the final hand-in reports the completion; earlier ones and re-offers do not', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  const first = store.feed(offer('Crude Wooden Flute', 'Cilin Spellsinger', { ts: 1000 }));
+  assert.equal(first.completed, null, 'a hand-in that leaves slots open finishes nothing');
+
+  const last = store.feed(offer('Wind Rune Azia', 'Cilin Spellsinger', { ts: 2000 }));
+  assert.equal(last.completed?.reward, "Ervaj's Flute of Flight");
+  assert.equal(last.completed.className, 'Bard');
+  assert.deepEqual(
+    store.completionChip(last.completed),
+    { text: "Ervaj's Flute of Flight", sub: 'Bard quest complete' },
+  );
+
+  // A re-offer finds the quest already done and announces nothing — the chip is
+  // worth reading precisely because it can only ever appear once per quest.
+  const again = store.feed(offer('Wind Rune Azia', 'Cilin Spellsinger', { ts: 3000 }));
+  assert.equal(again.completed, null);
+  assert.equal(store.completionChip(again.completed), null);
+});
+
+test('a quest an import already proved done completes silently when the log catches up', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  store.applyImport({ version: 1, turnedIn: { 'bard:0': true } });
+  store.feed(offer('Crude Wooden Flute', 'Cilin Spellsinger', { ts: 1000 }));
+  const last = store.feed(offer('Wind Rune Azia', 'Cilin Spellsinger', { ts: 2000 }));
+  assert.equal(last.completed, null, 'the ledger already said done; re-announcing is noise');
 });
 
 test('rune-in-currency arithmetic: stored loot derives owned, an offer takes it back', () => {
