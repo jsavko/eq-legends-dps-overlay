@@ -19,19 +19,72 @@
  * import refs), and the window remembers a selection rather than reordering anything.
  */
 export function classGroups(snapshot) {
-  return (snapshot?.classes ?? []).map((cls) => ({
-    id: cls.id,
-    name: cls.name,
-    doneCount: cls.quests.filter((q) => q.done).length,
-    total: cls.quests.length,
-    quests: cls.quests.map((q) => ({
-      ref: q.ref,
-      reward: q.reward,
-      done: q.done,
-      ownedCount: q.items.filter((i) => i.owned).length,
-      itemCount: q.items.length,
-    })),
-  }));
+  return (snapshot?.classes ?? []).map((cls) => {
+    const quests = cls.quests.map((q) => {
+      const ownedCount = q.items.filter((i) => i.owned).length;
+      return {
+        ref: q.ref,
+        reward: q.reward,
+        done: q.done,
+        ownedCount,
+        itemCount: q.items.length,
+        // READY is plain arithmetic over the store's decided claims: every slot owned,
+        // quest not yet turned in. The empty-items guard is paranoia against a future
+        // dataset refresh — a quest with nothing to collect must not read as ready.
+        ready: !q.done && q.items.length > 0 && ownedCount === q.items.length,
+      };
+    });
+    return {
+      id: cls.id,
+      name: cls.name,
+      doneCount: quests.filter((q) => q.done).length,
+      total: quests.length,
+      readyCount: quests.filter((q) => q.ready).length,
+      quests,
+    };
+  });
+}
+
+/**
+ * item name → every class wanting that item, as `{classId, className, reward, done}`,
+ * built from the same snapshot the window renders so the two can never disagree.
+ *
+ * Names match on plain string equality rather than `questItemKey` — safe because every
+ * shared name in the dataset is spelled identically across classes (all 29 shared
+ * groups, checked 2026-08-15), and the property test in quests-organize pins that
+ * against future dataset refreshes. Deduped by class; if a class ever wanted one item
+ * in two of its quests, the undone quest wins the slot, because "still needs it" is
+ * the actionable claim and "turned in" would silence it wrongly.
+ */
+export function sharedIndex(snapshot) {
+  const index = new Map();
+  for (const cls of snapshot?.classes ?? []) {
+    for (const quest of cls.quests) {
+      for (const item of quest.items) {
+        const slots = index.get(item.name) ?? [];
+        const existing = slots.find((s) => s.classId === cls.id);
+        if (existing) {
+          if (existing.done && !quest.done) {
+            existing.reward = quest.reward;
+            existing.done = quest.done;
+          }
+        } else {
+          slots.push({ classId: cls.id, className: cls.name, reward: quest.reward, done: quest.done });
+          index.set(item.name, slots);
+        }
+      }
+    }
+  }
+  return index;
+}
+
+/**
+ * The OTHER classes wanting one item — the competition, from the viewpoint of the
+ * class whose pane is open. Empty for a single-class item, which is also how the
+ * items pane knows to render nothing at all.
+ */
+export function sharedWith(index, itemName, classId) {
+  return (index.get(itemName) ?? []).filter((s) => s.classId !== classId);
 }
 
 /** The titlebar's one number: tests turned in, out of all of them. */
@@ -96,9 +149,14 @@ export function doneCaption(quest) {
     // that tells the player which quests are mid-turn-in without opening each one.
     const total = (quest.items ?? []).length;
     const offered = (quest.items ?? []).filter((i) => (i.offered ?? 0) > 0).length;
-    return offered
-      ? `${offered} of ${total} handed in per the log`
-      : 'checks itself when the log sees every item handed in';
+    if (offered) return `${offered} of ${total} handed in per the log`;
+    // Every item owned and nothing handed in yet: the quest is ready, and the hint is
+    // where the donebox says so. The handed-in caption above keeps precedence — once
+    // a turn-in has started, "2 of 4 handed in" is the more useful sentence.
+    if (total > 0 && (quest.items ?? []).every((i) => i.owned)) {
+      return 'every item owned — ready to hand in';
+    }
+    return 'checks itself when the log sees every item handed in';
   }
   switch (quest.doneSource) {
     case 'log': {
@@ -350,8 +408,8 @@ export function parseSources(source) {
 // The rail filter
 // ---------------------------------------------------------------------------
 
-/** The three rail modes, in display order. */
-export const RAIL_FILTERS = ['all', 'progress', 'done'];
+/** The four rail modes, in display order. */
+export const RAIL_FILTERS = ['all', 'progress', 'done', 'ready'];
 
 /**
  * Filter the rail's quests without touching its classes: every class header stays
@@ -360,9 +418,11 @@ export const RAIL_FILTERS = ['all', 'progress', 'done'];
  * statement about the class, not about the current view.
  */
 export function railFilter(groups, mode) {
-  if (mode !== 'progress' && mode !== 'done') return groups;
-  return groups.map((cls) => ({
-    ...cls,
-    quests: cls.quests.filter((q) => (mode === 'done' ? q.done : !q.done)),
-  }));
+  const keep = {
+    progress: (q) => !q.done,
+    done: (q) => q.done,
+    ready: (q) => q.ready,
+  }[mode];
+  if (!keep) return groups;
+  return groups.map((cls) => ({ ...cls, quests: cls.quests.filter(keep) }));
 }

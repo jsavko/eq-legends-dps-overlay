@@ -17,6 +17,7 @@ import {
   classGroups, doneTotals, questByRef, firstQuestRef, splitLine, importStamp,
   doneCaption, ownedTitle, ownedLabel,
   parseRewardStats, parseSources, railFilter, effectName, effectMeta,
+  sharedIndex, sharedWith,
 } from './organize.js';
 
 const $ = (id) => document.getElementById(id);
@@ -104,11 +105,12 @@ function renderRail() {
     const head = document.createElement('li');
     head.className = `chead${folded ? ' folded' : ''}`;
     const row = span('crow', '');
-    row.append(
-      span('chev', folded ? '▸' : '▾'),
-      span('cname', cls.name),
-      span('n', `${cls.doneCount} / ${cls.total} done`),
-    );
+    row.append(span('chev', folded ? '▸' : '▾'), span('cname', cls.name));
+    // The ready badge renders on folded headers too — "which tests can I go hand in"
+    // is answered at a glance, without unfolding anything. Gold, never balm: balm
+    // stays reserved for done.
+    if (cls.readyCount) row.append(span('ready', `${cls.readyCount} ready`));
+    row.append(span('n', `${cls.doneCount} / ${cls.total} done`));
     const bar = span('bar', '');
     const barFill = document.createElement('i');
     barFill.style.width = `${cls.total ? (100 * cls.doneCount) / cls.total : 0}%`;
@@ -130,7 +132,12 @@ function renderRail() {
       const li = document.createElement('li');
       li.className = `qrow${q.done ? ' done' : ''}`;
       li.setAttribute('aria-selected', String(q.ref === selected));
-      li.append(span('name', q.reward), span('st', q.done ? '✓' : `${q.ownedCount}/${q.itemCount}`));
+      // A ready quest trades its owned count for the pill — "4/4" made the reader do
+      // the arithmetic that READY states outright.
+      const st = q.done ? span('st', '✓')
+        : q.ready ? span('st ready', 'READY')
+          : span('st', `${q.ownedCount}/${q.itemCount}`);
+      li.append(span('name', q.reward), st);
       li.addEventListener('click', () => {
         selected = q.ref;
         localStorage.setItem('quests.selected', selected);
@@ -188,7 +195,7 @@ function renderQuest() {
     : 'Turn-ins are read from your log; run /outputfile inventory in game to prove pre-log '
       + 'history. An import is the last resort, and every mark stays editable.';
 
-  renderItems(quest);
+  renderItems(cls, quest);
 }
 
 /**
@@ -288,9 +295,14 @@ function effectTip(name, entry, effect) {
 
 // ---------------------------------------------------------------------- items pane
 
-function renderItems(quest) {
+function renderItems(cls, quest) {
   $('i-owned').textContent =
     `${quest.items.filter((i) => i.owned).length} of ${quest.items.length} owned`;
+
+  // The competition index, rebuilt per render from the same snapshot the rows come
+  // from — cheap (one pass over ~190 dataset items) and impossible to disagree with
+  // what's on screen.
+  const shared = sharedIndex(snapshot);
 
   const list = $('item-list');
   list.replaceChildren();
@@ -329,6 +341,23 @@ function renderItems(quest) {
     if (split) count.append(span('split', split));
 
     li.append(own, name, src, count);
+
+    // The competition footer: which OTHER classes want this item, each with its state
+    // in the wording — the decision aid for who gets the drop, and for the shared-rune
+    // case where one surviving rune makes several quests read READY at once. Absent
+    // entirely on a single-class item; this window says nothing it doesn't know.
+    const others = sharedWith(shared, item.name, cls.id);
+    if (others.length) {
+      const row = span('shared', '');
+      row.append(span('lead', 'also wanted by'));
+      for (const o of others) {
+        const chip = span(`schip${o.done ? ' covered' : ''}`, '');
+        chip.append(span('who', o.className), span('state', o.done ? '✓ turned in' : 'still needs it'));
+        row.append(chip);
+      }
+      li.append(row);
+    }
+
     list.append(li);
   }
 }

@@ -279,6 +279,97 @@ test('ownedLabel is the visible receipt, or nothing for an unowned item', () => 
   assert.equal(ownedLabel({ owned: false, ownedSource: null }), null);
 });
 
+// ------------------------------------------------- ready flags and shared items
+
+import { sharedIndex, sharedWith } from '../src/renderer/quests/organize.js';
+import { lookup, allItemKeys } from '../src/quests/index.js';
+
+test('classGroups flags a quest ready when every item is owned and it is not done', () => {
+  const groups = classGroups(realSnapshot());
+  const bard = groups[0];
+  // bard:0 stands 2/2 owned (a claim and a derived rune) and unturned-in: ready.
+  assert.equal(bard.quests[0].ready, true);
+  // bard:1 is done — done and ready are mutually exclusive by construction.
+  assert.equal(bard.quests[1].done, true);
+  assert.equal(bard.quests[1].ready, false);
+  assert.equal(bard.readyCount, 1);
+  // Nothing owned anywhere else: no other class shows ready.
+  assert.equal(groups.slice(1).every((c) => c.readyCount === 0), true);
+});
+
+test('an all-owned quest that is already done is not ready, and empty items never are', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'quests-org-'));
+  const store = new QuestProgress({ dir, character: 'Rhale', server: 'oggok' });
+  store.setOwned('bard:0:0', true);
+  store.setOwned('bard:0:1', true);
+  store.setDone('bard:0', true);
+  const bard = classGroups(store.snapshot())[0];
+  assert.equal(bard.quests[0].ownedCount, 2);
+  assert.equal(bard.quests[0].ready, false, 'turned in already — nothing left to hand in');
+
+  // The dataset has no zero-item quest; the guard exists for the refresh that adds one.
+  const synthetic = { classes: [{ id: 'x', name: 'X', quests: [{ ref: 'x:0', reward: 'R', done: false, items: [] }] }] };
+  assert.equal(classGroups(synthetic)[0].quests[0].ready, false);
+});
+
+test('the ready rail filter shows only ready quests and every class header survives', () => {
+  assert.equal(RAIL_FILTERS.includes('ready'), true);
+  const ready = railFilter(classGroups(realSnapshot()), 'ready');
+  assert.equal(ready.length, 16, 'every class header survives every filter');
+  assert.deepEqual(ready[0].quests.map((q) => q.ref), ['bard:0']);
+  assert.equal(ready[1].quests.length, 0);
+  assert.equal(ready[0].doneCount, 1, 'counts stay the class totals, not the view');
+});
+
+test('doneCaption says ready when everything is owned, and hand-ins keep precedence', () => {
+  assert.equal(doneCaption({ done: false, doneSource: null, items: [{ owned: true }, { owned: true }] }),
+    'every item owned — ready to hand in');
+  // One hand-in started: the partial-progress caption is the more useful sentence.
+  assert.equal(doneCaption({ done: false, doneSource: null, items: [{ owned: true, offered: 1 }, { owned: true }] }),
+    '1 of 2 handed in per the log');
+  assert.match(doneCaption({ done: false, doneSource: null, items: [{ owned: true }, {}] }),
+    /checks itself/);
+});
+
+test('sharedIndex maps a name to every class wanting it, from the snapshot itself', () => {
+  const index = sharedIndex(realSnapshot());
+  assert.deepEqual(index.get('Wind Rune Izah').map((s) => s.classId),
+    ['beastlord', 'druid', 'enchanter', 'paladin', 'rogue', 'shadowknight', 'wizard']);
+  const knuckles = index.get('Brass Knuckles');
+  assert.deepEqual(knuckles.map((s) => s.classId), ['beastlord', 'monk']);
+  assert.equal(knuckles[1].reward, "Wu's Fist of Mastery");
+});
+
+test('sharedWith answers with the OTHER classes, states riding along', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'quests-org-'));
+  const store = new QuestProgress({ dir, character: 'Rhale', server: 'oggok' });
+  store.setDone('monk:5', true); // the monk test that wants Brass Knuckles
+  const index = sharedIndex(store.snapshot());
+  assert.deepEqual(sharedWith(index, 'Brass Knuckles', 'beastlord'),
+    [{ classId: 'monk', className: 'Monk', reward: "Wu's Fist of Mastery", done: true }]);
+  // A single-class item has no competition and answers with nothing at all.
+  assert.deepEqual(sharedWith(index, 'Crude Wooden Flute', 'bard'), []);
+  // An unknown name answers empty rather than throwing.
+  assert.deepEqual(sharedWith(index, 'Rusty Sword', 'bard'), []);
+});
+
+test('property: every shared item group spells its name identically across classes', () => {
+  // sharedIndex matches on raw string equality where the store matches on
+  // questItemKey. That is safe exactly as long as the dataset spells a shared name
+  // the same way in every class that wants it — true for all 29 shared groups today.
+  // A posky.json refresh that breaks it fails here, in WSL, instead of silently
+  // dropping chips from the items pane.
+  let sharedGroups = 0;
+  for (const key of allItemKeys()) {
+    const slots = lookup(key);
+    if (new Set(slots.map((s) => s.classId)).size < 2) continue;
+    sharedGroups++;
+    assert.equal(new Set(slots.map((s) => s.itemName)).size, 1,
+      `"${key}" is spelled differently across classes`);
+  }
+  assert.ok(sharedGroups > 0, 'the dataset stopped sharing items — the chips feature is dead code');
+});
+
 test('effectMeta condenses the parenthetical without summarizing anything', () => {
   assert.equal(effectMeta('Fury (Must Equip, Casting Time: Instant) at Level 45'),
     'must equip · instant · at level 45');

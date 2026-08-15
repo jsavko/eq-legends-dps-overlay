@@ -115,6 +115,16 @@ button:hover { border-color: var(--ember); }
 }
 .chead.folded .cname { color: var(--ink-faint); }
 .chead .n { margin-left: auto; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+/* The ready badge stays gold even on a folded header — that glance is the feature.
+   When present it takes the auto margin so the done count sits flush beside it. */
+.chead .ready {
+  margin-left: auto;
+  font-size: 12.5px; font-weight: 600; color: var(--gold);
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line));
+  border-radius: 9px; padding: 1px 9px;
+  white-space: nowrap;
+}
+.chead .ready + .n { margin-left: 0; }
 .chead .bar {
   display: block; height: 3px; margin-top: 6px; border-radius: 2px;
   background: var(--panel-2); overflow: hidden;
@@ -133,6 +143,14 @@ button:hover { border-color: var(--ember); }
 .qrow[aria-selected="true"] .name { color: var(--gold); font-weight: 600; }
 .qrow .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; }
 .qrow .st { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+/* Every item owned, not yet turned in: the count becomes a filled gold pill — "4/4"
+   made the reader do the arithmetic that READY states outright. Gold, never balm;
+   balm is reserved for done. */
+.qrow .st.ready {
+  background: var(--gold); color: #17130f;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
+  border-radius: 9px; padding: 2px 9px;
+}
 .qrow.done .name { color: var(--ink-faint); }
 .qrow.done .st { color: var(--balm); }
 
@@ -216,7 +234,9 @@ button:hover { border-color: var(--ember); }
 .item {
   display: grid;
   grid-template-columns: 30px 1fr auto;
-  grid-template-areas: "own name count" ". src count";
+  /* The shared row spans under the count column too: the rune's six competitor chips
+     need the width, and an empty area costs a zero-height row and nothing else. */
+  grid-template-areas: "own name count" ". src count" ". shared shared";
   column-gap: 12px; align-items: baseline;
   padding: 12px 14px; margin-bottom: 10px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
@@ -248,6 +268,28 @@ button:hover { border-color: var(--ember); }
 .item .count .big { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--gold); }
 .item .count .big.zero { color: var(--ink-faint); font-weight: 400; }
 .item .count .split { display: block; font-size: 12.5px; color: var(--ink-faint); white-space: nowrap; }
+
+/* The competition footer: which other classes want this item, one chip each, the
+   state in the wording. Distinct from the source chips above it — those answer
+   "where does it drop", these answer "who else is collecting it". */
+.item .shared {
+  grid-area: shared; margin-top: 7px;
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+}
+.item .shared .lead { font-size: 12.5px; color: var(--ink-faint); }
+.item .shared .schip {
+  font-size: 12.5px; background: var(--panel-2); border-radius: 3px; padding: 2px 8px;
+  white-space: nowrap;
+}
+.item .shared .schip .who {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink); margin-right: 5px;
+}
+.item .shared .schip .state { color: var(--ink-dim); }
+/* A class that already turned its test in has stopped competing — its name fades and
+   its state wears the done colour. */
+.item .shared .schip.covered .who { color: var(--ink-faint); }
+.item .shared .schip.covered .state { color: var(--balm); }
 
 /* The rune row: a zone-wide drop, not an island's — it dresses gold on purpose. */
 .item.rune { border-color: color-mix(in srgb, var(--gold) 34%, var(--line)); background: color-mix(in srgb, var(--panel) 92%, #3a2c12); }
