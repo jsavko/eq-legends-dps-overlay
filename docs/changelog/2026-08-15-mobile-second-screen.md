@@ -11,9 +11,13 @@ nothing leaves the LAN: the phone talks straight to an HTTP server inside the ov
 
 Off by default, on the session tracker's promise: `mobileEnabled: false` means main
 never constructs the server, no port opens, no firewall prompt appears, and the app is
-bit-for-bit what it was before the feature existed. The switch and the port live in
-Settings (new SECOND SCREEN section); the tray dialog only shows what is true — same
-one-owner rule that moved the alert switches out of the settings form.
+bit-for-bit what it was before the feature existed. **The dialog is the switch**: its
+off state has a "Turn on the second screen" button and its on state a quiet "Turn
+off" — the first cut bounced the player to Settings to flip a key the dialog had just
+named, which lasted exactly one use ("WTF do I need to go to another screen"). One
+owner still: Settings keeps only the port and a pointer to the dialog, and its Save
+deliberately does not write `mobileEnabled`, so it can never clobber what the dialog
+set — the same failure that moved the alert switches out of that form.
 
 ## The server (`src/main/mobile.js`)
 

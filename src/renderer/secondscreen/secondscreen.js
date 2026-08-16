@@ -11,6 +11,13 @@ const $ = (id) => document.getElementById(id);
 for (const btn of document.querySelectorAll('.open-settings')) {
   btn.addEventListener('click', () => window.api.openSettings());
 }
+// The switch lives HERE — the dialog that says "off" is the dialog that turns it on.
+// No local state flip: main rebuilds the server and pushes MOBILE_CHANGED, and the
+// redraw shows what is actually true (the QR, or why not).
+$('enable').addEventListener('click', () => window.api.setEnabled(true));
+$('disable').addEventListener('click', () => window.api.setEnabled(false));
+// Retrying is just asserting the same intent again: CONFIG_SET rebuilds wholesale.
+$('retry').addEventListener('click', () => window.api.setEnabled(true));
 
 window.api.onChanged(render);
 render(await window.api.mobileState());

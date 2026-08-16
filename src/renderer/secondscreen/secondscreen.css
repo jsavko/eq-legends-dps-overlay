@@ -85,3 +85,24 @@ button {
   cursor: pointer;
 }
 button:hover { border-color: var(--ember); }
+
+/* The one action each state is FOR reads as the one action: turn it on. */
+button.primary {
+  border-color: var(--gold);
+  color: var(--gold);
+  font-weight: 600;
+}
+button.primary:hover { border-color: var(--gold); background: var(--panel); filter: brightness(1.15); }
+
+/* Turning it off is deliberately quiet — present, never competing with the QR. */
+button.quiet {
+  border-color: transparent;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 13px;
+  padding: 4px 10px;
+}
+button.quiet:hover { color: var(--ink); border-color: var(--line); }
+
+.row { display: flex; gap: 10px; justify-content: center; }
+.row button { margin: 0; }

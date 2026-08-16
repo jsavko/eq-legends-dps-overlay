@@ -19,21 +19,25 @@
     <p id="alts" class="alts"></p>
     <p class="note">The first time it starts, Windows asks once to allow the overlay
       through the firewall — allow it and the prompt never returns.</p>
+    <button id="disable" class="quiet">Turn off</button>
   </section>
 
   <section id="off" hidden>
-    <p class="lead">The second screen is switched off.</p>
-    <p class="note">Turn it on under <b>MOBILE</b> in Settings and this dialog will
-      show the code to scan. Nothing leaves your network: the phone talks straight
-      to this PC.</p>
-    <button class="open-settings">Open Settings…</button>
+    <p class="lead">The second screen is off.</p>
+    <p class="note">Turn it on and this dialog shows the code to scan. Nothing leaves
+      your network: the phone talks straight to this PC. The first time, Windows asks
+      once to allow it through the firewall — allow it.</p>
+    <button id="enable" class="primary">Turn on the second screen</button>
   </section>
 
   <section id="failed" hidden>
     <p class="lead" id="failed-lead">The second screen could not start.</p>
     <p class="note" id="failed-note">The port may be in use by another program. Pick a
-      different port under <b>MOBILE</b> in Settings.</p>
-    <button class="open-settings">Open Settings…</button>
+      different port in Settings, or try again.</p>
+    <div class="row">
+      <button id="retry" class="primary">Try again</button>
+      <button class="open-settings">Open Settings…</button>
+    </div>
   </section>
 
   <script type="module" src="secondscreen.js"></script>
