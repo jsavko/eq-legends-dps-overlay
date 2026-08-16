@@ -341,6 +341,10 @@ function fillForm(cfg) {
   for (const c of SESSION_CATEGORIES) $(`session-${c}`).checked = session[c] !== false;
   syncSessionEnabled();
 
+  $('mobile-enabled').checked = cfg.mobileEnabled === true;
+  $('mobile-port').value = cfg.mobilePort ?? 8321;
+  syncMobileEnabled();
+
   $('hk-lock').value = cfg.hotkeys.toggleLock;
   $('hk-show').value = cfg.hotkeys.toggleVisible;
   $('hk-reset').value = cfg.hotkeys.resetEncounter;
@@ -424,6 +428,12 @@ function syncSessionEnabled() {
   for (const c of SESSION_CATEGORIES) $(`session-${c}`).disabled = !on;
   $('session-categories').classList.toggle('disabled', !on);
   $('open-session').disabled = !on;
+}
+
+/** Same disabled-not-hidden rule as the session block, one switch down. The dialog
+ *  button stays live either way: opened while off, it says so and points back here. */
+function syncMobileEnabled() {
+  $('mobile-port').disabled = !$('mobile-enabled').checked;
 }
 
 /**
@@ -534,6 +544,8 @@ function wireEvents() {
   $('open-triggers').addEventListener('click', () => window.api.openTriggers());
   $('open-session').addEventListener('click', () => window.api.openSession());
   $('session-enabled').addEventListener('change', syncSessionEnabled);
+  $('open-mobile').addEventListener('click', () => window.api.openSecondScreen());
+  $('mobile-enabled').addEventListener('change', syncMobileEnabled);
 
   $('browse-dir').addEventListener('click', async () => {
     const r = await window.api.pick('directory');
@@ -715,6 +727,10 @@ async function save() {
       meterLine: $('session-meter-line').checked,
       ...Object.fromEntries(SESSION_CATEGORIES.map((c) => [c, $(`session-${c}`).checked])),
     },
+    mobileEnabled: $('mobile-enabled').checked,
+    // A blank or mangled port falls back rather than saving NaN; main clamps the same
+    // way, so the two can only ever agree on what actually gets bound.
+    mobilePort: Math.min(65535, Math.max(1024, Number($('mobile-port').value) || 8321)),
     hotkeys: {
       toggleLock: $('hk-lock').value.trim(),
       toggleVisible: $('hk-show').value.trim(),

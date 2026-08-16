@@ -18,7 +18,7 @@ const RENDERER = path.join(HERE, '..', 'src', 'renderer');
  * hangs forever on a channel nobody is listening to. This is the check that care was
  * taken.
  */
-const PRELOADS = ['overlay', 'setup', 'history', 'alerts', 'timers', 'triggers', 'session', 'quests']
+const PRELOADS = ['overlay', 'setup', 'history', 'alerts', 'timers', 'triggers', 'session', 'quests', 'secondscreen']
   .map((dir) => [dir, path.join(RENDERER, dir, 'preload.cjs')])
   .filter(([, file]) => fs.existsSync(file));
 

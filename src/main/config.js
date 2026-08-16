@@ -10,6 +10,7 @@ import path from 'node:path';
 
 import { SESSION_CATEGORIES } from '../session/rules.js';
 import { storeKey } from './history.js';
+import { DEFAULT_MOBILE_PORT } from './mobile.js';
 
 /** Where the Daybreak launcher installs EverQuest Legends by default. */
 export const DEFAULT_LOG_DIR =
@@ -299,6 +300,20 @@ export const DEFAULTS = {
     meterLine: false,
   },
 
+  /**
+   * The second screen: a phone or tablet on the same LAN, watching over HTTP.
+   *
+   * OFF by default on the session tracker's promise — `main` never constructs the
+   * server, no port opens, no firewall prompt appears, and the app is bit-for-bit what
+   * it was before the feature existed. The token is generated ONCE, the first time the
+   * screen is enabled, and then kept: it rides in the QR code, and a token that
+   * changed on every launch would silently orphan every phone that had scanned one.
+   */
+  mobileEnabled: false,
+  mobilePort: DEFAULT_MOBILE_PORT,
+  /** @type {string|null} pairing token; null until first enabled. */
+  mobileToken: null,
+
   hotkeys: {
     toggleLock: 'Control+Shift+L',
     toggleVisible: 'Control+Shift+H',
@@ -337,6 +352,11 @@ export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
 
 /** Every key that can change whether the boss-timer window should exist. */
 export const TIMER_KEYS = ['triggerTimers', 'alertsMuted'];
+
+/** Every key whose change means the second-screen server must be rebuilt. The token
+ *  is deliberately absent: nothing edits it after first generation, and a patch that
+ *  wrote it arrives FROM the rebuild path — reacting to it would loop. */
+export const MOBILE_KEYS = ['mobileEnabled', 'mobilePort'];
 
 /**
  * The seven session categories, in the order they read in the settings form.

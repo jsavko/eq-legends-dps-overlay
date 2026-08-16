@@ -1,0 +1,87 @@
+/*
+ * The Second Screen dialog wears the overlay family's warm parchment, like History
+ * and Triggers: it is part of the HUD's world, not another settings form. One column,
+ * fixed window, three interchangeable sections that all fit the same frame.
+ */
+
+:root {
+  --bg:        #100d0a;
+  --panel:     #17130f;
+  --line:      #2e2620;
+
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+
+  --ember:     #b9702a;
+  --gold:      #e0a53f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 22px 28px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  user-select: none;
+}
+
+h1 {
+  margin: 0 0 14px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.lead { margin: 0 0 16px; }
+
+/* The code itself: white tile so the quiet zone is real, whatever the theme. */
+#qr {
+  width: 296px;
+  margin: 0 auto 14px;
+  padding: 6px;
+  background: #fff;
+  border-radius: 6px;
+}
+#qr svg { display: block; width: 100%; height: auto; }
+
+.url {
+  margin: 0 0 10px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--gold);
+  word-break: break-all;
+  user-select: text;   /* the fallback to scanning is typing it */
+}
+
+.alts {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-dim);
+  word-break: break-all;
+  user-select: text;
+}
+.alts:empty { display: none; }
+
+.note {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+button {
+  display: block;
+  margin: 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 8px 18px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { border-color: var(--ember); }

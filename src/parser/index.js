@@ -1803,7 +1803,7 @@ export class LogParser {
    * When no fight is running the last one stays on screen — a number that vanishes the
    * instant combat ends is useless, since reading it is the whole point.
    */
-  snapshot(now = this.clock()) {
+  snapshot(now = this.clock(), { timeline = false } = {}) {
     // Warnings ride the snapshot rather than a channel of their own, and they exist
     // in BOTH branches: the pull often opens with the mob's first cast, before any
     // damage line has created an encounter — precisely the moment a warning matters.
@@ -1870,7 +1870,7 @@ export class LogParser {
     // could not be attributed to anybody, so hiding it would not tidy the meter, it
     // would make the group total quietly disagree with the rows above it.
     const include = (name) => name === UNKNOWN || this.roster.inParty(name);
-    const snap = enc.snapshot(now, { includeNames: include });
+    const snap = enc.snapshot(now, { includeNames: include, timeline });
     return {
       ...snap,
       idle: false,

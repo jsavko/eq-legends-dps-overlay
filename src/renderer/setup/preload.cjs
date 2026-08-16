@@ -18,6 +18,7 @@ const CH = {
   TRIGGERS_LIST: 'triggers:list',
   SESSION_OPEN: 'session:open',
   SESSION_LIST: 'session:list',
+  MOBILE_OPEN: 'mobile:open',
   EQCONFIG_STATE: 'eqconfig:state',
   EQCONFIG_ENABLE_LOG: 'eqconfig:enable-log',
 };
@@ -41,6 +42,8 @@ contextBridge.exposeInMainWorld('api', {
   triggersList: () => ipcRenderer.invoke(CH.TRIGGERS_LIST),
   /** Session stats own this form's switches, but the browsing surface is its own window. */
   openSession: () => ipcRenderer.invoke(CH.SESSION_OPEN),
+  /** The QR code lives in its own dialog; the switch and port live here. */
+  openSecondScreen: () => ipcRenderer.invoke(CH.MOBILE_OPEN),
   sessionList: (key) => ipcRenderer.invoke(CH.SESSION_LIST, key),
   /** EverQuest's own settings file — read what it says, and set Log=1 in it. */
   eqconfigState: () => ipcRenderer.invoke(CH.EQCONFIG_STATE),

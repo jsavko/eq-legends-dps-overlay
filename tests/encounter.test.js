@@ -373,6 +373,70 @@ test('a death alone is enough for a row — dying before swinging must not hide 
   assert.equal(row.deaths, 1);
 });
 
+// ------------------------------------------------------------------ timeline
+
+test('timeline buckets damage per second, aligned across rows, zeros for quiet seconds', () => {
+  const enc = new Encounter(s(0));
+  hit(enc, 'Rhale', 100, 0);
+  hit(enc, 'Rhale', 50, 0);
+  hit(enc, 'Rhale', 30, 3);
+  hit(enc, 'Rhain', 20, 4);      // joined late; padded with zeros back to the origin
+
+  const snap = enc.snapshot(s(4), { timeline: true });
+  assert.deepEqual(snap.timeline, { bucketMs: 1000, originTs: s(0), buckets: 5 });
+  const rhale = snap.rows.find((r) => r.name === 'Rhale');
+  const rhain = snap.rows.find((r) => r.name === 'Rhain');
+  assert.deepEqual(rhale.timeline.damage, [150, 0, 0, 30, 0]);
+  assert.deepEqual(rhain.timeline.damage, [0, 0, 0, 0, 20]);
+});
+
+test('timeline is absent unless asked for — the 4 Hz push must stay lean', () => {
+  const enc = new Encounter(s(0));
+  hit(enc, 'Rhale', 100, 0);
+  const snap = enc.snapshot(s(1));
+  assert.equal(snap.timeline, undefined);
+  assert.equal(snap.rows[0].timeline, undefined);
+});
+
+test('all three timeline series reconcile with the aggregates mid-fight', () => {
+  const enc = new Encounter(s(0));
+  hit(enc, 'Rhale', 100, 0);
+  hit(enc, 'Rhale', 71, 2, { isPet: true });
+  enc.addHeal({ name: 'Rhale', effective: 40, potential: 90, ts: s(1), ability: 'Salve', isPet: false, target: 'Rhain' });
+  taken(enc, 'Rhale', 'froglok king', 60, 3);
+
+  const row = enc.snapshot(s(3), { timeline: true }).rows[0];
+  const sum = (a) => a.reduce((acc, v) => acc + v, 0);
+  assert.equal(sum(row.timeline.damage), row.damage);
+  assert.equal(sum(row.timeline.healing), row.healing);
+  assert.equal(sum(row.timeline.taken), row.damageTaken);
+});
+
+test('a fight that outruns the bucket budget coarsens instead of dropping data', () => {
+  const enc = new Encounter(s(0), { timeoutMs: 600_000, timelineMaxBuckets: 10 });
+  hit(enc, 'Rhale', 100, 0);
+  hit(enc, 'Rhale', 30, 1);      // pairs with second 0 into the first 2s bucket
+  hit(enc, 'Rhale', 50, 4);
+  hit(enc, 'Rhale', 20, 15);     // index 15 >= 10, so the width doubles to 2s
+
+  const snap = enc.snapshot(s(15), { timeline: true });
+  assert.equal(snap.timeline.bucketMs, 2000);
+  assert.equal(snap.timeline.buckets, 8);   // 16s of fight at 2s per bucket
+  const series = snap.rows[0].timeline.damage;
+  assert.equal(series[0], 130, 'old buckets 0 and 1 merged exactly');
+  assert.equal(series[2], 50, 'old bucket 4 landed in new bucket 2');
+  assert.equal(series[7], 20);
+  assert.equal(series.reduce((a, v) => a + v, 0), snap.rows[0].damage);
+});
+
+test('a heal stamped a hair before the origin lands in the first bucket, not off the front', () => {
+  const enc = new Encounter(s(0));
+  hit(enc, 'Rhale', 100, 0);
+  enc.addHeal({ name: 'Rhale', effective: 25, potential: 25, ts: s(0) - 400, ability: 'Salve', isPet: false, target: 'Rhale' });
+  const row = enc.snapshot(s(1), { timeline: true }).rows[0];
+  assert.deepEqual(row.timeline.healing, [25, 0]);
+});
+
 test('the deaths list respects includeNames like the rows do', () => {
   const enc = new Encounter(s(0));
   hit(enc, 'Rhale', 100, 0);

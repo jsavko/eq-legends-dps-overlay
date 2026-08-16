@@ -26,6 +26,17 @@ export const DEFAULTS = {
   /** Width of the burst-DPS window shown beside the headline number. */
   rollingWindowMs: 10 * SECOND,
   /**
+   * The timeline doubles its bucket width rather than exceed this many buckets.
+   *
+   * 900 one-second buckets is fifteen minutes — longer than any ordinary pull, so the
+   * common case keeps full resolution. A fight that outruns it (a raid boss, a merged
+   * chain) halves its resolution instead of dropping anything: two adjacent buckets sum
+   * into one, exactly, so the totals a graph is drawn from never disagree with the
+   * aggregates beside it. Doubling keeps every merge lossless; a fixed-size ring buffer
+   * would drop the opening of the fight, which is often the part worth reviewing.
+   */
+  timelineMaxBuckets: 900,
+  /**
    * An engaged NPC silent in both directions for this long stops counting as alive.
    *
    * Mobs leave a fight without dying — the group evacuates, the mob flees, it is
@@ -106,6 +117,20 @@ function newCombatant(name) {
     /** @type {Map<number, number>} epoch-second -> damage taken, for rolling DTPS */
     takenWindow: new Map(),
 
+    // The durable timeline — what a DPS/HPS/DTPS-over-time graph is drawn from.
+    // Deliberately SEPARATE from the three rolling-window Maps above, which look like
+    // the same data but are not: `rollingTotal` deletes their old buckets on every
+    // snapshot, so by the end of a fight they hold only its last ten seconds. These
+    // arrays are indexed by fight-relative bucket (see Encounter#timelineIndex), keep
+    // every bucket, and are what `persistEncounter` writes so historical fights get
+    // graphs too. Holes are seconds where nothing happened; snapshot() reads them as 0.
+    /** @type {number[]} bucket index -> damage dealt */
+    tlDamage: [],
+    /** @type {number[]} bucket index -> effective healing */
+    tlHealing: [],
+    /** @type {number[]} bucket index -> damage taken */
+    tlTaken: [],
+
     firstTs: null,
     lastTs: null,
   };
@@ -137,6 +162,16 @@ export class Encounter {
     this.aliveNpcs = new Map();
     /** Set when the last engaged NPC dies; cleared if damage resumes. */
     this.allSlainAt = null;
+    /**
+     * Timeline geometry: bucket `i` covers
+     * [timelineOrigin + i·timelineBucketMs, +timelineBucketMs).
+     *
+     * The origin is the start second, aligned down, and never moves; only the width
+     * changes, by doubling (see coarsenTimeline), so every coarsening is an exact
+     * pairwise merge and a bucket's meaning is always derivable from these two numbers.
+     */
+    this.timelineBucketMs = SECOND;
+    this.timelineOrigin = Math.floor(startTs / SECOND) * SECOND;
     this.totalDamage = 0;
     this.totalHealing = 0;
     this.totalDamageTaken = 0;
@@ -201,6 +236,7 @@ export class Encounter {
 
     const second = Math.floor(ts / SECOND);
     c.window.set(second, (c.window.get(second) ?? 0) + amount);
+    this.addToTimeline(c.tlDamage, ts, amount);
 
     if (c.firstTs === null) c.firstTs = ts;
     c.lastTs = ts;
@@ -246,6 +282,7 @@ export class Encounter {
 
     const second = Math.floor(ts / SECOND);
     c.healWindow.set(second, (c.healWindow.get(second) ?? 0) + effective);
+    this.addToTimeline(c.tlHealing, ts, effective);
 
     if (c.firstTs === null) c.firstTs = ts;
     c.lastTs = ts;
@@ -355,6 +392,7 @@ export class Encounter {
 
     const second = Math.floor(ts / SECOND);
     c.takenWindow.set(second, (c.takenWindow.get(second) ?? 0) + amount);
+    this.addToTimeline(c.tlTaken, ts, amount);
 
     if (c.firstTs === null) c.firstTs = ts;
     c.lastTs = ts;
@@ -485,6 +523,52 @@ export class Encounter {
     return best;
   }
 
+  /** The timeline bucket `ts` falls in. Clamped at 0: a heal landing in the same
+   *  log second the fight opened can carry a timestamp a hair before the aligned
+   *  origin, and it belongs to the fight's first bucket, not to a bucket -1 that
+   *  would turn the arrays into keyed objects. */
+  timelineIndex(ts) {
+    return Math.max(0, Math.floor((ts - this.timelineOrigin) / this.timelineBucketMs));
+  }
+
+  /** Add an amount to one combatant's timeline series, coarsening first if the fight
+   *  has outrun the bucket budget. */
+  addToTimeline(series, ts, amount) {
+    // `while`, not `if`: a single line can be minutes past the previous one (the
+    // timeout will close the fight right after, but this write comes first), and one
+    // doubling might not be enough to bring its index back under the budget.
+    while (this.timelineIndex(ts) >= this.opts.timelineMaxBuckets) this.coarsenTimeline();
+    const idx = this.timelineIndex(ts);
+    series[idx] = (series[idx] ?? 0) + amount;
+  }
+
+  /**
+   * Halve the timeline's resolution: double the bucket width and pairwise-merge every
+   * series. Exact by construction — old buckets 2i and 2i+1 cover precisely the span
+   * of new bucket i, so every series still sums to the aggregate beside it.
+   */
+  coarsenTimeline() {
+    this.timelineBucketMs *= 2;
+    for (const c of this.combatants.values()) {
+      for (const key of ['tlDamage', 'tlHealing', 'tlTaken']) {
+        // Merged IN PLACE: addToTimeline coarsens mid-write while holding a reference
+        // to this very array, and swapping in a fresh one would send its write into
+        // the discarded copy.
+        const series = c[key];
+        const merged = [];
+        for (let i = 0; i < series.length; i++) {
+          if (series[i] === undefined) continue;   // holes stay holes; snapshot reads them as 0
+          const half = i >> 1;
+          merged[half] = (merged[half] ?? 0) + series[i];
+        }
+        series.length = 0;
+        for (let i = 0; i < merged.length; i++) {
+          if (merged[i] !== undefined) series[i] = merged[i];
+        }
+      }
+    }
+  }
+
   /** Total in the trailing rolling window. Prunes as it goes, so the map stays ~10 entries. */
   rollingTotal(buckets, now) {
     const cutoff = Math.floor((now - this.opts.rollingWindowMs) / SECOND);
@@ -503,7 +587,7 @@ export class Encounter {
    * to the group total and the share percentages agree with the bar widths. Dividing
    * each member by their own active time would be a different (and non-additive) metric.
    */
-  snapshot(now, { includeNames = null } = {}) {
+  snapshot(now, { includeNames = null, timeline = false } = {}) {
     const t = this.closed ? this.endTs : Math.max(now ?? this.lastDamageTs, this.lastDamageTs);
     const durationMs = this.durationMs(now);
     const durationSec = durationMs / SECOND;
@@ -511,6 +595,18 @@ export class Encounter {
       1,
       Math.min(this.opts.rollingWindowMs, durationMs) / SECOND
     );
+
+    // The timeline is emitted only on request. The buckets accumulate regardless, but
+    // serializing every combatant's full series into the 4 Hz overlay push would be
+    // hundreds of KB a frame on a long fight for a window that never draws a curve —
+    // the callers that want it (history persistence, the mobile stream) say so.
+    // Every row shares one bucket count, derived from the same `t` every rate uses,
+    // so the series align by index and trailing quiet seconds read as real zeros.
+    const bucketCount = timeline
+      ? Math.floor((t - this.timelineOrigin) / this.timelineBucketMs) + 1
+      : 0;
+    const denseSeries = (series) =>
+      Array.from({ length: bucketCount }, (_, i) => series[i] ?? 0);
 
     const rows = [];
     let shownDamage = 0;
@@ -604,6 +700,14 @@ export class Encounter {
         takenAbilities: [...c.takenByAbility.entries()]
           .map(([name, a]) => ({ name, damage: a.damage, hits: a.hits, max: a.max, type: a.type }))
           .sort((a, b) => b.damage - a.damage),
+
+        ...(timeline && {
+          timeline: {
+            damage: denseSeries(c.tlDamage),
+            healing: denseSeries(c.tlHealing),
+            taken: denseSeries(c.tlTaken),
+          },
+        }),
       });
 
       shownDamage += c.damage;
@@ -637,6 +741,16 @@ export class Encounter {
       // Filtered the same way as the rows, so a narrowed view never names outsiders.
       deaths: this.deaths.filter((d) => shownNames.has(d.name)),
       rows,
+      // The geometry every row's series shares. Absent unless asked for, so a record
+      // or a stream can test `snapshot.timeline` to know whether curves exist at all —
+      // the same absent-means-predates-the-feature contract old JSONL records rely on.
+      ...(timeline && {
+        timeline: {
+          bucketMs: this.timelineBucketMs,
+          originTs: this.timelineOrigin,
+          buckets: bucketCount,
+        },
+      }),
     };
   }
 }

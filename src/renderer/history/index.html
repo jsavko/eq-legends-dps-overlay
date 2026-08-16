@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="history.css" />
 </head>
 <body>
-  <!-- Three fixed panes. Every click swaps CONTENT inside a pane; no pane ever
+  <!-- Fixed panes. Every click swaps CONTENT inside a pane; no pane ever
        resizes, expands, or pushes another around — that reflow is exactly what the
        old accordion tab did and why it was replaced. -->
   <header id="titlebar">
@@ -53,6 +53,23 @@
         <button class="seg" data-metric="healing" aria-selected="false">Healing</button>
         <button class="seg" data-metric="taken" aria-selected="false">Damage taken</button>
       </nav>
+
+      <!-- Fixed height, rendered for EVERY fight — records that predate the feature
+           show a faint "no timeline recorded" in the same box instead of removing it,
+           the deaths-line rule again: panes must sit on the same pixel for every fight. -->
+      <div id="timeline">
+        <div id="tl-head">
+          <span id="tl-title">Timeline</span>
+          <span id="tl-legend">
+            <span class="tl-key tl-key-group"></span><span class="tl-name">group</span>
+            <span class="tl-key tl-key-member"></span><span class="tl-name" id="tl-member"></span>
+          </span>
+        </div>
+        <div id="tl-plot">
+          <canvas id="tl-canvas"></canvas>
+          <p id="tl-empty" hidden>no timeline recorded</p>
+        </div>
+      </div>
 
       <div id="panes">
         <section id="members">

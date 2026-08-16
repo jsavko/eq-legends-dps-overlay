@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#100d0a" />
+  <title>EQL Second Screen</title>
+  <link rel="stylesheet" href="mobile/mobile.css" />
+</head>
+<body data-metric="damage">
+  <!-- Three views, one visible at a time; the tab bar switches live/history and the
+       fight view slides in from a history row. Single column, parchment, finger-sized
+       targets — this page is the approved phone mock, not the desktop windows shrunk. -->
+
+  <main id="view-live" class="view">
+    <header id="live-head">
+      <div class="head-top">
+        <span id="live-dot"></span>
+        <h1 id="live-name">Connecting…</h1>
+        <span id="live-timer" class="mono"></span>
+      </div>
+      <p id="live-sub"></p>
+    </header>
+
+    <nav id="metrics">
+      <button class="seg" data-metric="damage" aria-selected="true">Damage</button>
+      <button class="seg" data-metric="healing" aria-selected="false">Healing</button>
+      <button class="seg" data-metric="taken" aria-selected="false">Taken</button>
+    </nav>
+
+    <section class="graph-card">
+      <div class="graph-head">
+        <span id="live-graph-label" class="graph-label"></span>
+        <span id="live-graph-stats" class="graph-stats"></span>
+      </div>
+      <div class="graph-plot">
+        <canvas id="live-canvas"></canvas>
+        <p id="live-graph-empty" class="graph-empty">waiting for a fight…</p>
+      </div>
+    </section>
+
+    <ol id="live-rows"></ol>
+  </main>
+
+  <main id="view-history" class="view" hidden>
+    <header id="hist-head">
+      <h1>History</h1>
+      <span id="hist-char" class="mono"></span>
+    </header>
+    <div id="hist-filters">
+      <input id="hist-search" type="search" placeholder="boss or zone…" spellcheck="false" />
+      <nav id="hist-chips">
+        <button class="chip" data-chip="all" aria-selected="true">All</button>
+        <button class="chip" data-chip="bosses" aria-selected="false">Bosses</button>
+        <button class="chip" data-chip="deaths" aria-selected="false">Deaths</button>
+        <button class="chip" data-chip="today" aria-selected="false">Today</button>
+      </nav>
+    </div>
+    <ol id="hist-list"></ol>
+  </main>
+
+  <main id="view-fight" class="view" hidden>
+    <header id="fight-head">
+      <button id="fight-back">‹ History</button>
+      <h1 id="fight-name"></h1>
+      <p id="fight-meta"></p>
+    </header>
+
+    <section id="fight-stats"></section>
+
+    <section class="graph-card">
+      <div class="graph-head">
+        <span class="graph-label">Timeline</span>
+        <span id="fight-legend">
+          <span class="tl-key tl-key-group"></span><span class="tl-name">group</span>
+          <span class="tl-key tl-key-member"></span><span class="tl-name" id="fight-legend-member"></span>
+        </span>
+      </div>
+      <div class="graph-plot">
+        <canvas id="fight-canvas"></canvas>
+        <p id="fight-graph-empty" class="graph-empty" hidden>no timeline recorded</p>
+      </div>
+    </section>
+
+    <ol id="fight-members"></ol>
+  </main>
+
+  <nav id="tabbar">
+    <button data-view="live" aria-selected="true">Live</button>
+    <button data-view="history" aria-selected="false">History</button>
+  </nav>
+
+  <script type="module" src="mobile/mobile.js"></script>
+</body>
+</html>

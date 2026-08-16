@@ -1,0 +1,263 @@
+/*
+ * The second screen wears the overlay family's warm parchment — it is the meter in
+ * your other hand, not another app. One column, finger-sized rows, ≥15px body text;
+ * this is a normal scrolling page (the phone owns its touches), so none of the
+ * overlay's no-scroll rules apply here.
+ */
+
+:root {
+  --bg:        #100d0a;
+  --panel:     #17130f;
+  --panel-2:   #221b14;
+  --line:      #2e2620;
+
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+
+  --ember:     #b9702a;
+  --gold:      #e0a53f;
+  --balm:      #63c2b4;
+  --wound:     #9e3b2e;
+  --wound-lit: #d0685a;
+  --bad:       #e5766b;
+
+  --metric:     var(--ember);
+  --metric-lit: var(--gold);
+}
+/* Same pairing rule as the history window: the lit tone is the member curve, and it
+   must stay readable against the group curve in every metric. */
+body[data-metric="healing"] { --metric: var(--balm); --metric-lit: #9adfd4; }
+body[data-metric="taken"]   { --metric: var(--wound); --metric-lit: var(--wound-lit); }
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Bahnschrift", "DIN Alternate", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+
+.mono, #live-timer, .num { font-variant-numeric: tabular-nums; }
+
+.view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+.view[hidden] { display: none; }
+
+h1 { margin: 0; font-size: 19px; font-weight: 600; }
+
+/* ------------------------------------------------------------------- live */
+
+#live-head {
+  padding: calc(12px + env(safe-area-inset-top)) 16px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.head-top { display: flex; align-items: center; gap: 8px; }
+.head-top h1 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#live-timer { font-size: 17px; color: var(--gold); }
+/* The dot is the connection, not the fight: green while the stream is open, dried
+   blood while the browser is reconnecting — a stale meter must look stale. */
+#live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--balm); flex: none; }
+#live-dot[data-connected="false"] { background: var(--wound-lit); }
+#live-sub { margin: 2px 0 0; font-size: 13px; color: var(--ink-dim); }
+
+#metrics { display: flex; gap: 6px; padding: 10px 16px 0; }
+.seg {
+  flex: 1;
+  padding: 8px 0;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.seg[aria-selected="true"] {
+  background: var(--metric);
+  border-color: var(--metric);
+  color: #14100c;
+  font-weight: 600;
+}
+
+.graph-card {
+  margin: 10px 16px 0;
+  padding: 10px 12px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.graph-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.graph-label { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+.graph-stats { font-size: 12px; color: var(--ink-dim); }
+.graph-plot { position: relative; height: 104px; margin-top: 6px; }
+.graph-plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.graph-empty {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  margin: 0; font-size: 13px; color: var(--ink-faint);
+}
+.graph-empty[hidden] { display: none; }
+
+#fight-legend { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-dim); }
+.tl-key { width: 14px; height: 3px; border-radius: 1px; background: var(--metric); }
+.tl-key-member { background: var(--metric-lit); margin-left: 8px; }
+#fight-legend[data-member="false"] .tl-key-member,
+#fight-legend[data-member="false"] #fight-legend-member { display: none; }
+
+ol { list-style: none; margin: 0; padding: 0; }
+
+#live-rows, #fight-members { padding: 10px 16px 0; display: flex; flex-direction: column; gap: 6px; }
+
+.row-card {
+  padding: 9px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.row-card[aria-selected="true"] { border-color: var(--gold); }
+.row-top { display: flex; align-items: baseline; gap: 8px; }
+.row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+.row-skull { color: var(--bad); }
+.row-value { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.row-share { font-size: 13px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.row-bar { height: 5px; margin-top: 6px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+.row-bar span { display: block; height: 100%; background: var(--metric); border-radius: 2px; }
+
+/* Tap-open breakdown, inside the row card: user-controlled collapse inside one
+   scrolling pane. EVERY ability renders — the list grows, it never truncates. */
+.row-breakdown { margin-top: 8px; }
+.row-breakdown .b-line { margin: 0 0 6px; font-size: 13px; color: var(--ink-dim); }
+.b-row { position: relative; height: 24px; margin-top: 2px; }
+.b-row .b-fill {
+  position: absolute; inset: 1px auto 1px 0;
+  background: color-mix(in srgb, var(--metric) 18%, transparent);
+  border-radius: 2px;
+}
+.b-row .b-name {
+  position: absolute; left: 6px; top: 3px; right: 118px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px;
+}
+.b-row .b-name.pet { color: var(--ink-dim); }
+.b-row .b-val { position: absolute; right: 48px; top: 3px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.b-row .b-share { position: absolute; right: 4px; top: 3px; font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- history */
+
+#hist-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: calc(12px + env(safe-area-inset-top)) 16px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+#hist-head h1 { flex: 1; }
+#hist-char { font-size: 13px; color: var(--ink-dim); }
+
+#hist-filters { padding: 10px 16px 0; display: flex; flex-direction: column; gap: 8px; }
+#hist-search {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+#hist-search::placeholder { color: var(--ink-faint); }
+#hist-chips { display: flex; gap: 6px; }
+.chip {
+  padding: 5px 14px;
+  font: inherit; font-size: 14px;
+  color: var(--ink-dim);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.chip[aria-selected="true"] { color: var(--gold); border-color: var(--gold); background: var(--panel-2); }
+
+#hist-list { padding: 10px 16px 0; display: flex; flex-direction: column; gap: 6px; }
+.day-head { padding: 6px 2px 0; font-size: 12px; letter-spacing: 0.12em; color: var(--ink-faint); }
+.hist-row {
+  padding: 9px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.hist-row .row-name { font-size: 16px; }
+.hist-row .row-name.trash { color: var(--ink-dim); font-weight: 400; }
+.hist-row .row-len { font-size: 13px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.hist-sub { display: flex; gap: 8px; margin-top: 2px; font-size: 13px; color: var(--ink-faint); }
+.hist-sub .when { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-sub .deaths { color: var(--bad); }
+.hist-empty { padding: 18px 4px; font-size: 14px; color: var(--ink-faint); }
+
+/* ------------------------------------------------------------- fight view */
+
+#fight-head {
+  padding: calc(8px + env(safe-area-inset-top)) 16px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+#fight-back {
+  margin: 0 0 2px -4px;
+  padding: 4px;
+  font: inherit; font-size: 14px;
+  color: var(--gold);
+  background: none; border: none;
+}
+#fight-meta { margin: 2px 0 0; font-size: 13px; color: var(--ink-dim); }
+
+#fight-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px 16px 0;
+}
+.stat {
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.stat .s-label { display: block; font-size: 11px; letter-spacing: 0.12em; color: var(--ink-faint); }
+.stat b { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat .s-unit { margin-left: 6px; font-size: 12px; color: var(--ink-dim); }
+.stat.balm b  { color: var(--balm); }
+.stat.wound b { color: var(--wound-lit); }
+.stat.bad b   { color: var(--bad); }
+
+/* ----------------------------------------------------------------- tabbar */
+
+#tabbar {
+  display: flex;
+  flex: none;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+#tabbar button {
+  flex: 1;
+  padding: 13px 0;
+  font: inherit; font-size: 15px;
+  color: var(--ink-dim);
+  background: none;
+  border: none;
+  border-top: 2px solid transparent;
+}
+#tabbar button[aria-selected="true"] {
+  color: var(--gold);
+  font-weight: 600;
+  border-top-color: var(--gold);
+}

@@ -15,6 +15,12 @@ import {
 // the same way — one of them knowing which attack whiffs and the other not is the kind of
 // quiet divergence that makes a player distrust the pair.
 import { abilityAccuracy } from '../overlay/breakdown.js';
+// The graph's pure half: bucket series in, drawable geometry out. Shared verbatim with
+// the mobile page, so a curve on the phone and the same fight's curve here can never
+// disagree about what the buckets say.
+import {
+  ratePerSec, sumSeries, smooth, niceMax, axisTicks, timeTicks, polylinePoints,
+} from './timeline.js';
 
 const $ = (id) => document.getElementById(id);
 const SKULL = '☠';
@@ -70,6 +76,15 @@ function wireEvents() {
     if (!window.confirm(`Delete ALL recorded encounters for ${label}? This cannot be undone.`)) return;
     await window.api.historyClear(state.key);
     await loadCharacter(null);
+  });
+
+  // The window is resizable and the canvas is a bitmap: a resize without a redraw
+  // leaves the curves stretched. One rAF of debounce keeps a drag from redrawing
+  // hundreds of times.
+  let resizeRaf = null;
+  window.addEventListener('resize', () => {
+    cancelAnimationFrame(resizeRaf);
+    resizeRaf = requestAnimationFrame(() => { if (state.record) drawTimeline(); });
   });
 
   // ↑/↓ walk the filtered fight list. Not while typing in the search box, where the
@@ -367,6 +382,7 @@ function renderMembers() {
       for (const el of document.querySelectorAll('#member-list li')) {
         el.setAttribute('aria-selected', String(el.dataset.name === r.name));
       }
+      drawTimeline();
       renderBreakdown();
     });
 
@@ -400,6 +416,9 @@ function renderMembers() {
     return li;
   }));
 
+  // The timeline follows the same three inputs the breakdown does — fight, metric,
+  // member — and every path that changes one of them funnels through here.
+  drawTimeline();
   renderBreakdown();
 }
 
@@ -424,6 +443,114 @@ function renderBreakdown() {
     : state.metric === 'healing' ? healingBreakdown(row)
     : takenBreakdown(row);
   pane.replaceChildren(...parts);
+}
+
+// ---------------------------------------------------------------- timeline
+
+/** Which series a metric reads — the same axis names the record stores. */
+const TL_SERIES = { damage: 'damage', healing: 'healing', taken: 'taken' };
+
+/** Centered box radius for the drawn curves. Presentation only — the record keeps
+ *  the raw buckets, and the phone applies the same radius to the same series. */
+const TL_SMOOTH_RADIUS = 2;
+
+/**
+ * Draw the fight's curves into the fixed timeline box, or clear it and say why not.
+ *
+ * Runs on every path that changes what it depends on — fight, metric, member, window
+ * size — always into the same 168px box. Records written before timeline buckets
+ * existed have no `snapshot.timeline`; they get the faint empty line, never a
+ * collapsed panel.
+ */
+function drawTimeline() {
+  const canvas = $('tl-canvas');
+  const legend = $('tl-legend');
+  const snap = state.record?.snapshot;
+  const tl = snap?.timeline;
+  const hasData = Boolean(tl && tl.buckets > 0 && tl.bucketMs > 0);
+  $('tl-empty').hidden = hasData;
+
+  const box = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(box.width * dpr));
+  canvas.height = Math.max(1, Math.round(box.height * dpr));
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, box.width, box.height);
+
+  if (!hasData || box.width < 60 || box.height < 30) {
+    legend.dataset.member = 'false';
+    return;
+  }
+
+  const key = TL_SERIES[state.metric];
+  const rows = snap.rows ?? [];
+  const groupRate = smooth(
+    ratePerSec(sumSeries(rows.map((r) => r.timeline?.[key] ?? [])), tl.bucketMs),
+    TL_SMOOTH_RADIUS,
+  );
+  const memberRow = rows.find((r) => r.name === state.member && r.timeline);
+  const memberRate = memberRow
+    ? smooth(ratePerSec(memberRow.timeline[key], tl.bucketMs), TL_SMOOTH_RADIUS)
+    : null;
+  legend.dataset.member = String(Boolean(memberRow));
+  if (memberRow) $('tl-member').textContent = memberRow.name;
+
+  // Resolved at draw time so the curves follow the metric palette the same way the
+  // bars do — getComputedStyle collapses the var() chain to real colors.
+  const styles = getComputedStyle(document.body);
+  const color = (name) => styles.getPropertyValue(name).trim();
+
+  // Geometry: y labels on the left, time labels under, curves in the rest.
+  const AXIS_W = 36;
+  const AXIS_H = 16;
+  const plotW = box.width - AXIS_W - 4;
+  const plotH = box.height - AXIS_H - 6;
+  const plotX = AXIS_W;
+  const plotY = 4;
+
+  const top = niceMax(Math.max(0, ...groupRate));
+  ctx.font = '11px "Bahnschrift", "Segoe UI", sans-serif';
+
+  ctx.strokeStyle = color('--line');
+  ctx.fillStyle = color('--ink-faint');
+  ctx.lineWidth = 1;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (const tick of axisTicks(top, 3)) {
+    const y = plotY + plotH - (tick / top) * plotH;
+    ctx.beginPath();
+    ctx.moveTo(plotX, Math.round(y) + 0.5);
+    ctx.lineTo(plotX + plotW, Math.round(y) + 0.5);
+    ctx.stroke();
+    // formatRate prints small numbers with a decimal; the axis floor is exactly 0
+    // and "0.0" reads as measurement where there is none.
+    ctx.fillText(tick === 0 ? '0' : formatRate(tick), plotX - 6, y);
+  }
+
+  // The x axis spans the buckets, not durationMs: the curve is spaced by bucket, and
+  // a label that used a different clock would drift off its own spike.
+  const spanMs = tl.buckets * tl.bucketMs;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (const tickMs of timeTicks(spanMs, 6).ticks) {
+    const x = plotX + (tickMs / spanMs) * plotW;
+    ctx.fillText(formatDuration(tickMs), Math.min(plotX + plotW - 14, Math.max(plotX + 14, x)), plotY + plotH + 5);
+  }
+
+  const stroke = (series, colorName, width) => {
+    const pts = polylinePoints(series, { width: plotW, height: plotH, max: top });
+    if (pts.length === 0) return;
+    ctx.strokeStyle = color(colorName);
+    ctx.lineWidth = width;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    pts.forEach((p, i) => (i === 0 ? ctx.moveTo(plotX + p.x, plotY + p.y) : ctx.lineTo(plotX + p.x, plotY + p.y)));
+    ctx.stroke();
+  };
+  stroke(groupRate, '--metric', 2);
+  if (memberRate) stroke(memberRate, '--metric-lit', 2);
 }
 
 function damageBreakdown(r) {

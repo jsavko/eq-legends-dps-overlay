@@ -43,6 +43,14 @@ export const CHANNELS = {
   SESSION_APPENDED: 'session:appended',
 
   /**
+   * The second screen's pairing state moved — the server started, stopped or failed
+   * after a settings change. Pushed to an open Second Screen dialog so a switch
+   * flipped in Settings redraws the QR code (or the "switched off" note) live,
+   * instead of leaving a dialog frozen at whatever was true when it opened.
+   */
+  MOBILE_CHANGED: 'mobile:changed',
+
+  /**
    * The quest ledger moved — a loot was counted, a flag was toggled, an import landed.
    * Sent to the Quests window so an open one refetches instead of showing a checklist
    * frozen at whatever moment it was opened. Payloadless: the window asks QUESTS_GET
@@ -208,6 +216,16 @@ export const CHANNELS = {
   QUESTS_IMPORT: 'quests:import',
   /** Open the Quests window — the settings form's entry point to it. */
   QUESTS_OPEN: 'quests:open',
+
+  /**
+   * Everything the Second Screen dialog needs to draw itself: whether the feature is
+   * on, whether the server actually started, and the URL(s) a phone can reach —
+   * token included, because the URL IS the pairing. The dialog renders the QR code
+   * itself (vendored encoder, src/renderer/vendor/qrcode.js); main only states facts.
+   */
+  MOBILE_STATE: 'mobile:state',
+  /** Open the Second Screen dialog — the settings form's entry point to it. */
+  MOBILE_OPEN: 'mobile:open',
 
   /**
    * Put a finished line of text on the Windows clipboard.

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>Second Screen</title>
+  <link rel="stylesheet" href="secondscreen.css" />
+</head>
+<body>
+  <h1>Second screen</h1>
+
+  <!-- Exactly one of the three sections shows; secondscreen.js decides which from
+       the state main pushes. The window never resizes between them. -->
+  <section id="on" hidden>
+    <p class="lead">Scan with the phone's camera — same Wi&#8209;Fi as this PC.</p>
+    <div id="qr"></div>
+    <p id="url" class="url"></p>
+    <p id="alts" class="alts"></p>
+    <p class="note">The first time it starts, Windows asks once to allow the overlay
+      through the firewall — allow it and the prompt never returns.</p>
+  </section>
+
+  <section id="off" hidden>
+    <p class="lead">The second screen is switched off.</p>
+    <p class="note">Turn it on under <b>MOBILE</b> in Settings and this dialog will
+      show the code to scan. Nothing leaves your network: the phone talks straight
+      to this PC.</p>
+    <button class="open-settings">Open Settings…</button>
+  </section>
+
+  <section id="failed" hidden>
+    <p class="lead" id="failed-lead">The second screen could not start.</p>
+    <p class="note" id="failed-note">The port may be in use by another program. Pick a
+      different port under <b>MOBILE</b> in Settings.</p>
+    <button class="open-settings">Open Settings…</button>
+  </section>
+
+  <script type="module" src="secondscreen.js"></script>
+</body>
+</html>

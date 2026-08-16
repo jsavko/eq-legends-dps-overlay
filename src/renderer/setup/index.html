@@ -38,6 +38,7 @@
     <p class="grp">Other windows</p>
     <button type="button" data-page="triggers" aria-selected="false">Triggers</button>
     <button type="button" data-page="session" aria-selected="false">Session stats</button>
+    <button type="button" data-page="mobile" aria-selected="false">Second screen</button>
   </nav>
 
   <main id="detail">
@@ -355,6 +356,38 @@
         <div class="row">
           <button id="open-session" class="secondary">Open Session…</button>
           <span id="session-summary" class="unit"></span>
+        </div>
+      </section>
+    </article>
+
+    <!-- ---------------------------------------------------------------- second screen -->
+    <article data-page="mobile" hidden>
+      <h1>Second screen</h1>
+      <!-- The switch and the port live HERE and only here; the tray dialog only shows
+           what is true. Same one-owner rule that moved the alert switches out. -->
+      <p class="sub">
+        Show the live meter on a phone or tablet on the same Wi&#8209;Fi: fight rows,
+        tap for a breakdown, a DPS graph, and fight history. Nothing leaves your
+        network — the phone talks straight to this PC.
+      </p>
+
+      <section>
+        <div class="row checkbox">
+          <input id="mobile-enabled" type="checkbox" />
+          <label for="mobile-enabled">Serve the second screen
+            <span class="unit">Windows asks once to allow it through the firewall</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <label for="mobile-port">Port</label>
+          <input id="mobile-port" type="number" min="1024" max="65535" step="1" />
+          <span class="unit">change it only if another program already uses this one</span>
+        </div>
+
+        <div class="row">
+          <button id="open-mobile" class="secondary">Show the code to scan…</button>
+          <span class="unit">also in the tray: Second screen…</span>
         </div>
       </section>
     </article>

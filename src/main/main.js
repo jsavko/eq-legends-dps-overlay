@@ -21,10 +21,11 @@ import { LogParser } from '../parser/index.js';
 import { nearestName } from '../parser/entities.js';
 import { Tailer, listLogs } from './tailer.js';
 import {
-  ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, alertsEnabled, timersEnabled, partyListFor,
+  ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, MOBILE_KEYS, alertsEnabled, timersEnabled, partyListFor,
   ALERT_PRESETS, warnKeyFor, presetOf, sessionEnabled, sessionCategories,
   DURATION_KEYS, DURATION_DEFAULTS, durationSec, alertTtls,
 } from './config.js';
+import { MobileServer, generateToken, lanAddresses, DEFAULT_MOBILE_PORT } from './mobile.js';
 import { EncounterStore, RECORD_VERSION, storeKey, combatBetween } from './history.js';
 import { SessionStore, sessionKey, listEntry, CHECKPOINT_INTERVAL_MS } from './session-store.js';
 import { SessionTracker } from '../session/session.js';
@@ -99,6 +100,13 @@ const STALE_LOG_MS = 10 * 60 * 1000;
  */
 /** @type {SessionTracker|null} */ let session = null;
 /** @type {SessionStore|null} */  let sessionStore = null;
+/**
+ * The second-screen server — pure Node like the parser, constructed only while
+ * `mobileEnabled` is on, on exactly the session tracker's terms: switched off, it is
+ * never built, no port opens, and the feature costs nothing.
+ */
+/** @type {MobileServer|null} */  let mobileServer = null;
+/** @type {BrowserWindow|null} */ let secondScreenWindow = null;
 /** @type {BrowserWindow|null} */ let sessionWindow = null;
 /**
  * The Plane of Sky quest ledger — a THIRD sibling of the parser, same terms again.
@@ -224,6 +232,9 @@ async function main() {
   } else {
     createSetup('setup');
   }
+
+  // Never awaited: a port squatter must not stand between the player and the overlay.
+  void syncMobileServer();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlay();
@@ -405,6 +416,7 @@ app.on('will-quit', () => {
   // rather than left for the next launch to recover. Recovery exists for the crash case;
   // using it for the ordinary one would mislabel every clean shutdown as a crash.
   closeSession('shutdown');
+  mobileServer?.stop();
   stopUpdater?.();
   // setTimeout and setInterval handles alike — clearInterval accepts both.
   for (const timer of quietUpdateTimers) clearInterval(timer);
@@ -580,7 +592,10 @@ function pollInventoryDump() {
 function persistEncounter(enc) {
   if (!history || !parser) return;
   try {
-    const snap = enc.snapshot(enc.endTs);
+    // `timeline: true` — the record is where a closed fight's curves live, and it is
+    // built once per fight rather than four times a second, so the size argument that
+    // keeps the flag off the overlay push does not apply here.
+    const snap = enc.snapshot(enc.endTs, { timeline: true });
     if (snap.totalDamage === 0 && snap.totalDamageTaken === 0) return;
     const key = history.append({
       v: RECORD_VERSION,
@@ -751,6 +766,84 @@ function liveEntry(browsing, tracked) {
   // `live` is the only field a stored row does not have, and it exists so the renderer can
   // say "– now" instead of an end time it would otherwise print as fact.
   return { ...listEntry(record), live: true };
+}
+
+// ---------------------------------------------------------------------------
+// The second screen
+// ---------------------------------------------------------------------------
+
+/**
+ * Build or tear down the second-screen server to match the config.
+ *
+ * Wholesale on every call, the syncSessionTracker pattern: enabled state and port
+ * both land here, a restart costs microseconds plus one SSE reconnect (the stream
+ * asks browsers to retry in 3s, so a phone rides through it), and an incremental
+ * path would be several ways to reach a slightly wrong state.
+ *
+ * A server that cannot start — port taken, no permission — toasts and leaves the
+ * feature off rather than propagating: the second screen is a convenience, and the
+ * overlay must never pay for it.
+ */
+async function syncMobileServer() {
+  mobileServer?.stop();
+  mobileServer = null;
+  if (config.get('mobileEnabled') !== true) {
+    refreshTrayMenu();
+    return;
+  }
+
+  // Generated exactly once and kept forever after: the token is in every QR code a
+  // phone has ever scanned, and rotating it would silently orphan them all.
+  let token = config.get('mobileToken');
+  if (!token) {
+    token = generateToken();
+    config.set({ mobileToken: token });
+  }
+
+  const server = new MobileServer({
+    staticDir: RENDERER,
+    token,
+    history,
+    currentKey: () => storeKey(parser?.selfName, parser?.server),
+    // A fresh, timeline-laden snapshot for a phone that connects during a lull —
+    // the push loop only speaks when something changed.
+    snapshot: ({ timeline }) => (parser ? buildSnapshot({ timeline }) : null),
+  });
+  try {
+    await server.start({ port: Number(config.get('mobilePort')) || DEFAULT_MOBILE_PORT });
+    mobileServer = server;
+  } catch (err) {
+    toast(`Second screen failed to start: ${err.message}`);
+  }
+  refreshTrayMenu();
+  // An open dialog follows the switch: flipped on in Settings, it draws the QR the
+  // moment the server is up; failed to bind, it says so instead of showing a code
+  // that leads nowhere.
+  if (secondScreenWindow && !secondScreenWindow.isDestroyed()) {
+    secondScreenWindow.webContents.send(CHANNELS.MOBILE_CHANGED, mobileState());
+  }
+}
+
+/**
+ * The URLs a phone could open — one per LAN address, port and token included. Usually
+ * one; a machine with a VPN or a second adapter gets them all, because guessing which
+ * interface the phone shares would be inventing an answer the dialog can just list.
+ */
+function mobileUrls() {
+  if (!mobileServer) return [];
+  return lanAddresses().map(
+    (host) => `http://${host}:${mobileServer.port}/?t=${config.get('mobileToken')}`,
+  );
+}
+
+/** The facts the Second Screen dialog draws from. */
+function mobileState() {
+  return {
+    enabled: config.get('mobileEnabled') === true,
+    running: mobileServer !== null,
+    port: mobileServer?.port ?? (Number(config.get('mobilePort')) || DEFAULT_MOBILE_PORT),
+    urls: mobileUrls(),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -984,6 +1077,12 @@ function startPushLoop() {
     for (const win of [alertsWindow, timersWindow]) {
       if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.SNAPSHOT, snapshot);
     }
+    // The phones get their own build, WITH the timeline — and only when somebody is
+    // actually watching, so an enabled-but-idle server costs the loop nothing. The
+    // server slices each client's unseen buckets out of it; see MobileServer#send.
+    if (mobileServer !== null && mobileServer.clientCount > 0) {
+      mobileServer.broadcast(buildSnapshot({ timeline: true }));
+    }
   }, PUSH_INTERVAL_MS);
 }
 
@@ -997,9 +1096,9 @@ function startPushLoop() {
  * `castTimers` list went with the estimator that produced it, and what used to be the
  * app's own timers is a shipped pack running through this same engine.
  */
-function buildSnapshot() {
+function buildSnapshot({ timeline = false } = {}) {
   const now = Date.now();
-  const snapshot = parser.snapshot();
+  const snapshot = parser.snapshot(undefined, { timeline });
   // `session` is a compact summary, never the full record: this crosses the IPC boundary
   // four times a second, and the browse-time shape (every creature, every item, every
   // faction) is fetched by name when the Session window asks for it. Null when tracking
@@ -1381,6 +1480,10 @@ function refreshTrayMenu() {
     // is one screen away in Settings.
     ...(sessionEnabled(config.all) ? [{ label: 'Session…', click: createSession }] : []),
     { label: 'Quests…', click: createQuests },
+    // Always present, enabled or not: the dialog is where you find out the feature
+    // exists, and when it is off it says so and points at Settings — a hidden entry
+    // would just read as the feature not existing.
+    { label: 'Second screen…', click: createSecondScreen },
     { label: 'Settings…', click: () => createSetup('settings') },
     { type: 'separator' },
     // The version is the first half of the answer to "am I on the latest?", and it is the
@@ -1414,6 +1517,38 @@ function refreshTrayMenu() {
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));
+}
+
+/**
+ * The Second Screen dialog: the QR code a phone scans, and nothing else. A dialog
+ * rather than a settings section because the moment it exists for is holding a phone
+ * up to the monitor — the code wants to be big, alone and reachable in two clicks
+ * from the tray. The switch and the port stay in Settings; this window only states
+ * what is true right now, so the two can never disagree about who owns the config.
+ */
+function createSecondScreen() {
+  if (secondScreenWindow && !secondScreenWindow.isDestroyed()) {
+    secondScreenWindow.focus();
+    return;
+  }
+
+  secondScreenWindow = new BrowserWindow({
+    width: 480,
+    height: 640,
+    resizable: false,
+    title: 'EQL DPS Overlay — Second Screen',
+    backgroundColor: '#100d0a',
+    icon: path.join(ASSETS, 'icon-256.png'),
+    webPreferences: {
+      preload: path.join(RENDERER, 'secondscreen', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  secondScreenWindow.setMenuBarVisibility(false);
+  secondScreenWindow.loadFile(path.join(RENDERER, 'secondscreen', 'index.html'));
+  secondScreenWindow.on('closed', () => { secondScreenWindow = null; });
 }
 
 /** @param {'setup'|'settings'} mode */
@@ -2124,6 +2259,8 @@ function pushStatus() {
 function registerIpc() {
   ipcMain.handle(CHANNELS.CONFIG_GET, () => config.all);
   ipcMain.handle(CHANNELS.CONFIG_DURATION_DEFAULTS, () => ({ ...DURATION_DEFAULTS }));
+  ipcMain.handle(CHANNELS.MOBILE_STATE, () => mobileState());
+  ipcMain.handle(CHANNELS.MOBILE_OPEN, () => { createSecondScreen(); });
 
   ipcMain.handle(CHANNELS.CONFIG_SET, async (_e, patch) => {
     const before = config.all;
@@ -2161,6 +2298,8 @@ function registerIpc() {
     // all and the seven categories decide what it reads, so any touch of it re-derives
     // both rather than trying to work out which half moved.
     if (patch.session !== undefined) syncSessionTracker();
+    // Same wholesale contract for the second screen: any touched key rebuilds it.
+    if (MOBILE_KEYS.some((key) => patch[key] !== undefined)) await syncMobileServer();
 
     broadcastConfig(after);
     // The tray carries the same switches as the settings form, so a change made in
@@ -2620,6 +2759,10 @@ function registerIpc() {
     config.set(patch);
     await startTailing(config.get('logPath'));
     if (!overlayWindow) createOverlay();
+    // First-run setup carries the same keys the settings form does, so the same
+    // rebuilds apply — someone who switched the second screen on during setup must
+    // not have to reopen settings to make it true.
+    if (MOBILE_KEYS.some((key) => patch[key] !== undefined)) await syncMobileServer();
     setupWindow?.close();
     return config.all;
   });
