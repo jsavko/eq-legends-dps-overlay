@@ -789,6 +789,9 @@ async function syncMobileServer() {
   mobileServer = null;
   if (config.get('mobileEnabled') !== true) {
     refreshTrayMenu();
+    // The off path notifies too — skipping it here is how "Turn off" once left a
+    // dead QR code on screen, which reads as the button doing nothing.
+    notifySecondScreen();
     return;
   }
 
@@ -816,9 +819,15 @@ async function syncMobileServer() {
     toast(`Second screen failed to start: ${err.message}`);
   }
   refreshTrayMenu();
-  // An open dialog follows the switch: flipped on in Settings, it draws the QR the
-  // moment the server is up; failed to bind, it says so instead of showing a code
-  // that leads nowhere.
+  notifySecondScreen();
+}
+
+/**
+ * Tell an open Second Screen dialog what is true now. Every path through
+ * syncMobileServer ends here — enabled (draw the QR), failed (say why), and
+ * disabled (clear the code) alike.
+ */
+function notifySecondScreen() {
   if (secondScreenWindow && !secondScreenWindow.isDestroyed()) {
     secondScreenWindow.webContents.send(CHANNELS.MOBILE_CHANGED, mobileState());
   }

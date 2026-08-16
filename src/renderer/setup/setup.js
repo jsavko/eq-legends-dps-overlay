@@ -341,6 +341,7 @@ function fillForm(cfg) {
   for (const c of SESSION_CATEGORIES) $(`session-${c}`).checked = session[c] !== false;
   syncSessionEnabled();
 
+  $('mobile-enabled').checked = cfg.mobileEnabled === true;
   $('mobile-port').value = cfg.mobilePort ?? 8321;
 
   $('hk-lock').value = cfg.hotkeys.toggleLock;
@@ -537,6 +538,12 @@ function wireEvents() {
   $('open-session').addEventListener('click', () => window.api.openSession());
   $('session-enabled').addEventListener('change', syncSessionEnabled);
   $('open-mobile').addEventListener('click', () => window.api.openSecondScreen());
+  // The Second Screen dialog writes this same key immediately; the checkbox follows
+  // it live so what this form shows — and what Save will write back — is always what
+  // is actually true, never a stale snapshot from when the window opened.
+  window.api.onConfigChanged?.((cfg) => {
+    $('mobile-enabled').checked = cfg.mobileEnabled === true;
+  });
 
   $('browse-dir').addEventListener('click', async () => {
     const r = await window.api.pick('directory');
@@ -718,9 +725,11 @@ async function save() {
       meterLine: $('session-meter-line').checked,
       ...Object.fromEntries(SESSION_CATEGORIES.map((c) => [c, $(`session-${c}`).checked])),
     },
-    // `mobileEnabled` is deliberately absent: the Second Screen dialog owns the
-    // switch, and a Save here writing it would clobber whatever the dialog just set —
-    // the exact failure that moved the alert switches out of this form.
+    // Written by this form AND by the Second Screen dialog — safe only because the
+    // checkbox tracks CONFIG_CHANGED live, so a Save can never write back a state
+    // the dialog already replaced. That live follow is the contract; removing it
+    // reopens the clobber the alert switches left this form over.
+    mobileEnabled: $('mobile-enabled').checked,
     // A blank or mangled port falls back rather than saving NaN; main clamps the same
     // way, so the two can only ever agree on what actually gets bound.
     mobilePort: Math.min(65535, Math.max(1024, Number($('mobile-port').value) || 8321)),

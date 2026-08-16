@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const CH = {
   CONFIG_GET: 'config:get',
   CONFIG_SET: 'config:set',
+  CONFIG_CHANGED: 'config:changed',
   LOGS_LIST: 'logs:list',
   LOGS_PICK: 'logs:pick',
   LOGS_VALIDATE: 'logs:validate',
@@ -29,6 +30,10 @@ contextBridge.exposeInMainWorld('api', {
   mode: modeArg ? modeArg.split('=')[1] : 'setup',
   getConfig: () => ipcRenderer.invoke(CH.CONFIG_GET),
   setConfig: (patch) => ipcRenderer.invoke(CH.CONFIG_SET, patch),
+  /** Config moved under an open form (the Second Screen dialog wrote its switch, a
+   *  tray toggle flipped) — the cue for the form to re-read what it also displays. */
+  onConfigChanged: (handler) =>
+    ipcRenderer.on(CH.CONFIG_CHANGED, (_event, cfg) => handler(cfg)),
   listLogs: (dir) => ipcRenderer.invoke(CH.LOGS_LIST, dir),
   pick: (what) => ipcRenderer.invoke(CH.LOGS_PICK, what),
   validate: (filePath) => ipcRenderer.invoke(CH.LOGS_VALIDATE, filePath),

@@ -11,13 +11,17 @@ nothing leaves the LAN: the phone talks straight to an HTTP server inside the ov
 
 Off by default, on the session tracker's promise: `mobileEnabled: false` means main
 never constructs the server, no port opens, no firewall prompt appears, and the app is
-bit-for-bit what it was before the feature existed. **The dialog is the switch**: its
-off state has a "Turn on the second screen" button and its on state a quiet "Turn
-off" — the first cut bounced the player to Settings to flip a key the dialog had just
-named, which lasted exactly one use ("WTF do I need to go to another screen"). One
-owner still: Settings keeps only the port and a pointer to the dialog, and its Save
-deliberately does not write `mobileEnabled`, so it can never clobber what the dialog
-set — the same failure that moved the alert switches out of that form.
+bit-for-bit what it was before the feature existed. **The switch is in both places
+that name it.** The dialog turns the feature on and off directly ("Turn on the second
+screen" / a quiet "Turn off" / "Try again" on a failed bind) — the first cut bounced
+the player to Settings to flip a key the dialog had just named, which lasted exactly
+one use. Settings shows the same checkbox, and the two stay honest by construction:
+the dialog writes the key immediately, the form's checkbox follows `CONFIG_CHANGED`
+live, so its Save only ever writes back what is already true. Two *views* of one key;
+what the ALERTS-section removal forbade was two writers that cannot see each other.
+Second field lesson: the disable path in `syncMobileServer` originally returned before
+pushing `MOBILE_CHANGED`, so "Turn off" left a dead QR on screen — every path notifies
+now.
 
 ## The server (`src/main/mobile.js`)
 
