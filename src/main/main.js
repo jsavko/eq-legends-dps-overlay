@@ -1488,7 +1488,12 @@ function refreshTrayMenu() {
     // ever be empty is a promise the app cannot keep, and the switch that would fill it
     // is one screen away in Settings.
     ...(sessionEnabled(config.all) ? [{ label: 'Session…', click: createSession }] : []),
-    { label: 'Quests…', click: createQuests },
+    // The accelerator is display only in a tray menu, but that display is how a player
+    // finds out the gesture exists — same deal as "Copy meter to chat" above, and it
+    // reads from config on every rebuild so it cannot go stale. The click stays
+    // open/focus (not toggle): a menu row named "Quests…" that closed the window
+    // would be the menu lying about what it does.
+    { label: 'Quests…', accelerator: keys.openQuests, click: createQuests },
     // Always present, enabled or not: the dialog is where you find out the feature
     // exists, and when it is off it says so and points at Settings — a hidden entry
     // would just read as the feature not existing.
@@ -2106,6 +2111,22 @@ function copyReport() {
   overlayWindow.webContents.send(CHANNELS.COPY_REPORT);
 }
 
+/**
+ * The Quests… tray row as a keyboard gesture, in both directions: open the window if
+ * it is gone, close it if it is up. One-way "open or focus" was considered and
+ * rejected — a binding that cannot dismiss what it summoned forces the mouse trip it
+ * exists to avoid, and no other hotkey here is one-way. The known edge: a window that
+ * is open but buried behind the game closes on the first press instead of raising.
+ * Worst case is a second press, and the closing press itself answers "was it open?".
+ */
+function toggleQuests() {
+  if (questsWindow && !questsWindow.isDestroyed()) {
+    questsWindow.close();
+    return;
+  }
+  createQuests();
+}
+
 function registerHotkeys() {
   globalShortcut.unregisterAll();
   const keys = config.get('hotkeys');
@@ -2128,6 +2149,7 @@ function registerHotkeys() {
   bind(keys.toggleAlerts, toggleAlerts, 'mute alerts');
   bind(keys.newSession, startNewSession, 'new session');
   bind(keys.copyReport, copyReport, 'copy');
+  bind(keys.openQuests, toggleQuests, 'quests');
 }
 
 /**

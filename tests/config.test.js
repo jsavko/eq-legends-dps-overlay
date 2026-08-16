@@ -73,6 +73,8 @@ test('a config written before a hotkey existed gains it rather than losing the b
   assert.equal(store.get('hotkeys').newSession, DEFAULTS.hotkeys.newSession);
   assert.ok(DEFAULTS.hotkeys.copyReport, 'the copy gesture ships with a binding');
   assert.equal(store.get('hotkeys').copyReport, DEFAULTS.hotkeys.copyReport);
+  assert.ok(DEFAULTS.hotkeys.openQuests, 'the quest-window gesture ships with a binding');
+  assert.equal(store.get('hotkeys').openQuests, DEFAULTS.hotkeys.openQuests);
   assert.equal(store.get('hotkeys').toggleLock, 'Control+Alt+D', 'their own choices survive');
 });
 

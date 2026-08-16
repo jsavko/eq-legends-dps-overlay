@@ -351,6 +351,7 @@ function fillForm(cfg) {
   $('hk-metric').value = cfg.hotkeys.toggleMetric;
   $('hk-copy').value = cfg.hotkeys.copyReport ?? '';
   $('hk-alerts').value = cfg.hotkeys.toggleAlerts ?? '';
+  $('hk-quests').value = cfg.hotkeys.openQuests ?? '';
   syncOutputs();
 }
 
@@ -741,6 +742,7 @@ async function save() {
       toggleMetric: $('hk-metric').value.trim(),
       copyReport: $('hk-copy').value.trim(),
       toggleAlerts: $('hk-alerts').value.trim(),
+      openQuests: $('hk-quests').value.trim(),
     },
   };
 

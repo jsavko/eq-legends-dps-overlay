@@ -339,6 +339,17 @@ export const DEFAULTS = {
      * the one-level-deep merge in `load()`, and nothing already bound changes meaning.
      */
     copyReport: 'Control+Shift+C',
+    /**
+     * "Show me the quest ledger" — the tray's Quests… row, without leaving the game.
+     *
+     * A toggle, not open-only: every other binding here works in both directions (H
+     * hides what it showed, M keeps cycling), and a hotkey that can summon a window but
+     * not dismiss it forces the mouse trip it exists to avoid.
+     *
+     * Same no-migration story as `newSession` above: an existing config gains the key on
+     * the one-level-deep merge in `load()`, and nothing already bound changes meaning.
+     */
+    openQuests: 'Control+Shift+Q',
   },
 };
 
