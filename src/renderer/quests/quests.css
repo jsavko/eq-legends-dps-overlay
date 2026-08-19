@@ -132,17 +132,39 @@ button:hover { border-color: var(--ember); }
 .chead .bar i { display: block; height: 100%; background: var(--gold); border-radius: 2px; }
 .chead .bar i.complete { background: var(--balm); }
 
+/* A row is one line — name and count — until something is missing, when the boss
+   flags open a second line underneath. Done and ready rows never grow, so a class
+   the character is finishing keeps its one-line-per-quest density. The row itself
+   is a block and .qtop carries the old flex line, which keeps every selected/hover
+   rule below working untouched on their descendant selectors. */
 .qrow {
-  display: flex; align-items: center; gap: 9px;
+  display: block;
   padding: 8px 14px 8px 26px;
   cursor: pointer;
   border-left: 2px solid transparent;
 }
+.qrow .qtop { display: flex; align-items: center; gap: 9px; }
 .qrow:hover { background: var(--panel-2); }
 .qrow[aria-selected="true"] { background: var(--panel-2); border-left-color: var(--gold); }
 .qrow[aria-selected="true"] .name { color: var(--gold); font-weight: 600; }
 .qrow .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; }
 .qrow .st { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+/* The boss flags: the items pane's source chips restyled down a register, dimmed
+   against the reward name so the name stays the row's anchor. Full mob names, never
+   truncated — an island number alone does not tell anyone where to go. */
+.qrow .flags { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; margin-top: 4px; }
+.qrow .mobflag {
+  font-size: 12px; color: var(--ink-dim);
+  background: var(--panel-2); border-radius: 3px; padding: 1px 7px;
+  white-space: nowrap;
+}
+.qrow .mobflag b { color: var(--gold); font-weight: 700; font-size: 12px; letter-spacing: 0.06em; margin-right: 5px; }
+.qrow .mobflag b:only-child { margin-right: 0; }
+/* The zone-wide flag dresses gold like the rune row it belongs to — a rune drops
+   anywhere in the zone, and the flag should read as that fact, not as a place. */
+.qrow .mobflag.zone { border: 1px solid color-mix(in srgb, var(--gold) 34%, var(--line)); padding: 0 6px; }
+/* "or" joins alternatives inside one item's group: any of these bosses drops it. */
+.qrow .flags .or { font-size: 12px; font-style: italic; color: var(--ink-faint); }
 /* Every item owned, not yet turned in: the count becomes a filled gold pill — "4/4"
    made the reader do the arithmetic that READY states outright. Gold, never balm;
    balm is reserved for done. */

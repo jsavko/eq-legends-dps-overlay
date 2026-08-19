@@ -239,6 +239,91 @@ test('the rune form is one zone-wide chip and a stranger is one verbatim chip', 
   assert.deepEqual(parseSources(''), []);
 });
 
+// ------------------------------------------------------------------ rail boss flags
+
+import { questSourceFlags } from '../src/renderer/quests/organize.js';
+
+test('questSourceFlags dedupes the same boss across items but not within its group', () => {
+  const quest = { done: false, items: [
+    { owned: false, source: 'Island 4: Overseer of Air' },
+    { owned: false, source: 'Island 4: Overseer of Air' },
+    { owned: false, source: 'Island 4: Overseer of Air / Island 8: the Hand of Veeshan' },
+  ] };
+  // The Overseer is one trip however many items it owes; the Hand keeps its own
+  // group, the surviving alternative of the third item.
+  assert.deepEqual(questSourceFlags(quest), [
+    [{ island: '4', mob: 'Overseer of Air', zoneWide: false }],
+    [{ island: '8', mob: 'the Hand of Veeshan', zoneWide: false }],
+  ]);
+});
+
+test('alternatives within one item stay one group, for the renderer to join with "or"', () => {
+  const quest = { done: false, items: [
+    { owned: false, source: 'Island 1.5: Noble Dojorn / Island 4: Overseer of Air / Island 8: the Hand of Veeshan' },
+  ] };
+  const groups = questSourceFlags(quest);
+  assert.equal(groups.length, 1, 'three bosses, one hunt — any of them drops it');
+  assert.deepEqual(groups[0].map((c) => c.mob),
+    ['Noble Dojorn', 'Overseer of Air', 'the Hand of Veeshan']);
+});
+
+test('zone-wide sources collapse to a single zone-wide group', () => {
+  const quest = { done: false, items: [
+    { owned: false, source: 'Random zone-wide drop' },
+    { owned: false, source: 'Random zone-wide drop' },
+    { owned: false, source: 'Island 5: The Spiroc Lord' },
+  ] };
+  const groups = questSourceFlags(quest);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0][0].zoneWide, true);
+  assert.deepEqual(groups[1], [{ island: '5', mob: 'The Spiroc Lord', zoneWide: false }]);
+});
+
+test('owned items contribute nothing, whatever the source of the claim', () => {
+  const quest = { done: false, items: [
+    { owned: true, ownedSource: 'manual', source: 'Island 5: The Spiroc Lord' },
+    { owned: true, ownedSource: 'log', source: 'Random zone-wide drop' },
+    { owned: false, source: 'Island 2: Gorgalosk' },
+  ] };
+  assert.deepEqual(questSourceFlags(quest), [
+    [{ island: '2', mob: 'Gorgalosk', zoneWide: false }],
+  ]);
+});
+
+test('done and ready quests fly no flags at all', () => {
+  // Done silences even an unowned item — turned in is turned in.
+  assert.deepEqual(questSourceFlags({ done: true, items: [
+    { owned: false, source: 'Island 5: The Spiroc Lord' },
+  ] }), []);
+  // Ready is every item owned, which empties the flags with no special case.
+  assert.deepEqual(questSourceFlags({ done: false, items: [
+    { owned: true, source: 'Island 5: The Spiroc Lord' },
+    { owned: true, source: 'Random zone-wide drop' },
+  ] }), []);
+  assert.deepEqual(questSourceFlags({ done: false, items: [] }), []);
+});
+
+test('an unrecognized source shape becomes a verbatim flag, never a dropped one', () => {
+  assert.deepEqual(questSourceFlags({ done: false, items: [
+    { owned: false, source: 'Somewhere new' },
+  ] }), [[{ island: null, mob: 'Somewhere new', zoneWide: false }]]);
+});
+
+test('classGroups carries the flags, and the real snapshot backs every unfinished quest', () => {
+  const groups = classGroups(realSnapshot());
+  for (const cls of groups) {
+    for (const q of cls.quests) {
+      if (q.done || q.ready) {
+        assert.deepEqual(q.sources, [], `${q.ref} is finished and must fly no flags`);
+      } else {
+        // Every dataset source parses to at least one chip, so every quest still
+        // missing something names at least one place to go.
+        assert.ok(q.sources.length >= 1, `${q.ref} is unfinished yet names no source`);
+      }
+    }
+  }
+});
+
 // -------------------------------------------------------------------- the rail filter
 
 test('railFilter narrows quests but never drops a class header', () => {

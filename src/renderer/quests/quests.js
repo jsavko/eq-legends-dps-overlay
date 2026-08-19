@@ -137,7 +137,29 @@ function renderRail() {
       const st = q.done ? span('st', '✓')
         : q.ready ? span('st ready', 'READY')
           : span('st', `${q.ownedCount}/${q.itemCount}`);
-      li.append(span('name', q.reward), st);
+      const top = span('qtop', '');
+      top.append(span('name', q.reward), st);
+      li.append(top);
+      // The flag line: where the missing pieces drop, under the name so the whole rail
+      // answers "we're pulling X — which of my quests care?" without a click. It
+      // exists only while something is missing, so done and ready rows keep their
+      // one-line density and a finishing character's rail converges back to it.
+      // Alternatives within one item are joined with "or" — three bosses on one flag
+      // group is one item that any of them drops, not three errands.
+      if (q.sources.length) {
+        const flags = span('flags', '');
+        for (const group of q.sources) {
+          group.forEach((chip, i) => {
+            if (i) flags.append(span('or', 'or'));
+            const f = span(`mobflag${chip.zoneWide ? ' zone' : ''}`, '');
+            if (chip.zoneWide) f.append(strong('ZONE-WIDE'));
+            else if (chip.island) f.append(strong(`ISL ${chip.island}`), text(` ${chip.mob}`));
+            else f.append(text(chip.mob));
+            flags.append(f);
+          });
+        }
+        li.append(flags);
+      }
       li.addEventListener('click', () => {
         selected = q.ref;
         localStorage.setItem('quests.selected', selected);

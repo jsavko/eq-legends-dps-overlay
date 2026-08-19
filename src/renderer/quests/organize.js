@@ -32,6 +32,9 @@ export function classGroups(snapshot) {
         // quest not yet turned in. The empty-items guard is paranoia against a future
         // dataset refresh — a quest with nothing to collect must not read as ready.
         ready: !q.done && q.items.length > 0 && ownedCount === q.items.length,
+        // Where the missing pieces drop — empty exactly when nothing is missing, which
+        // is also how the rail knows a row gets its second line.
+        sources: questSourceFlags(q),
       };
     });
     return {
@@ -402,6 +405,50 @@ export function parseSources(source) {
     }
   }
   return chips;
+}
+
+/**
+ * The rail's answer to "where do I still have to go for this quest": the source chips
+ * of every UNOWNED item, grouped so the claim reads right. Chips from one item are
+ * alternatives — the item drops from any of them — so they stay together in one group
+ * for the renderer to join with "or"; separate groups are separate hunts. Owned items
+ * contribute nothing (the flag's whole job is to vanish as loot lands), and a done
+ * quest contributes nothing however its items stand — turned in is turned in.
+ *
+ * Dedupe runs ACROSS items on island+mob: two missing items off the same boss are one
+ * trip, so one flag. A chip deduped out of a later item's alternatives leaves the rest
+ * of that group standing — the trips still to name are the ones that render. All
+ * zone-wide sources collapse to a single zone-wide group, because "anything in the
+ * zone might drop it" said twice is still one fact. An unrecognized source shape rides
+ * through as the verbatim chip `parseSources` already made of it — flagged, never
+ * dropped.
+ *
+ * @returns {Array<Array<{island: string|null, mob: string, zoneWide: boolean}>>}
+ */
+export function questSourceFlags(quest) {
+  if (quest.done) return [];
+  const groups = [];
+  const seen = new Set();
+  let zoneWideSeen = false;
+  for (const item of quest.items ?? []) {
+    if (item.owned) continue;
+    const group = [];
+    for (const chip of parseSources(item.source)) {
+      if (chip.zoneWide) {
+        if (!zoneWideSeen) {
+          zoneWideSeen = true;
+          groups.push([chip]);
+        }
+        continue;
+      }
+      const key = `${chip.island ?? ''}|${chip.mob}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      group.push(chip);
+    }
+    if (group.length) groups.push(group);
+  }
+  return groups;
 }
 
 // ---------------------------------------------------------------------------
