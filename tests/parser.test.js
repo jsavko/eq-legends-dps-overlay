@@ -2077,3 +2077,16 @@ test('retuning alertTtls mid-session leaves a stamped chip alone and governs the
   p.feed(`${D(18, 48, 30)} A cyclops begins casting Instill.`);
   assert.equal(p.snapshot(T(18, 48, 30)).hostileCasts[0].remainingMs, 20_000);
 });
+
+test('the snapshot names the whole engaged set, not just the headline mob', () => {
+  const p = makeParser();
+  assert.deepEqual(p.snapshot().engagedNames, [], 'no encounter, no names');
+
+  p.feed(`${D(18, 48, 16)} You crush Keeper of Souls for 40 points of damage.`);
+  p.feed(`${D(18, 48, 18)} You kick Eternal Spirit for 12 points of damage.`);
+  const snap = p.snapshot();
+  assert.equal(snap.active, true);
+  // A multi-mob pull engages more names than the label can carry — the drops popup
+  // matches on these, and matching on the label alone would miss every add.
+  assert.deepEqual([...snap.engagedNames].sort(), ['Eternal Spirit', 'Keeper of Souls']);
+});

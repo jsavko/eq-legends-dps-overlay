@@ -21,7 +21,8 @@ import { LogParser } from '../parser/index.js';
 import { nearestName } from '../parser/entities.js';
 import { Tailer, listLogs } from './tailer.js';
 import {
-  ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, MOBILE_KEYS, alertsEnabled, timersEnabled, partyListFor,
+  ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, DROPS_KEYS, MOBILE_KEYS,
+  alertsEnabled, timersEnabled, dropsEnabled, partyListFor,
   ALERT_PRESETS, warnKeyFor, presetOf, sessionEnabled, sessionCategories,
   DURATION_KEYS, DURATION_DEFAULTS, durationSec, alertTtls,
 } from './config.js';
@@ -31,6 +32,7 @@ import { SessionStore, sessionKey, listEntry, CHECKPOINT_INTERVAL_MS } from './s
 import { SessionTracker } from '../session/session.js';
 import { QuestProgress } from '../quests/progress.js';
 import { parseInventory } from '../quests/inventory.js';
+import { bossNeeds, engagedNeeds, nextDropsState, dropsDisplay } from '../quests/needs.js';
 import { TriggerStore } from './triggers-store.js';
 import { builtinPack, builtinPatch, builtinPresetPatch } from './builtin-pack.js';
 import { TriggerEngine } from '../triggers/engine.js';
@@ -75,6 +77,7 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {BrowserWindow|null} */ let triggersWindow = null;
 /** @type {BrowserWindow|null} */ let alertsWindow = null;
 /** @type {BrowserWindow|null} */ let timersWindow = null;
+/** @type {BrowserWindow|null} */ let dropsWindow = null;
 /** @type {LogParser|null} */    let parser = null;
 /** @type {Tailer|null} */       let tailer = null;
 /** @type {ConfigStore|null} */  let config = null;
@@ -169,6 +172,15 @@ let saveHistoryBoundsTimer = null;
 let saveTriggersBoundsTimer = null;
 let saveAlertsBoundsTimer = null;
 let saveTimersBoundsTimer = null;
+let saveDropsBoundsTimer = null;
+/**
+ * The engaged-drops popup's lifetime, advanced once per push tick by the pure state
+ * machine in needs.js — engaged, lingering while the corpse is looted, or null.
+ * `lastDropsJson` is the change gate: the popup gets a push only when its payload
+ * actually differs, which between pulls means it gets nothing at all.
+ */
+let dropsState = null;
+let lastDropsJson = 'null';
 let hoverTimer = null;
 /**
  * Where the player put the window. Auto-fit reads these and never writes them.
@@ -229,6 +241,8 @@ async function main() {
     if (alertsEnabled(config.all)) createAlerts();
     // The timers get their own, on their own switch — see createTimersWindow.
     if (timersEnabled(config.all)) createTimersWindow();
+    // And the engaged-drops popup, likewise — see createDropsWindow.
+    if (dropsEnabled(config.all)) createDropsWindow();
   } else {
     createSetup('setup');
   }
@@ -1069,6 +1083,10 @@ function startPushLoop() {
     // be running with no encounter open at all — which is the ONE behaviour change this
     // feature makes to the timers panel, and it only happens once a pack is imported.
     const snapshot = buildSnapshot();
+    // The drops popup rides the same tick but keeps its own change gate and its own
+    // channel — its lifetime (the 90s loot linger in particular) has to advance
+    // during exactly the silence the snapshot skip below exists for.
+    pushDrops(snapshot);
     const unchanged = parser.revision === lastRevision &&
       (triggers?.revision ?? -1) === lastTriggerRevision &&
       (session?.revision ?? -1) === lastSessionRevision &&
@@ -1129,6 +1147,49 @@ function buildSnapshot({ timeline = false } = {}) {
     triggerTimers: triggers.timers(now),
     session: sessionSummary,
   };
+}
+
+/**
+ * One tick of the engaged-drops popup: advance its lifetime and push its payload —
+ * to its own window, on its own channel, only when it changed.
+ *
+ * All the judgement is imported: `bossNeeds` inverts the ledger (the same inversion
+ * the Quests window's "By boss" rail paints, so the two surfaces cannot disagree),
+ * `engagedNeeds` matches the fight's enemy names against it by strict equality, and
+ * `nextDropsState` owns the lifetime — including the 90s linger past encounter
+ * close, which is why this runs BEFORE the snapshot skip: the linger has to expire
+ * during exactly the silence that skip exists for.
+ *
+ * The inversion is recomputed per tick rather than cached, but only while it can
+ * matter (a state is live, or an encounter is running with engaged names): out of
+ * combat this function is two null checks, and in combat the ledger is ~190 items —
+ * cheaper than the snapshot already built this tick. Recomputing is also what makes
+ * a drop looted mid-linger leave the list with no invalidation plumbing at all.
+ */
+function pushDrops(snapshot) {
+  let payload = null;
+  if (quests && (dropsState || (snapshot.active && snapshot.engagedNames?.length))) {
+    const groups = bossNeeds(quests.snapshot());
+    const matched = engagedNeeds(groups, snapshot.active ? snapshot.engagedNames : [])
+      .map((g) => g.mob);
+    dropsState = nextDropsState(dropsState, {
+      active: Boolean(snapshot.active),
+      startTs: snapshot.startTs ?? null,
+      matchedMobs: matched,
+      now: Date.now(),
+    });
+    const display = dropsDisplay(dropsState, groups);
+    if (display.length) payload = { phase: dropsState.phase, groups: display };
+  } else {
+    dropsState = null;
+  }
+
+  const json = JSON.stringify(payload);
+  if (json === lastDropsJson) return;
+  lastDropsJson = json;
+  if (dropsWindow && !dropsWindow.isDestroyed()) {
+    dropsWindow.webContents.send(CHANNELS.DROPS, payload);
+  }
 }
 
 /**
@@ -1930,6 +1991,77 @@ function createTimersWindow() {
 }
 
 /**
+ * The engaged-drops popup: the quest ledger's answer to "we are fighting this boss —
+ * what do I still need from it", floating in a corner while the fight runs and while
+ * the corpse is looted.
+ *
+ * The timers window's contract exactly, for the same reasons: an invisible
+ * generously-sized box, click-through on the shared lock, no geometry machinery, its
+ * own bounds key written only by its own move handler. The panel bottom-anchors
+ * inside the box (see drops.css) so the default placement reads as a corner popup:
+ * the box's bottom-right corner sits near the screen's, the panel sits in it, and
+ * growth extends up and left into the dead space. The box is sized for the worst
+ * realistic list — a fresh ledger meeting an island-8 boss owes ~19 items — with the
+ * same "generosity is load-bearing" caveat as the other two, since a clipped row
+ * would be a silently hidden one.
+ */
+function createDropsWindow() {
+  if (dropsWindow && !dropsWindow.isDestroyed()) return;
+
+  const area = screen.getPrimaryDisplay().workArea;
+  const width = 620;
+  const height = 760;
+  const bounds = config.get('dropsBounds') ?? {
+    width,
+    height,
+    x: area.x + area.width - width - 20,
+    y: area.y + area.height - height - 20,
+  };
+
+  dropsWindow = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    icon: path.join(ASSETS, 'icon-256.png'),
+    focusable: true,
+    webPreferences: {
+      preload: path.join(RENDERER, 'drops', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  dropsWindow.setAlwaysOnTop(true, 'screen-saver');
+  dropsWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  dropsWindow.loadFile(path.join(RENDERER, 'drops', 'index.html'));
+
+  dropsWindow.on('ready-to-show', () => {
+    if (!dropsWindow || dropsWindow.isDestroyed()) return;
+    dropsWindow.setIgnoreMouseEvents(config.get('locked'));
+    dropsWindow.webContents.send(CHANNELS.LOCK_CHANGED, config.get('locked'));
+    // A window created mid-fight (the switch flipped in settings) must not sit empty
+    // until the next change — hand it whatever the last tick decided.
+    dropsWindow.webContents.send(CHANNELS.DROPS, JSON.parse(lastDropsJson));
+    if (!overlayVisible) dropsWindow.hide();
+  });
+
+  const remember = () => {
+    clearTimeout(saveDropsBoundsTimer);
+    saveDropsBoundsTimer = setTimeout(() => {
+      if (!dropsWindow || dropsWindow.isDestroyed()) return;
+      config.set({ dropsBounds: dropsWindow.getBounds() });
+    }, 400);
+  };
+  dropsWindow.on('moved', remember);
+  dropsWindow.on('closed', () => { dropsWindow = null; });
+}
+
+/**
  * Bring the alert window into line with the settings — the single place that decides
  * whether it exists.
  *
@@ -1952,6 +2084,13 @@ function syncTimersWindow() {
   else timersWindow?.close();
 }
 
+/** And for the engaged-drops popup, from its own one switch (mute wins here too). */
+function syncDropsWindow() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (dropsEnabled(config.all)) createDropsWindow();
+  else dropsWindow?.close();
+}
+
 /**
  * Push the current config to every window that listens for it.
  *
@@ -1961,7 +2100,7 @@ function syncTimersWindow() {
  * switched off rather than at whatever minute the next snapshot arrives.
  */
 function broadcastConfig(cfg) {
-  for (const win of [overlayWindow, alertsWindow, timersWindow, setupWindow]) {
+  for (const win of [overlayWindow, alertsWindow, timersWindow, dropsWindow, setupWindow]) {
     if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.CONFIG_CHANGED, cfg);
   }
 }
@@ -1977,6 +2116,8 @@ function setAlertOption(patch) {
   const after = config.set(patch);
   syncAlertsWindow();
   syncTimersWindow();
+  // Mute owns this window too — it is a consult surface like the timers.
+  syncDropsWindow();
   broadcastConfig(after);
   refreshTrayMenu();
 }
@@ -2015,10 +2156,10 @@ function applyLock(locked) {
   }
 
   // One lock for the whole HUD: unlocking to reposition the meter is the moment to
-  // reposition the warnings and the timers too, and a separate hotkey per window
-  // would just be three things to forget instead of one. Placement stays separate —
-  // only the GESTURE is shared.
-  for (const win of [alertsWindow, timersWindow]) {
+  // reposition the warnings, the timers and the drops popup too, and a separate
+  // hotkey per window would just be things to forget instead of one. Placement stays
+  // separate — only the GESTURE is shared.
+  for (const win of [alertsWindow, timersWindow, dropsWindow]) {
     if (!win || win.isDestroyed()) continue;
     win.setIgnoreMouseEvents(locked);
     win.webContents.send(CHANNELS.LOCK_CHANGED, locked);
@@ -2076,7 +2217,7 @@ function toggleVisible() {
   if (overlayVisible) {
     overlayWindow.showInactive();   // show without stealing focus from the game
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
-    for (const win of [alertsWindow, timersWindow]) {
+    for (const win of [alertsWindow, timersWindow, dropsWindow]) {
       if (!win || win.isDestroyed()) continue;
       win.showInactive();
       win.setAlwaysOnTop(true, 'screen-saver');
@@ -2085,6 +2226,7 @@ function toggleVisible() {
     overlayWindow.hide();
     alertsWindow?.hide();
     timersWindow?.hide();
+    dropsWindow?.hide();
   }
   refreshTrayMenu();
 }
@@ -2325,6 +2467,7 @@ function registerIpc() {
     // timers window answers to its own switch, and to the same mute.
     if (ALERT_KEYS.some((key) => patch[key] !== undefined)) syncAlertsWindow();
     if (TIMER_KEYS.some((key) => patch[key] !== undefined)) syncTimersWindow();
+    if (DROPS_KEYS.some((key) => patch[key] !== undefined)) syncDropsWindow();
     // One block, one predicate — the master switch decides whether the tracker exists at
     // all and the seven categories decide what it reads, so any touch of it re-derives
     // both rather than trying to work out which half moved.

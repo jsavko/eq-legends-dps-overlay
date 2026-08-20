@@ -19,6 +19,7 @@ import {
   parseRewardStats, parseSources, railFilter, effectName, effectMeta,
   sharedIndex, sharedWith,
 } from './organize.js';
+import { bossNeeds } from '../../quests/needs.js';
 
 const $ = (id) => document.getElementById(id);
 const ICONS = '../../quests/icons/';
@@ -95,6 +96,14 @@ function renderRail() {
     btn.setAttribute('aria-pressed', String(btn.dataset.filter === filter));
   }
 
+  // "By boss" is not a quest filter but the rail's second arrangement — the same
+  // ledger inverted. It branches here rather than teaching railFilter about it,
+  // because railFilter filters quests and boss mode has no quests to filter.
+  if (filter === 'boss') {
+    renderBossRail();
+    return;
+  }
+
   const selectedClass = selected?.split(':')[0] ?? null;
   const list = $('quests');
   list.replaceChildren();
@@ -168,6 +177,79 @@ function renderRail() {
       // The rail does not show the reward card, so hovering is where it earns its
       // keep: the full parsed card floats beside the row. No pin — a click selects.
       bindPopup(li, () => railPreview(q.ref), { pinOnClick: false, side: 'right' });
+      list.append(li);
+    }
+  }
+}
+
+/**
+ * The rail's other arrangement: Boss → Item → class flags, strictly still-needed.
+ *
+ * The hunt list read before a raid — islands ascend in pull order, each boss lists
+ * what it still owes, and each item flies the classes it is owed to. Everything here
+ * comes from `bossNeeds`, the same inversion the engaged-drops popup paints, so the
+ * two can never disagree about what a boss owes. Clicking a class flag selects that
+ * class's quest, so the quest and items panes follow exactly as they do from a quest
+ * row; hovering one previews the reward the errand is for. The list empties as the
+ * ledger completes, and the empty state says so in a sentence rather than showing a
+ * blank pane.
+ */
+function renderBossRail() {
+  const list = $('quests');
+  list.replaceChildren();
+  const groups = bossNeeds(snapshot);
+
+  if (!groups.length) {
+    const li = document.createElement('li');
+    li.className = 'bossempty';
+    li.textContent = 'Nothing left to hunt — every unfinished quest’s items are in hand.';
+    list.append(li);
+    return;
+  }
+
+  for (const group of groups) {
+    const head = document.createElement('li');
+    head.className = 'bosshead';
+    if (group.zoneWide) {
+      head.append(span('btag', 'ZONE-WIDE'), span('bnote', 'any Sky mob — runes'));
+    } else if (group.island) {
+      head.append(span('btag', `ISL ${group.island}`), span('bmob', group.mob));
+    } else {
+      // A source shape parseSources could not place rides through verbatim — flagged,
+      // never dropped, the contract every reader of that function keeps.
+      head.append(span('bmob', group.mob));
+    }
+    head.append(span('bcount', `${group.items.length} item${group.items.length === 1 ? '' : 's'}`));
+    list.append(head);
+
+    for (const item of group.items) {
+      const li = document.createElement('li');
+      li.className = `need${item.rune ? ' rune' : ''}`;
+      li.append(span('iname', item.name));
+
+      const flags = span('nflags', '');
+      for (const c of item.classes) {
+        const f = document.createElement('button');
+        f.type = 'button';
+        f.className = 'clsflag';
+        f.textContent = c.className;
+        f.setAttribute('aria-pressed', String(c.ref === selected));
+        f.title = `${c.reward} — open the ${c.className} quest`;
+        f.addEventListener('click', () => {
+          selected = c.ref;
+          localStorage.setItem('quests.selected', selected);
+          render();
+        });
+        bindPopup(f, () => railPreview(c.ref), { pinOnClick: false, side: 'right' });
+        flags.append(f);
+      }
+      // Where else this item drops: you fight differently over a drop you can get
+      // elsewhere, so the alternatives ride on the row rather than hiding in a hover.
+      if (item.alsoFrom.length) {
+        flags.append(span('also',
+          `also ${item.alsoFrom.map((a) => (a.island ? `ISL ${a.island}` : a.mob)).join(' · ')}`));
+      }
+      li.append(flags);
       list.append(li);
     }
   }

@@ -1855,6 +1855,7 @@ export class LogParser {
         totalHealing: 0,
         groupHps: 0,
         rows: [],
+        engagedNames: [],
         hostileCasts,
         memberEffects,
         notices,
@@ -1876,6 +1877,11 @@ export class LogParser {
       idle: false,
       zone: this.zone,
       self: this.selfName,
+      // The fight's enemy set by name, for consumers that key on WHO is engaged
+      // rather than on the numbers — the engaged-drops popup matches these against
+      // the quest dataset's bosses. The label alone won't do: it is only the
+      // headline mob, and a multi-mob pull engages more names than it can name.
+      engagedNames: [...enc.engagedNpcs.keys()],
       hostileCasts,
       memberEffects,
       notices,

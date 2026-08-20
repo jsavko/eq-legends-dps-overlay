@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled, timersEnabled,
+  ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled, timersEnabled, dropsEnabled,
   ALERT_CATEGORIES, ALERT_PRESETS, TIMER_KEYS, WARN_GROUPS, WARN_KEYS,
   warnKeyFor, warnGroupOn, presetOf,
   SESSION_CATEGORIES, sessionEnabled, sessionLineEnabled, sessionCategories, partyListFor,
@@ -538,4 +538,14 @@ test('duration values round-trip through disk like any other setting', () => {
   assert.equal(b.get('questChipSec'), 15);
   assert.equal(b.get('toastSec'), 4);
   assert.equal(b.get('summonChipSec'), 5, 'untouched categories keep their defaults');
+});
+
+test('the drops popup has one switch, and mute wins over it like the timers', () => {
+  assert.equal(dropsEnabled(DEFAULTS), true, 'a fresh install shows needed drops on engage');
+  assert.equal(dropsEnabled({ ...DEFAULTS, dropsOverlay: false }), false);
+  assert.equal(dropsEnabled({ ...DEFAULTS, alertsMuted: true }), false, 'mute silences every consult surface');
+  // A config predating the key must not silently swallow the feature.
+  const legacy = { ...DEFAULTS };
+  delete legacy.dropsOverlay;
+  assert.equal(dropsEnabled(legacy), true);
 });

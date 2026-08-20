@@ -176,6 +176,48 @@ button:hover { border-color: var(--ember); }
 .qrow.done .name { color: var(--ink-faint); }
 .qrow.done .st { color: var(--balm); }
 
+/* ------------------------------------------------- rail, "By boss" mode */
+
+/* An island header echoes the class headers' register — gold tag, tracked caps —
+   so the rail reads as the same instrument in either arrangement. The count is the
+   scan number: "we're clearing island 4 — how much do I care?" */
+.bosshead {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 12px 14px 5px;
+  border-top: 1px solid var(--line);
+}
+#quests .bosshead:first-child { border-top: none; }
+.bosshead .btag { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; color: var(--gold); white-space: nowrap; }
+.bosshead .bmob {
+  font-size: 12.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink);
+}
+.bosshead .bnote { font-size: 12.5px; color: var(--ink-dim); }
+.bosshead .bcount { margin-left: auto; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-faint); }
+
+.need { display: block; padding: 6px 14px 6px 26px; }
+.need .iname { font-size: 14.5px; }
+/* A rune keeps its gold accent in every surface that names one. */
+.need.rune .iname { color: var(--gold); }
+.need .nflags { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; margin-top: 4px; }
+
+/* The class flag is a real button — it selects that class's quest — restyled to the
+   mobflag register. The global button rule is undone property by property. */
+.clsflag {
+  font-size: 12.5px; color: var(--ink-dim);
+  background: var(--panel-2); border: 1px solid transparent; border-radius: 3px;
+  padding: 1px 8px; cursor: pointer;
+}
+.clsflag:hover { color: var(--ink); border-color: var(--line); }
+.clsflag[aria-pressed="true"] {
+  color: var(--gold); font-weight: 600;
+  border-color: color-mix(in srgb, var(--gold) 45%, var(--line));
+}
+/* Where else the item drops — on the row, never behind a hover. */
+.need .also { font-size: 12px; font-style: italic; color: var(--ink-faint); }
+
+.bossempty { padding: 40px 20px; color: var(--ink-faint); font-size: 14px; text-align: center; line-height: 1.8; }
+
 /* ------------------------------------------------------------- quest pane */
 
 #quest { grid-area: quest; border-right: 1px solid var(--line); padding: 18px 20px; overflow: hidden; display: flex; flex-direction: column; }

@@ -232,6 +232,19 @@ export const DEFAULTS = {
   timersBounds: null,
 
   /**
+   * The engaged-boss drops popup: a small click-through panel that appears when a
+   * Sky boss with quest drops still needed is engaged, listing those drops and the
+   * classes they are owed to. One switch, living in the settings form — it backs no
+   * other surface, so the two-places failure that removed the ALERTS section from
+   * settings cannot recur here.
+   */
+  dropsOverlay: true,
+  /** Drops popup position; null until the player drags it somewhere. Its own key,
+   *  written only by that window's own move handler — never derived from another
+   *  window's bounds, for the usual climbing-window reason. */
+  dropsBounds: null,
+
+  /**
    * Whether the "where the controls live" hint has been shown.
    *
    * The overlay is frameless and stays out of the taskbar, and Windows 11 files new tray
@@ -363,6 +376,9 @@ export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
 
 /** Every key that can change whether the boss-timer window should exist. */
 export const TIMER_KEYS = ['triggerTimers', 'alertsMuted'];
+
+/** Every key that can change whether the engaged-drops popup window should exist. */
+export const DROPS_KEYS = ['dropsOverlay', 'alertsMuted'];
 
 /** Every key whose change means the second-screen server must be rebuilt. The token
  *  is deliberately absent: nothing edits it after first generation, and a patch that
@@ -516,6 +532,20 @@ export function alertsEnabled(cfg) {
 export function timersEnabled(cfg) {
   if (!cfg || cfg.alertsMuted) return false;
   return cfg.triggerTimers !== false;
+}
+
+/**
+ * Should the engaged-drops popup window exist at all?
+ *
+ * One switch, and mute wins over it exactly as it does for the timers: the popup is
+ * a consult surface like the countdown panel, and "shut up for this pull" that left
+ * it talking would be the one surface ignoring the hotkey. Absent reads as on for
+ * the same reason the timers key does — a config predating the key must not
+ * silently swallow the feature its next update ships.
+ */
+export function dropsEnabled(cfg) {
+  if (!cfg || cfg.alertsMuted) return false;
+  return cfg.dropsOverlay !== false;
 }
 
 /**

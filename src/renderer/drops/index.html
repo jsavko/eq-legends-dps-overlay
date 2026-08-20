@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>EQL Needed Drops</title>
+  <link rel="stylesheet" href="drops.css" />
+</head>
+<body data-locked="true">
+  <!-- The window is an invisible, generously-sized box; only this panel paints, and
+       only while an engaged (or just-slain) Sky boss still owes something. It
+       BOTTOM-anchors inside the box so the default placement reads as a corner
+       popup: the panel sits in the corner and grows upward into the dead space. -->
+  <div id="panel" hidden>
+    <div class="phead">
+      <span class="title">Drops needed</span>
+    </div>
+    <div id="rows"></div>
+  </div>
+
+  <!-- Only visible while unlocked. The panel vanishes whenever nothing is owed, and
+       a window with nothing in it cannot be dragged anywhere. -->
+  <div id="placeholder">
+    <span class="verb">Needed drops</span>
+    <span class="hint">drag to place — the list appears when a Sky boss is engaged</span>
+  </div>
+
+  <script type="module" src="drops.js"></script>
+</body>
+</html>

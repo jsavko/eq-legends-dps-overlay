@@ -379,33 +379,14 @@ export function effectMeta(text) {
 // ---------------------------------------------------------------------------
 
 /**
- * "Island 1.5: Noble Dojorn / Island 4: Overseer of Air" → one chip per mob.
- *
- * Split on " / " (space-slash-space) ONLY: "drake/sphinx/spirit mobs" is one mob
- * blob, not three chips. A segment with no "Island N:" head of its own continues the
- * previous island ("Island 5: spiroc mobs / The Spiroc Lord" is two chips on island
- * 5). The rune's zone-wide form is flagged distinctly, and a shape this function has
- * never seen becomes a single verbatim chip — never a dropped one.
- *
- * @returns {Array<{island: string|null, mob: string, zoneWide: boolean}>}
+ * The source-string vocabulary lives in `src/quests/needs.js` now — the boss-first
+ * inversion there is shared with the main process (the engaged-drops popup), and a
+ * renderer module is the wrong home for something main has to import. Re-exported
+ * here so this window's own imports read exactly as they always did.
  */
-export function parseSources(source) {
-  const text = String(source ?? '').trim();
-  if (!text) return [];
-  if (/zone-wide/i.test(text)) return [{ island: null, mob: text, zoneWide: true }];
-  const chips = [];
-  let island = null;
-  for (const segment of text.split(' / ')) {
-    const m = /^Island ([\d.]+): *(.+)$/.exec(segment.trim());
-    if (m) {
-      island = m[1];
-      chips.push({ island, mob: m[2], zoneWide: false });
-    } else {
-      chips.push({ island, mob: segment.trim(), zoneWide: false });
-    }
-  }
-  return chips;
-}
+import { parseSources } from '../../quests/needs.js';
+
+export { parseSources };
 
 /**
  * The rail's answer to "where do I still have to go for this quest": the source chips

@@ -29,6 +29,14 @@ export const CHANNELS = {
    */
   COPY_REPORT: 'overlay:copy-report',
   /**
+   * The engaged-drops popup's whole feed: `{ phase, groups }` while a matched Sky
+   * boss is engaged or its kill is still being looted, `null` otherwise. Its own
+   * channel rather than a rider on SNAPSHOT because the popup is the only window
+   * that wants it — the other click-through windows would carry the payload four
+   * times a second for nothing — and main pushes it only when it changes.
+   */
+  DROPS: 'drops:state',
+  /**
    * A fight was appended to the history store — `{ key }` names whose file grew. Sent
    * to the history window so an open one can refresh its rail live instead of showing
    * a list frozen at whatever moment it was opened.

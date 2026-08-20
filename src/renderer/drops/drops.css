@@ -1,0 +1,173 @@
+/*
+ * The engaged-drops popup: a small framed list floating in a corner of the game
+ * screen, dressed like the boss-timer panel — the two are siblings, consult
+ * fixtures rather than interruptions.
+ *
+ * The same absences as the timers window, for the same reasons: no scroll container
+ * anywhere (this window ignores mouse input while locked, so a wheel would never
+ * reach it — the invisible box is generously sized instead, and the worst realistic
+ * list fits it with headroom), no geometry machinery (the box never moves itself;
+ * the only bounds that change are the ones the player drags to).
+ *
+ * The panel BOTTOM-anchors inside the box, unlike the timers' top anchor: the
+ * default placement is a corner, and a bottom-anchored panel sits IN the corner and
+ * grows upward into the box's dead space. Row stability matters less here than on
+ * the timers — the list changes wholesale at pull boundaries and only shrinks
+ * within one (loot landing) — so growth direction is free to serve placement.
+ */
+
+:root {
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+  --slab:      #100d0a;
+  --edge:      #2e2620;
+  --ember:     #b9702a;
+  --ember-lit: #e0a53f;
+
+  --scale: 1;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  cursor: default;
+  user-select: none;
+}
+
+body {
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: calc(13px * var(--scale));
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;  /* the anchor is the box's BOTTOM edge — the corner */
+  align-items: flex-end;      /* …and its right edge */
+}
+
+/* Unlocked, the whole box is a drag handle — there is no other chrome to grab. */
+body:not([data-locked="true"]) { -webkit-app-region: drag; }
+
+/* ------------------------------------------------------------------- the panel */
+
+#panel {
+  width: 24.62em;   /* 320px at 1× */
+  background: linear-gradient(180deg, color-mix(in srgb, var(--slab) 94%, #3a2a18) 0%, var(--slab) 40%, var(--slab) 100%);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: 0 2px 18px rgba(0, 0, 0, 0.65), inset 0 1px 0 color-mix(in srgb, var(--ember) 26%, transparent);
+  overflow: hidden;
+}
+#panel[hidden] { display: none; }
+
+.phead {
+  padding: 0.31em 0.69em;
+  border-bottom: 1px solid var(--edge);
+  background: color-mix(in srgb, var(--slab) 82%, #241a10);
+}
+.phead .title {
+  font-size: 0.73em;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ember-lit);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ boss lines */
+
+.bhead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.42em 0.69em 0.15em;
+}
+.bhead .btag {
+  font-size: 0.85em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ember-lit);
+  white-space: nowrap;
+}
+.bhead .bmob {
+  font-size: 0.92em;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bhead .bstate {
+  margin-left: auto;
+  font-size: 0.81em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------- item rows */
+
+.need {
+  display: flex;
+  align-items: center;
+  gap: 0.62em;
+  padding: 0.19em 0.69em 0.19em 1.15em;
+}
+.need .iname {
+  font-size: 0.96em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A rune keeps its gold accent in every surface that names one. */
+.need.rune .iname { color: var(--ember-lit); }
+.need .who {
+  margin-left: auto;
+  display: flex;
+  gap: 0.31em;
+  flex: none;
+}
+.need .cls {
+  font-size: 0.85em;
+  color: var(--ink-dim);
+  background: color-mix(in srgb, var(--slab) 55%, #241a10);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 0.04em 0.5em;
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------- unlocked drag placeholder */
+
+/*
+ * Whenever nothing is owed the panel is GONE — no empty frame, nothing on screen.
+ * The one exception is while unlocked, because a window with nothing in it cannot
+ * be positioned.
+ */
+#placeholder {
+  display: none;
+  width: 24.62em;
+  margin-top: 0.3em;
+  padding: 0.62em 0.92em;
+  text-align: center;
+  background: rgba(16, 13, 10, 0.88);
+  border: 1px dashed var(--ink-faint);
+  border-radius: 3px;
+}
+#placeholder .verb {
+  display: block;
+  color: var(--ember-lit);
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 0.77em;
+}
+#placeholder .hint { color: var(--ink-dim); font-size: 0.81em; }
+
+/* While unlocked the placeholder marks the anchor even when the list is live. */
+body:not([data-locked="true"]) #placeholder { display: block; }
