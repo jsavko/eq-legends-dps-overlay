@@ -294,6 +294,40 @@
     </div>
   </dialog>
 
+  <!-- ------------------------------------------------------------ new pack -->
+  <!--
+    A dialog rather than window.prompt, because Electron does not implement prompt: it
+    short-circuits the call and returns null without drawing anything, so the button that
+    asked for a name was a control that did nothing at all. alert and confirm ARE
+    implemented, which is why Export and Remove worked while this one did not.
+
+    Not a <form>: the other dialogs in this window are not forms either, and Enter is
+    handled on the field so Create stays the single path that reads the value.
+  -->
+  <dialog id="newpack" class="narrow">
+    <div class="dialog-form">
+      <header class="dialog-head">
+        <p class="kicker ember">NEW PACK</p>
+        <h3>Name the pack</h3>
+        <p class="muted small">
+          A pack is a set of triggers you can switch, export and hand to somebody else in
+          one go — a boss, a zone, a night.
+        </p>
+      </header>
+      <div class="dialog-body">
+        <label class="field">
+          <span class="kicker">NAME</span>
+          <input id="np-name" type="text" spellcheck="false" placeholder="My boss timers" />
+        </label>
+        <p id="np-hint" class="error" hidden></p>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" id="np-create" class="primary">Create</button>
+        <button type="button" id="np-cancel" class="secondary">Cancel</button>
+      </footer>
+    </div>
+  </dialog>
+
   <!-- ------------------------------------------------------------ import report -->
   <dialog id="report">
     <div class="dialog-form">

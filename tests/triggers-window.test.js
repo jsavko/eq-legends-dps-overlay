@@ -30,6 +30,11 @@ const idsUsed = [...new Set([...script.matchAll(/\$\('([\w-]+)'\)/g)].map((m) =>
  *  a check for absent wording has to be able to tell the two apart. */
 const markup = html.replace(/<!--[\s\S]*?-->/g, '');
 
+/** The script's CODE, comments stripped — for the same reason as `markup` above: the
+ *  comment in triggers.js that explains why `window.prompt` is gone names it, and a
+ *  comment naming a call is not a call. */
+const code = script.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\n)\s*\/\/[^\n]*/g, '$1');
+
 test('every id the script reaches for exists in the markup', () => {
   assert.ok(idsUsed.length > 20, 'expected to find the script’s element lookups');
   for (const id of idsUsed) {
@@ -57,6 +62,30 @@ test('the New buttons are reachable from the window’s default state', () => {
     'the New trigger button must never be hidden by the selection again');
   assert.ok(idsInHtml.has('new-pack'), 'the rail footer has no New pack button');
   assert.match(script, /window\.api\.createPack/, 'New pack is not wired to the channel');
+});
+
+test('New pack asks for a name in a way this runtime can actually draw', () => {
+  // Electron implements alert and confirm and NOT prompt: the call returns without ever
+  // showing a dialog, so the name came back null, the guard beneath it returned, and the
+  // channel was never reached. The existing assertion above — that `window.api.createPack`
+  // appears in the file — passed the whole time the button was dead, because a string
+  // being present says nothing about the code around it being able to run.
+  assert.doesNotMatch(code, /window\.prompt/,
+    'window.prompt is a no-op in Electron — a control that uses it does nothing');
+
+  for (const id of ['newpack', 'np-name', 'np-create', 'np-cancel', 'np-hint']) {
+    assert.ok(idsInHtml.has(id), `the naming dialog is missing #${id}`);
+  }
+  // ...and the same failure class one level down. The naming ask must NOT depend on the
+  // dialog's `close` event to deliver its answer: measured on Electron 33, an occluded
+  // window closes the dialog and dispatches no `close` at all (no rendering updates, so no
+  // requestAnimationFrame either), which would leave the click handler awaiting forever —
+  // the same button doing nothing, in a different costume. The buttons settle it; the
+  // events are the backup that catches Escape.
+  assert.match(script, /settlePackName\(name\);\s*\n\s*\$\('newpack'\)\.close\(\)/,
+    'Create must settle the ask itself rather than leave it to the close event');
+  assert.match(script, /\$\('newpack'\)\.addEventListener\('cancel'/,
+    'Escape must still settle the pending ask');
 });
 
 test('a built-in row shows the same pattern block an imported trigger does', () => {

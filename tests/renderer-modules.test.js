@@ -37,6 +37,27 @@ function scripts(dir) {
   return out;
 }
 
+/** Source with comments removed. A comment that *names* a banned call — triggers.js has
+ *  one explaining why window.prompt is gone — is not a call to it. */
+const code = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\n)\s*\/\/[^\n]*/g, '$1');
+
+/**
+ * No renderer calls `window.prompt`.
+ *
+ * Same register as the check above, and the same failure: Electron's dialog manager
+ * implements `alert` and `confirm` and short-circuits `prompt`, returning null without
+ * drawing anything. The call does not throw and nothing reaches main — the button simply
+ * does nothing, which is indistinguishable from a button nobody wired. It cost `+ New
+ * pack` in the Triggers window; this catches the next renderer that reaches for it.
+ */
+test('no renderer calls window.prompt — Electron does not implement it', () => {
+  for (const file of scripts(RENDERER)) {
+    assert.doesNotMatch(code(fs.readFileSync(file, 'utf8')), /window\.prompt|\bprompt\s*\(/,
+      `${path.relative(RENDERER, file)} calls prompt(), which is a no-op in Electron`);
+  }
+});
+
 test('every renderer script parses under module grammar', () => {
   const files = scripts(RENDERER);
   assert.ok(files.length > 5, 'expected to find the renderer scripts');

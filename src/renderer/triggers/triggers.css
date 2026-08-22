@@ -343,6 +343,10 @@ dialog {
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
 }
 dialog::backdrop { background: rgba(8, 6, 4, 0.62); }
+/* 760px is a FORM's width — a pattern field, a token row and a test result all need it.
+   A dialog that asks for one short line does not, and a single input stretched across
+   three quarters of the screen reads as though more were expected than a name. */
+dialog.narrow { width: min(440px, 92vw); }
 .dialog-form {
   display: grid;
   grid-template-rows: auto 1fr auto;

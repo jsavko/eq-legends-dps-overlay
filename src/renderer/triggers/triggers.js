@@ -830,6 +830,61 @@ async function saveDurations() {
   $('durations').close();
 }
 
+/* ------------------------------------------------------------ new pack dialog */
+
+/**
+ * The resolver for the `askPackName` call in flight, or null.
+ *
+ * Module-scoped rather than closed over by the dialog's own listeners because the BUTTONS
+ * settle this, not an event — see `askPackName` for why that distinction is the fix.
+ */
+let resolvePackName = null;
+
+/**
+ * Settle the naming ask, once.
+ *
+ * Calling it twice is a no-op, which is what lets Create, Cancel and the dialog's own
+ * close events all point here without racing: whichever arrives first wins, and the rest
+ * land on a null resolver.
+ */
+function settlePackName(name) {
+  const resolve = resolvePackName;
+  resolvePackName = null;
+  if (resolve) resolve(name);
+}
+
+/**
+ * Ask for a pack name; resolve it, or null if the player backed out.
+ *
+ * A dialog rather than `window.prompt` because Electron does not implement prompt — it
+ * returns without drawing anything, so the name came back null every time and the guard
+ * below it turned `+ New pack` into a button that did nothing at all. `alert` and
+ * `confirm` ARE implemented, which is why Export and Remove were always fine.
+ *
+ * The first fix for that was settled by the dialog's own `close` event, and it was the
+ * same bug in a different costume. Measured on Electron 33 against this very window:
+ * while it is occluded, `close()` clears `open` and sets `returnValue` and the `close`
+ * event is never dispatched at all — a hidden window produces no rendering updates, and
+ * `requestAnimationFrame` does not fire either. So an event is the BACKUP path here and
+ * never the mechanism.
+ */
+function askPackName() {
+  // A previous ask can still be pending if the dialog was dismissed by a path that never
+  // reached us. Settle it rather than leave two handlers waiting on one dialog.
+  settlePackName(null);
+
+  const input = $('np-name');
+  // Cleared between opens: a name left over from a cancelled attempt would be offered as
+  // though it were this pack's.
+  input.value = '';
+  $('np-hint').hidden = true;
+
+  const settled = new Promise((resolve) => { resolvePackName = resolve; });
+  $('newpack').showModal();
+  input.focus();
+  return settled;
+}
+
 function wire() {
   $('surface-chips').addEventListener('click', async () => {
     await window.api.setConfig({ triggerAlerts: state.cfg.triggerAlerts === false });
@@ -843,6 +898,37 @@ function wire() {
   $('open-durations').addEventListener('click', openDurations);
   $('d-save').addEventListener('click', saveDurations);
   $('d-cancel').addEventListener('click', () => $('durations').close());
+
+  // Create is the only thing that reads the field, so Enter presses Create rather than
+  // becoming a second reader of the value that could drift from it. An empty field says
+  // so and stays open — closing on nothing would look exactly like the bug this fixes.
+  $('np-create').addEventListener('click', () => {
+    const name = $('np-name').value.trim();
+    if (!name) {
+      $('np-hint').textContent = 'A pack needs a name — it is what the file is called.';
+      $('np-hint').hidden = false;
+      $('np-name').focus();
+      return;
+    }
+    // Settle BEFORE closing, always: whether this runtime dispatches `close` synchronously,
+    // asynchronously or not at all, the answer is already delivered by the time it decides.
+    settlePackName(name);
+    $('newpack').close();
+  });
+  $('np-cancel').addEventListener('click', () => {
+    settlePackName(null);
+    $('newpack').close();
+  });
+  // Escape closes a <dialog> natively and reaches no button, so these are the only way
+  // that path can settle — and they are a backup, not the mechanism. If they never arrive
+  // the cost is one dangling promise the next ask clears, not a button that does nothing.
+  $('newpack').addEventListener('cancel', () => settlePackName(null));
+  $('newpack').addEventListener('close', () => settlePackName(null));
+  $('np-name').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    $('np-create').click();
+  });
   // Reset fills the fields and stops — Save is still the only thing that writes, so
   // a mis-click here is recoverable with Cancel.
   $('d-reset').addEventListener('click', () =>
@@ -902,12 +988,10 @@ function wire() {
    * filename, and main sanitizes it — see TRIGGERS_CREATE_PACK.
    */
   $('new-pack').addEventListener('click', async () => {
-    const name = window.prompt(
-      'Name the pack.\n\nA pack is a set of triggers you can switch, export and hand to ' +
-      'somebody else in one go — a boss, a zone, a night.', 'My boss timers');
-    if (name === null || !name.trim()) return;
+    const name = await askPackName();
+    if (!name) return;
 
-    const result = await window.api.createPack(name.trim());
+    const result = await window.api.createPack(name);
     if (!result.ok) {
       window.alert(`Could not create it — ${(result.errors ?? ['unknown error']).join('; ')}`);
       return;

@@ -1,5 +1,5 @@
 ---
-status: created
+status: completed
 ---
 # "+ New pack" in the Triggers window does nothing
 
@@ -100,7 +100,7 @@ blank trigger rather than an empty list.
 
 ## Tasks
 
-- [ ] Add `<dialog id="newpack">` to `src/renderer/triggers/index.html`, after the
+- [x] Add `<dialog id="newpack">` to `src/renderer/triggers/index.html`, after the
       `durations` dialog, on the `.dialog-form` / `.dialog-head` / `.dialog-body` /
       `.dialog-foot` skeleton the other dialogs use: kicker + `<h3>Name the pack</h3>`,
       the "a set of triggers you can switch, export and hand to somebody else in one go —
@@ -109,37 +109,56 @@ blank trigger rather than an empty list.
       `id="np-hint"` for the "a name is required" case, and a footer with
       `<button id="np-create" class="primary">Create</button>` and
       `<button id="np-cancel" class="secondary">Cancel</button>`.
-- [ ] Add a narrow-dialog modifier to `src/renderer/triggers/triggers.css` — the base
+- [x] Add a narrow-dialog modifier to `src/renderer/triggers/triggers.css` — the base
       `dialog` rule is `width: min(760px, 92vw)`, which is a form's width, not a name's.
       `dialog.narrow { width: min(440px, 92vw); }` next to it, with a comment saying why.
-- [ ] Replace the `window.prompt` call in `triggers.js:904` with an `askPackName()` helper
+- [x] Replace the `window.prompt` call in `triggers.js:904` with an `askPackName()` helper
       that returns `Promise<string|null>`: `showModal()`, resolve on Create with the
       trimmed value, resolve `null` on Cancel and on the dialog's `close` event (Escape
       closes a `<dialog>` natively — the promise must settle or the click handler hangs
       forever, which is the same silent no-op in a new costume).
-- [ ] Wire the dialog: focus `np-name` on open, clear it and `np-hint` between opens,
+- [x] Wire the dialog: focus `np-name` on open, clear it and `np-hint` between opens,
       Enter in the field submits (keydown, not a `<form>` — the other dialogs here are not
       forms), and Create with an empty field shows the hint rather than closing.
-- [ ] Leave the rest of the listener as it is — `createPack`, `state.selectedPack`,
+- [x] Leave the rest of the listener as it is — `createPack`, `state.selectedPack`,
       `refresh()`, `newTrigger()` — and keep the existing `window.alert` on a failed
       create (alert *is* supported; only prompt is not).
-- [ ] Add to `tests/triggers-window.test.js`: assert `triggers.js` contains no
+- [x] Add to `tests/triggers-window.test.js`: assert `triggers.js` contains no
       `window.prompt` and that the dialog's ids (`newpack`, `np-name`, `np-create`,
       `np-cancel`, `np-hint`) are in the markup. The existing "every id the script reaches
       for exists in the markup" test covers the second half automatically once the code
       uses `$('np-…')`, so the explicit assertion is about the *first* half: the button
       reaching the channel through a path that runs.
-- [ ] Add to `tests/renderer-modules.test.js` a repo-wide check that no file under
+- [x] Add to `tests/renderer-modules.test.js` a repo-wide check that no file under
       `src/renderer/` calls `window.prompt` — same register as that file's existing
       module-grammar check (a platform gap that leaves a control silently doing nothing),
       and it catches the next renderer that reaches for it.
-- [ ] `npm test`, then `scripts/dev.sh pack`, kill the running overlay first, and relaunch
+- [x] `npm test`, then `scripts/dev.sh pack`, kill the running overlay first, and relaunch
       it with `powershell.exe Start-Process` so the window is actually back up.
-- [ ] `docs/changelog/2026-08-22-new-pack-does-nothing.md` — what the break was (Electron
+- [x] `docs/changelog/2026-08-22-new-pack-does-nothing.md` — what the break was (Electron
       has no `prompt`), why it looked like nothing at all rather than an error, and why
       alert/confirm elsewhere in the same file are fine to leave alone.
 
 ## Notes
+
+- **The first fix was the same bug in a different costume, and only the running app said
+  so.** Task 3 as written settled the promise on the dialog's `close` event and nothing
+  else. Every static test passed. Driven over CDP against the packed build, `+ New pack`
+  still did nothing: measured on Electron 33, a `<dialog>` in an occluded window
+  (`document.visibilityState === 'hidden'`) closes on `close()` — `open` clears,
+  `returnValue` is set — and **the `close` event is never dispatched**. A hidden window
+  produces no rendering updates, and `requestAnimationFrame` never fires there either.
+  The promise stayed pending and the click handler awaited forever. Rewritten so the
+  BUTTONS settle it (`settlePackName`, called before `close()`), with `cancel`/`close`
+  demoted to the backup path that catches Escape. Verified in both states: visible, and
+  minimized with `visibilityState: hidden`.
+- **Verifying in the real runtime needed a chain, because the Triggers window has no
+  hotkey.** It opens from the tray only. Over CDP: the overlay's `openSettings()`, then
+  the settings window's `openTriggers()`. Worth knowing next time — `docs/changelog/`
+  entries describe driving the packed build on `--remote-debugging-port=9223`, but not
+  how to get this particular window open in the first place.
+- **`Page.captureScreenshot` hangs on an occluded Electron window.** Same root cause as
+  the `close` event — no frames. Measurements over `Runtime.evaluate` work fine.
 
 - **Empty packs are already handled.** If the player cancels the trigger editor right
   after creating a pack, the pack sits there with zero triggers — `renderPackRows` has a
