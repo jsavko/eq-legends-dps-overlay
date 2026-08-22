@@ -3164,7 +3164,9 @@ function registerIpc() {
       // The boss box has no timers of its own — its rows come from the trigger packs —
       // so it gets a couple of stand-ins rather than nothing.
       const rows = mine.length
-        ? mine.slice(0, 8).map((t) => ({ key: t.id, name: t.name, durationMs: t.durationMs, color: t.color }))
+        ? mine.slice(0, 8).map((t) => ({
+          key: t.id, timerId: t.id, name: t.name, durationMs: t.durationMs, color: t.color,
+        }))
         : [
             { key: 's1', name: 'A boss cast', durationMs: 62_000, color: '#b9702a' },
             { key: 's2', name: 'Another one', durationMs: 30_000, color: '#b9702a' },
@@ -3173,6 +3175,9 @@ function registerIpc() {
         timersRuntime.preview({
           categoryId,
           key: row.key,
+          // Null for the two stand-ins the boss box gets: they mock no timer, so an edit
+          // elsewhere must not reach in and take them down.
+          timerId: row.timerId ?? null,
           name: row.name,
           durationMs: row.durationMs,
           color: row.color,

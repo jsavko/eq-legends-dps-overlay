@@ -328,6 +328,91 @@ test('a switched-off timer does not run', () => {
   assert.deepEqual(rt.rows(1000), []);
 });
 
+test('editing a timer that is RUNNING changes the row on screen, in place', () => {
+  // A slot is a snapshot taken when it armed, so an edit used to reach nothing that was
+  // already running: you renamed a timer mid-pull and the row went on showing the old
+  // name until it expired, which reads exactly like a save that did not stick.
+  let model = defaultModel();
+  model = addTimer(model, { ...PUMA, name: 'Puma', durationSec: 100 }).model;
+  model = addTimer(model, {
+    ...PUMA, name: 'Wolf', startsOn: 'You feel wolflike.', endsOn: null,
+  }).model;
+  const [puma, wolf] = model.timers;
+
+  const runtime = new TimersRuntime();
+  runtime.setModel(model);
+  runtime.feed(PUMA.startsOn, 1000);
+  runtime.feed('You feel wolflike.', 2000);
+
+  const renamed = updateTimer(model, puma.id, {
+    ...puma, name: 'Spirit of the Puma VI', durationSec: 200, color: '#c04f7a',
+  }).model;
+  runtime.setModel(renamed);
+
+  const rows = runtime.rows(3000);
+  assert.equal(rows[0].name, 'Spirit of the Puma VI');
+  assert.equal(rows[0].color, '#c04f7a');
+  // And it did NOT move: it armed first, so it stays first. Re-sorting the panel on an
+  // edit would reintroduce the bug the whole window was built to fix.
+  assert.equal(rows[1].name, 'Wolf');
+  assert.equal(rows[0].id, puma.id);
+  assert.equal(rows[1].id, wolf.id);
+
+  // The duration rebases from when it armed rather than only applying to the next one —
+  // somebody correcting 100s to 200s while the buff is up has just said what the
+  // remaining time is.
+  assert.equal(rows[0].durationMs, 200_000);
+  assert.equal(rows[0].remainingMs, 198_000);
+});
+
+test('a running timer that is deleted or switched off takes its row down', () => {
+  // The player's own act, not the panel re-sorting itself. A countdown for something
+  // that no longer exists is the "nothing on screen you can explain" failure.
+  let model = defaultModel();
+  model = addTimer(model, PUMA).model;
+  const puma = model.timers[0];
+
+  const runtime = new TimersRuntime();
+  runtime.setModel(model);
+  runtime.feed(PUMA.startsOn, 1000);
+  assert.equal(runtime.rows(2000).length, 1);
+
+  runtime.setModel(updateTimer(model, puma.id, { ...puma, durationSec: 146, enabled: false }).model);
+  assert.equal(runtime.rows(2000).length, 0, 'switched off means off the screen');
+
+  runtime.setModel(model);
+  runtime.feed(PUMA.startsOn, 3000);
+  runtime.setModel(removeTimer(model, puma.id).model);
+  assert.equal(runtime.rows(4000).length, 0, 'and a deleted timer leaves nothing behind');
+});
+
+test('a preview follows a rename, and the stand-ins answer to nothing', () => {
+  // A box preview mocks the player's real timers, so it has to follow them — that is what
+  // somebody looking at one is judging. The editor's draft row and the boss box's samples
+  // mock no timer at all and must not be swept up as orphans by an unrelated edit.
+  let model = defaultModel();
+  model = addTimer(model, PUMA).model;
+  const puma = model.timers[0];
+
+  const runtime = new TimersRuntime();
+  runtime.setModel(model);
+  runtime.preview({ categoryId: 'c1', key: puma.id, timerId: puma.id, name: puma.name, durationMs: 146_000 });
+  runtime.preview({ categoryId: 'boss', key: 's1', name: 'A boss cast', durationMs: 62_000 });
+  runtime.preview({ categoryId: 'c1', key: 'draft', name: 'Preview', durationMs: 45_000 });
+
+  runtime.setModel(updateTimer(model, puma.id, { ...puma, name: 'Puma VI', durationSec: 146 }).model);
+
+  const byName = runtime.rows(1000).map((r) => r.name);
+  assert.ok(byName.includes('Puma VI'), 'the mock of a real timer follows its rename');
+  assert.ok(byName.includes('A boss cast'), 'the boss box samples are left alone');
+  assert.ok(byName.includes('Preview'), 'the editor draft row is left alone');
+
+  // Deleting the timer takes its mock with it, but still leaves the stand-ins.
+  runtime.setModel(removeTimer(model, puma.id).model);
+  const after = runtime.rows(1000).map((r) => r.name);
+  assert.deepEqual(after.sort(), ['A boss cast', 'Preview']);
+});
+
 // ---------------------------------------------------------------------- store
 
 test('the store round-trips, and a corrupt file does not stop the app starting', () => {

@@ -63,7 +63,70 @@ export class TimersRuntime {
     }
     this.budget.clear();
     this.disabled.clear();
+    // Rows already on screen are brought along. A slot is a SNAPSHOT taken when it armed,
+    // so without this an edit reaches nothing that is currently running — you rename a
+    // timer mid-pull, the document changes, and the row goes on showing the old name
+    // until it expires. Which reads as the edit not having saved.
+    this.syncSlots(model?.timers ?? []);
     this.revision++;
+  }
+
+  /**
+   * Bring the rows that are already on screen into line with the model.
+   *
+   * Only what a row SAYS is updated, never where it sits: the fields are written into the
+   * existing slot and the Map keeps its insertion order, so a rename cannot re-sort the
+   * panel. `since` is untouched for the same reason — it is the moment the slot was
+   * claimed, and it never moves again.
+   *
+   * A changed duration rebases the countdown from when it armed rather than only applying
+   * to the next one. The number on screen should be the number in the document: somebody
+   * who corrects "146 seconds" to "180" while the buff is up has just told you what the
+   * remaining time is, and a row that ignored them would be wrong for the rest of its
+   * life. A duration cut below what has already elapsed simply lands the row in `spent`,
+   * which is a state it renders honestly.
+   *
+   * Deleting a timer, or switching it off, takes its row down. That is not the panel
+   * re-sorting itself — it is the player's own act, and a countdown for something that no
+   * longer exists is the "nothing on screen you can explain" failure this project keeps
+   * running into.
+   *
+   * Previews are stand-ins, not model rows: they follow a rename and a recolour, because
+   * that is what somebody looking at one is judging, and they keep their staggered timing
+   * fiction and their box. The ones that answer to no timer at all — the editor's draft
+   * row, the boss box's two samples — are left entirely alone rather than deleted as
+   * orphans.
+   */
+  syncSlots(timers) {
+    const byId = new Map((timers ?? []).map((t) => [t.id, t]));
+    let changed = 0;
+
+    for (const [id, slot] of this.slots) {
+      // A preview standing in for no timer at all — the editor's draft row, the boss
+      // box's two samples — answers to nothing in the document and is nobody's orphan.
+      if (slot.preview && !slot.timerId) continue;
+
+      const timer = byId.get(slot.timerId ?? id);
+      if (!timer || !timer.enabled) {
+        this.slots.delete(id);
+        changed++;
+        continue;
+      }
+
+      if (slot.name !== timer.name) { slot.name = timer.name; changed++; }
+      if (slot.color !== timer.color) { slot.color = timer.color; changed++; }
+      if (slot.preview) continue;
+
+      if (slot.categoryId !== timer.categoryId) { slot.categoryId = timer.categoryId; changed++; }
+      if (slot.durationMs !== timer.durationMs) {
+        slot.durationMs = timer.durationMs;
+        slot.endTs = slot.startedTs + timer.durationMs;
+        changed++;
+      }
+    }
+
+    if (changed) this.revision++;
+    return changed;
   }
 
   /** One log line, timestamp already stripped. @returns {number} how many armed */
@@ -124,6 +187,10 @@ export class TimersRuntime {
     }
     this.slots.set(timer.id, {
       id: timer.id,
+      // Which timer this row came from. The same as `id` for an armed row and NOT the
+      // same for a preview, whose id also carries the box — one field both kinds can be
+      // looked up by beats picking an id apart with a string split.
+      timerId: timer.id,
       categoryId: timer.categoryId,
       name: timer.name,
       color: timer.color,
@@ -147,7 +214,7 @@ export class TimersRuntime {
    * was to go and make the effect happen in game.
    */
   preview({ categoryId, name = 'Preview', durationMs = 45_000, color = null,
-    key = '', remainingMs = null, ts = Date.now() }) {
+    key = '', timerId = null, remainingMs = null, ts = Date.now() }) {
     // Keyed per timer within the box, so previewing a box can put ALL of its timers on
     // screen at once rather than one stand-in row. `clearPreviews(categoryId)` still
     // takes the whole box down, because the key is prefixed with it.
@@ -155,6 +222,11 @@ export class TimersRuntime {
     const existing = this.slots.get(id);
     this.slots.set(id, {
       id,
+      // The timer this stands in for, when it stands in for one at all. A box preview
+      // mocks the player's real timers and follows them when they are renamed; the
+      // editor's draft row and the boss box's two samples are rows no timer owns, and
+      // saying so explicitly is what keeps them from being swept up as orphans.
+      timerId,
       categoryId,
       name,
       color,
