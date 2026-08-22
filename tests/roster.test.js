@@ -60,11 +60,60 @@ test('leaving and disbanding shrink explicit membership', () => {
   assert.equal(r.isConfirmedMember('Rhale'), true);
 });
 
-test('/who output seeds the roster', () => {
+test('/who proves a player, NOT a group member — a zone /who lists strangers', () => {
   const r = new Roster('Rhale');
-  r.applyEvent({ kind: 'who', who: 'Emalina', level: 27, className: 'Cleric', race: 'Human' });
-  assert.equal(r.includes('Emalina'), true);
-  assert.equal(r.isConfirmedMember('Emalina'), true);
+  r.applyEvent({
+    kind: 'who', who: 'Emalina', level: 27, classes: ['CLR', 'ROG', 'NEC'],
+    race: 'Human', guild: null, ts: 1_000,
+  });
+
+  // Player proof, which is all the line supports: a bare /who returns everybody
+  // standing in the zone, and calling fifty strangers confirmed group members would
+  // feed the charm inference a set it has no business believing.
+  assert.equal(r.hasPlayerProof('Emalina'), true);
+  assert.equal(r.isConfirmedMember('Emalina'), false);
+  assert.equal(r.explicit.has('Emalina'), false);
+});
+
+test('a /who sighting is stored, overwritten, and outlives going anonymous', () => {
+  const r = new Roster('Rhale');
+  assert.equal(r.sightingFor('Emalina'), null);
+
+  r.applyEvent({
+    kind: 'who', who: 'Emalina', level: 27, classes: ['CLR', 'ROG', 'NEC'],
+    race: 'Human', guild: 'Nostalgia', ts: 1_000,
+  });
+  const first = r.sightingFor('Emalina');
+  assert.deepEqual(first.classes, ['CLR', 'ROG', 'NEC']);
+  assert.equal(first.level, 27);
+  assert.equal(first.race, 'Human');
+  assert.equal(first.guild, 'Nostalgia');
+  assert.equal(first.ts, 1_000);
+
+  // Class swapping is a thing here, so the newest reading simply replaces the old one —
+  // there is no merging to do and nothing older worth keeping.
+  r.applyEvent({
+    kind: 'who', who: 'Emalina', level: 28, classes: ['WAR', 'SHM'],
+    race: 'Human', guild: null, ts: 9_000,
+  });
+  assert.deepEqual(r.sightingFor('Emalina').classes, ['WAR', 'SHM']);
+  assert.equal(r.sightingFor('Emalina').ts, 9_000);
+
+  // Going anonymous hides a class; it does not change one. Erasing the reading here
+  // would trade a dated truth for no answer at all.
+  r.applyEvent({ kind: 'who', who: 'Emalina', anonymous: true, ts: 12_000 });
+  assert.deepEqual(r.sightingFor('Emalina').classes, ['WAR', 'SHM']);
+  assert.equal(r.sightingFor('Emalina').ts, 9_000);
+  assert.equal(r.hasPlayerProof('Emalina'), true);
+});
+
+test('sightings belong to the session, and a character switch ends it', () => {
+  const r = new Roster('Rhale');
+  r.applyEvent({
+    kind: 'who', who: 'Emalina', level: 27, classes: ['CLR'], race: 'Human', ts: 1_000,
+  });
+  r.setSelf('Rhain');
+  assert.equal(r.sightingFor('Emalina'), null);
 });
 
 test('manual overrides beat everything', () => {

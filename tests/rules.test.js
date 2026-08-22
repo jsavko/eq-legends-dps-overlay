@@ -568,3 +568,70 @@ test('the mapping command accepts a mob-shaped pet name (live log)', () => {
   // Talking about pets still is not a command: no equals sign, no match.
   assert.notEqual(m("You tell your raid, 'pets increase level with rank up'")?.kind, 'pet-command');
 });
+
+test('/who entries carry the EQ Legends class trio (live log)', () => {
+  // Every fixture in this test is verbatim from eqlog_Rhale_oggok.txt, trailing spaces
+  // included. The rule this replaced matched NONE of them: 633 /who result lines in that
+  // log, zero events, because its class group had no slash in it.
+  const trio = m('[29 PAL/ENC/BER] Rhain (Dark Elf)  ZONE: The Ruins of Old Guk 22 (gukbottom_22)  ');
+  assert.equal(trio.kind, 'who');
+  assert.equal(trio.who, 'Rhain');
+  assert.equal(trio.level, 29);
+  assert.deepEqual(trio.classes, ['PAL', 'ENC', 'BER']);
+  assert.equal(trio.race, 'Dark Elf');   // races contain spaces
+  assert.equal(trio.guild, null);
+
+  // Low level: only two classes unlocked. The count is whatever the line states.
+  const duo = m('[5 DRU/BST] Leafeegreen (Wood Elf)  ZONE: The Greater Faydark (gfaydark)  ');
+  assert.deepEqual(duo.classes, ['DRU', 'BST']);
+  assert.equal(duo.level, 5);
+
+  const guilded = m('[20 PAL/ENC/BER] Nexuszak (Ogre) <Hello World> ZONE: The Ruins of Old Guk (gukbottom)  ');
+  assert.equal(guilded.guild, 'Hello World');
+  assert.equal(guilded.who, 'Nexuszak');
+
+  // A trailing marker after the zone tail — the one " LFG" line in the log. The rule
+  // stops reading at the race, so tails it has never seen cannot break the entry.
+  const lfg = m('[48 NEC/WIZ/ENC] Nural (Erudite)  ZONE: The Plane of Hate (hateplane)   LFG');
+  assert.equal(lfg.who, 'Nural');
+  assert.deepEqual(lfg.classes, ['NEC', 'WIZ', 'ENC']);
+
+  // Away when somebody typed /who. 14 lines in the live log, and exactly the gap this
+  // rule exists to close: without the prefix the one member who stepped out is the one
+  // person with no reading, silently.
+  const afk = m('AFK [21 DRU/NEC/BST] Chuk (Ancient Wolf) <Gnomercy> ZONE: The Greater Faydark (gfaydark)  ');
+  assert.equal(afk.who, 'Chuk');
+  assert.deepEqual(afk.classes, ['DRU', 'NEC', 'BST']);
+  assert.equal(afk.guild, 'Gnomercy');
+
+  // `className` is gone; nothing ever read it.
+  assert.equal('className' in trio, false);
+});
+
+test('a /who corpse entry is not a sighting (live log)', () => {
+  // /who lists corpses too. This one names "Sisco's corpse", not Sisco, and filing a
+  // reading under that key would put a class trio on a name no combat row can carry.
+  // Left unmatched on purpose, where collect-unknown.js can keep showing it.
+  const e = m("* RIP *[44 MNK/SHM/NEC] Sisco's corpse (Dark Elf)  ZONE: The Ruins of Old Paineel (hole)  ");
+  assert.equal(e?.kind ?? null, null);
+});
+
+test('an anonymous /who entry proves a player and nothing else (live log)', () => {
+  assert.equal(m('AFK [ANONYMOUS] Rumgruk ').who, 'Rumgruk');
+  const e = m('[ANONYMOUS] Raplah ');
+  assert.equal(e.kind, 'who');
+  assert.equal(e.who, 'Raplah');
+  assert.equal(e.anonymous, true);
+  // Absent, not zeroed: a level of 0 would be a claim, and the line makes none.
+  assert.equal(e.level, undefined);
+  assert.equal(e.classes, undefined);
+});
+
+test('the /who header and footer are not entries', () => {
+  // The block a /who prints around its results. None of it names anybody, and none of
+  // it must reach the roster as a sighting.
+  assert.equal(m('Players in EverQuest Legends:')?.kind ?? null, null);
+  assert.equal(m('Friends currently on EverQuest Legends:')?.kind ?? null, null);
+  assert.equal(m('---------------------------')?.kind ?? null, null);
+  assert.equal(m('There are 12 players in EverQuest Legends.')?.kind ?? null, null);
+});

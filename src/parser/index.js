@@ -1872,6 +1872,23 @@ export class LogParser {
     // would make the group total quietly disagree with the rows above it.
     const include = (name) => name === UNKNOWN || this.roster.inParty(name);
     const snap = enc.snapshot(now, { includeNames: include, timeline });
+
+    // What /who last said about each member, attached to the row it describes.
+    //
+    // Rows rather than a name->info map on the side, because a zone /who returns every
+    // stranger in Greater Faydark and the 4 Hz payload has to stay proportional to the
+    // fight rather than to the neighbourhood. `seenAgoMs` is derived here for the same
+    // reason `remainingMs` above is — the renderer holds no notion of log time — while
+    // the absolute `ts` rides along for the consumer that dates the reading against
+    // something other than now (the encounter record, at fight close).
+    //
+    // Absent, never null, when there is no reading: the overlay tests for the field and
+    // an explicit null would be a claim that /who answered and said nothing.
+    for (const row of snap.rows) {
+      const seen = this.roster.sightingFor(row.name);
+      if (seen) row.who = { ...seen, seenAgoMs: Math.max(0, now - seen.ts) };
+    }
+
     return {
       ...snap,
       idle: false,

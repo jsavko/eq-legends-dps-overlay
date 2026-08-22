@@ -149,6 +149,26 @@ export class Roster {
     this.notPets = new Set();
 
     /**
+     * The most recent `/who` reading for each name — level, classes, race, guild, and
+     * the instant it was read.
+     *
+     * A READING, not a fact, and the distinction is the whole design. EverQuest Legends
+     * lets a player change classes at will, so "Emalina is a cleric" is a claim with a
+     * shelf life measured in minutes; what can be stored honestly is "at 21:14 /who said
+     * Emalina was 27 CLR/ROG/NEC". Hence the `ts` on every entry, hence overwriting
+     * rather than merging, and hence memory only: nothing here is written to config and
+     * nothing survives a restart. The one durable copy of a sighting is the one stamped
+     * onto a finished encounter record, where it is bound to a fight that has its own
+     * start and end and therefore cannot go stale.
+     *
+     * Keyed by the name exactly as `/who` printed it, which is the canonical row name a
+     * player's rows carry. Pets, charmed mobs and the Unknown bucket are simply never in
+     * here — a pet row resolves to its owner, who is a player /who can name.
+     * @type {Map<string, {level: number, classes: string[], race: string|null, guild: string|null, ts: number}>}
+     */
+    this.whoSightings = new Map();
+
+    /**
      * The friendly summon we are waiting to see a pet come out of.
      *
      * Summoned pets get a generated name ("Kibektik", "Gann") that the log never ties
@@ -389,8 +409,22 @@ export class Roster {
     // Everything learned by watching belonged to the old character's session too.
     this.learnedPetOwners.clear();
     this.notPets.clear();
+    this.whoSightings.clear();
     this.pendingSummon = null;
     this.clearOverrides();
+  }
+
+  /**
+   * What `/who` last said about `name`, or null if it has said nothing this session.
+   *
+   * The caller decides what "how old" means: the overlay dates the reading against the
+   * clock, the History window against the pull it is attached to. Both need the absolute
+   * instant, so that is what is handed out.
+   *
+   * @returns {{level: number, classes: string[], race: string|null, guild: string|null, ts: number}|null}
+   */
+  sightingFor(name) {
+    return this.whoSightings.get(String(name ?? '').trim()) ?? null;
   }
 
   /**
@@ -404,9 +438,34 @@ export class Roster {
     }
 
     if (event.kind === 'who') {
-      this.hasExplicitData = true;
-      this.explicit.add(event.who);
+      // A /who line proves PLAYER, never GROUP MEMBER — and until the rule was fixed
+      // this distinction never came up, because the rule matched nothing.
+      //
+      // It matters now: a bare zone /who returns everybody standing in Greater Faydark,
+      // and the old branch put every one of them into `explicit`, the tier that means
+      // "the game named this person as one of ours". That set feeds isConfirmedMember,
+      // which drives the charm inference in noteMemberTurned — fifty strangers landing
+      // in it is a real change to what the parser believes. `knownPlayers` is what the
+      // line actually supports, it is the tier standing() already reads one level down,
+      // and channel chat has always been able to fill it with strangers from across the
+      // server, so routing /who here introduces no new risk class at all. `explicit`
+      // stays the group-message tier it was named for.
       this.noteKnownPlayer(event.who);
+
+      // An ANONYMOUS entry records nothing and, crucially, erases nothing: going
+      // anonymous hides a class, it does not change one, and blanking the earlier
+      // reading would trade a dated truth for no answer at all.
+      if (!event.anonymous && Array.isArray(event.classes) && event.classes.length > 0) {
+        this.whoSightings.set(String(event.who).trim(), {
+          level: event.level ?? null,
+          classes: [...event.classes],
+          race: event.race ?? null,
+          guild: event.guild ?? null,
+          // Stamped with the log line's own time, not the wall clock, so a replayed or
+          // backfilled log dates its readings the way the session that wrote them did.
+          ts: event.ts ?? 0,
+        });
+      }
       return;
     }
 

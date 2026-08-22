@@ -459,6 +459,31 @@ body[data-panel="above"] #detail {
 #d-name { font-size: 0.95em; font-weight: 600; font-stretch: 87.5%; }
 #d-total { margin-left: auto; font-size: 0.85em; color: var(--ink-dim); }
 
+/*
+ * "29 PAL/DRU/BST · Dwarf · 14m ago" — what /who last said about the hovered member.
+ *
+ * Its own line under the head rather than appended to it, because it is a different
+ * kind of claim from the numbers beside the name: those describe this fight, this
+ * describes the person, and it carries its own age precisely because EverQuest Legends
+ * lets them change class between pulls.
+ *
+ * No overflow rule and no max-height, deliberately. The overlay ignores mouse input so
+ * the wheel never reaches it — anything clipped here is gone with nothing on screen to
+ * say so, and the window grows to fit instead. It is one line by content, not by
+ * constraint: a long race name simply wraps and fitWindow() makes room.
+ *
+ * The `max()` floor is the one place the HUD's em scale is overridden. Everything else
+ * here rides --scale as one unit, but this line is the smallest text in the panel and a
+ * class trio read at a glance is the whole point of it.
+ */
+#d-who {
+  margin: 0 0 0.5em;
+  font-size: max(12px, 0.85em);
+  color: var(--ink-dim);
+}
+/* `display` is left at the block default so the user agent's [hidden] rule still wins —
+   the trap #d-types and #session-line both document further down. */
+
 .split-bar {
   display: flex;
   height: 0.4em;

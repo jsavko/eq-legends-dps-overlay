@@ -28,6 +28,7 @@ const els = {
   detail: $('detail'),
   dName: $('d-name'),
   dTotal: $('d-total'),
+  dWho: $('d-who'),
   dSelfBar: $('d-self-bar'),
   dPetBar: $('d-pet-bar'),
   dSelfLabel: $('d-self-label'),
@@ -478,6 +479,7 @@ function buildRow(name) {
 function renderDetail(row) {
   els.detail.hidden = false;
   els.dName.textContent = row.name;
+  setWho(row.who);
 
   // The type row belongs to the taken view alone; renderTakenDetail un-hides it.
   els.dTypes.hidden = true;
@@ -491,6 +493,47 @@ function renderDetail(row) {
   // Re-fit now rather than waiting for the next 4 Hz push. Also covers moving between
   // rows, where the panel changes height because members have different ability counts.
   fitWindow();
+}
+
+/**
+ * What `/who` last said about this member: "29 PAL/DRU/BST · Dwarf · 14m ago".
+ *
+ * The age is not decoration and is never dropped. EverQuest Legends lets a player swap
+ * classes at will, so there is no durable "Emalina is a cleric" fact to show — only a
+ * reading with a time on it, and a trio read six hours ago is weaker evidence than one
+ * read a minute ago. Saying which is what keeps the line honest.
+ *
+ * Hidden rather than blanked when there is no reading, because the panel auto-fits: an
+ * empty line would still take its height. The History window makes the opposite call
+ * for the opposite reason — it must never reflow, so there the line is always drawn.
+ */
+function setWho(who) {
+  if (!who || !(who.classes?.length > 0)) {
+    els.dWho.hidden = true;
+    els.dWho.textContent = '';
+    return;
+  }
+  const bits = [`${who.level} ${who.classes.join('/')}`];
+  if (who.race) bits.push(who.race);
+  bits.push(formatAge(who.seenAgoMs));
+  els.dWho.textContent = bits.join(' · ');
+  els.dWho.hidden = false;
+}
+
+/**
+ * How old a /who reading is, in one glance-sized phrase.
+ *
+ * Whole phrase rather than a bare number, so "just now" does not have to be followed by
+ * an "ago" that reads as broken English. Rounded hard: the difference between 13 and 14
+ * minutes changes nothing about how much the reading is worth.
+ */
+function formatAge(ms) {
+  if (!Number.isFinite(ms) || ms < 45_000) return 'just now';
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(ms / 3_600_000);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(ms / 86_400_000)}d ago`;
 }
 
 function renderDamageDetail(row) {

@@ -125,3 +125,36 @@ export function shortDate(ts) {
   const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   return `${date}, ${timeOfDay(ts)}`;
 }
+
+/**
+ * How a stored `/who` reading dates against the fight it is attached to.
+ *
+ * Against the PULL, deliberately, and never against now. The overlay's version of this
+ * line ages in real time because it is describing somebody standing in front of you; a
+ * record opened next Tuesday is describing a night that is over, and "read 3 days ago"
+ * would be a fact about when you opened the window rather than about the fight. What the
+ * reader needs is how much the reading was worth AT THE PULL — a trio read eight minutes
+ * before is close to certain, one read six hours before is a guess wearing a number, and
+ * EQ Legends lets a player reroll in between either way.
+ *
+ * Returns null when there is nothing to date, so the caller renders its placeholder
+ * rather than a phrase about a reading that does not exist.
+ *
+ * @param {number} readTs when /who said it
+ * @param {number} fightStartTs when the pull opened
+ */
+export function readingAge(readTs, fightStartTs) {
+  if (!Number.isFinite(readTs) || !Number.isFinite(fightStartTs)) return null;
+
+  const before = fightStartTs - readTs;
+  // Taken after the pull opened — the player typed /who mid-fight, which happens on a
+  // long one. There is no "before" to measure and none is invented.
+  if (before <= 0) return 'read during the fight';
+
+  if (before < 60_000) return 'read moments before the pull';
+  const minutes = Math.round(before / 60_000);
+  if (minutes < 60) return `read ${minutes}m before the pull`;
+  const hours = Math.round(before / 3_600_000);
+  if (hours < 24) return `read ${hours}h before the pull`;
+  return `read ${Math.round(before / 86_400_000)}d before the pull`;
+}

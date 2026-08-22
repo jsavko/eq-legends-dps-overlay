@@ -2090,3 +2090,52 @@ test('the snapshot names the whole engaged set, not just the headline mob', () =
   // matches on these, and matching on the label alone would miss every add.
   assert.deepEqual([...snap.engagedNames].sort(), ['Eternal Spirit', 'Keeper of Souls']);
 });
+
+test('a /who reading rides the row it describes, and only a player row has one', () => {
+  const p = makeParser();
+
+  // A real /who block from the live log, header and footer included — those must feed
+  // nothing, and the entries must reach the roster now that the rule matches at all.
+  p.feed(`${D(19, 30, 0)} Players in EverQuest Legends:`);
+  p.feed(`${D(19, 30, 0)} ---------------------------`);
+  p.feed(`${D(19, 30, 0)} [29 PAL/DRU/BST] Rhale (Dwarf)  ZONE: The Greater Faydark (gfaydark)  `);
+  p.feed(`${D(19, 30, 0)} [27 CLR/ROG/NEC] Emalina (Human) <Nostalgia> ZONE: The Greater Faydark (gfaydark)  `);
+  p.feed(`${D(19, 30, 0)} There are 2 players in EverQuest Legends.`);
+
+  // Then a fight, six minutes later, with a charmed mob and an unattributable hit in it.
+  p.feed(`${D(19, 36, 0)} You crush a froglok shin knight for 40 points of damage.`);
+  p.feed(`${D(19, 36, 1)} Emalina slashes a froglok shin knight for 100 points of damage.`);
+  p.feed(`${D(19, 36, 2)} a tal ghoul wizard has been charmed.`);
+  p.feed(`${D(19, 36, 4)} A tal ghoul wizard slashes a froglok shin knight for 40 points of damage.`);
+  p.feed(`${D(19, 36, 6)} A froglok shin knight was hit by non-melee for 200 damage.`);
+
+  p.setNow(new Date(2026, 6, 31, 19, 38, 0).getTime());
+  const rows = p.snapshot().rows;
+
+  const emalina = rows.find((r) => r.name === 'Emalina');
+  assert.deepEqual(emalina.who.classes, ['CLR', 'ROG', 'NEC']);
+  assert.equal(emalina.who.level, 27);
+  assert.equal(emalina.who.race, 'Human');
+  assert.equal(emalina.who.guild, 'Nostalgia');
+  // Read at 19:30, asked at 19:38: eight minutes old. The age is derived against the
+  // snapshot's clock, so a reading gets older on screen without a new line arriving.
+  assert.equal(emalina.who.seenAgoMs, 8 * 60_000);
+  assert.equal(emalina.who.ts, new Date(2026, 6, 31, 19, 30, 0).getTime());
+
+  // "You" resolves to the logging character, and /who named that character too.
+  assert.deepEqual(rows.find((r) => r.name === 'Rhale').who.classes, ['PAL', 'DRU', 'BST']);
+
+  // Nothing /who can name: a charmed mob fighting for us and the Unknown bucket. The
+  // field is ABSENT rather than null — a null would read as "/who answered, and said
+  // nothing", which is a different claim from "/who has not been asked".
+  assert.equal('who' in rows.find((r) => r.name === 'tal ghoul wizard'), false);
+  assert.equal('who' in rows.find((r) => r.name === UNKNOWN), false);
+});
+
+test('a /who line never makes a stranger a confirmed group member', () => {
+  const p = makeParser();
+  // A bare zone /who returns everybody standing in the zone. None of them joined a group.
+  p.feed(`${D(19, 30, 0)} [42 RNG/WIZ/BST] Vahln (Kerran) <Four Inches Is Fine> ZONE: The Greater Faydark (gfaydark)  `);
+  assert.equal(p.roster.hasPlayerProof('Vahln'), true);
+  assert.equal(p.roster.isConfirmedMember('Vahln'), false);
+});

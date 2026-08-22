@@ -9,7 +9,7 @@
 
 import {
   isBoss, applyFilters, groupByDay,
-  pct, accPct, formatRate, formatDuration, timeOfDay, shortDate,
+  pct, accPct, formatRate, formatDuration, timeOfDay, shortDate, readingAge,
 } from './organize.js';
 // The overlay's pure half. Both windows describe the same fight, so both derive accuracy
 // the same way — one of them knowing which attack whiffs and the other not is the kind of
@@ -439,10 +439,48 @@ function renderBreakdown() {
     return;
   }
 
-  const parts = state.metric === 'damage' ? damageBreakdown(row)
+  // Every builder leads with its head line ("Rhale · 1.2M dealt · 12.3k dps · …"), and
+  // the /who reading is spliced in directly under it — ONE call site for all three
+  // metrics, which is what stops the damage, healing and taken views from drifting into
+  // three slightly different answers to the same question about the same person.
+  const [head, ...rest] = state.metric === 'damage' ? damageBreakdown(row)
     : state.metric === 'healing' ? healingBreakdown(row)
     : takenBreakdown(row);
-  pane.replaceChildren(...parts);
+  pane.replaceChildren(head, whoLine(row), ...rest);
+}
+
+/**
+ * What `/who` said about this member, as of this fight.
+ *
+ * ALWAYS rendered — the trio when the record carries a reading, a faint placeholder when
+ * it does not. That is not symmetry for its own sake: this window never reflows, and a
+ * line that appears only on the fights that happen to have one would shove the abilities
+ * table down by its own height every time the reader clicked a member who had been
+ * /who'd. It is the exact failure the deaths line already taught this pane, and the fix
+ * is the same one.
+ *
+ * Records written before this shipped have no `row.who` at all and get the placeholder,
+ * which is the honest answer for them too: nobody read a /who into that fight.
+ */
+function whoLine(row) {
+  const p = document.createElement('p');
+  p.className = 'b-who';
+
+  const who = row.who;
+  if (!who || !(who.classes?.length > 0)) {
+    p.classList.add('is-absent');
+    p.textContent = 'no /who reading for this fight';
+    return p;
+  }
+
+  const b = document.createElement('b');
+  b.textContent = `${who.level} ${who.classes.join('/')}`;
+  // Dated against the pull rather than against now, so the line says what it said that
+  // night however long ago that was. Guild is stored on the record but not shown: the
+  // names run long enough that one would push the age off the end of the line.
+  const bits = [who.race, readingAge(who.ts, state.record?.startTs)].filter(Boolean);
+  p.append(b, bits.length > 0 ? ` · ${bits.join(' · ')}` : '');
+  return p;
 }
 
 // ---------------------------------------------------------------- timeline

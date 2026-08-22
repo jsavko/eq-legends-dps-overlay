@@ -834,16 +834,66 @@ export const RULES = [
     make: () => ({ kind: 'group', action: 'disband', who: null }),
   },
   {
-    // "[Level Class] Name (Race)" — /who and /who group output.
+    // (confirmed) "[29 PAL/DRU/BST] Rhale (Dwarf)  ZONE: The Greater Faydark (gfaydark)  "
+    //
+    // EverQuest Legends gives a character up to THREE classes at once and prints them
+    // slash-joined inside one bracket. The pattern this replaces was the classic
+    // single-class shape — its class group was `[A-Za-z' ]+?`, with no slash in it — so
+    // it could never match a line this server writes. Measured against the live log:
+    // 633 /who result lines, zero matches. The roster's /who tier has been fed nothing
+    // for the entire life of the app, which is worth knowing quite apart from what the
+    // reading is now used for.
+    //
+    // Everything after the race varies and none of it is read: an optional guild tag in
+    // angle brackets, a "ZONE: <long name> (<short>)" tail, sometimes a trailing " LFG",
+    // and always two trailing spaces. The pattern stops caring once the race is in hand,
+    // so a tail this log happens not to contain cannot break the entry.
+    //
+    // Classes are exactly three uppercase letters each — the sixteen codes in the live
+    // log are BER BRD BST CLR DRU ENC MAG MNK NEC PAL RNG ROG SHD SHM WAR WIZ — and
+    // spelling that out is what stops the bracket from swallowing some other bracketed
+    // line that happens to start with a number.
+    //
+    // The optional "AFK " prefix is 14 lines in the live log and is exactly the gap this
+    // rule exists to close: a group member who happened to be away when somebody typed
+    // /who would otherwise be the one person with no reading, silently. It comes with a
+    // leading space the plain entry does not have — EQ writes "]  AFK [13 WAR/...", two
+    // spaces after the timestamp — which is why the anchor tolerates leading whitespace.
+    // Note what is NOT
+    // accepted — "* RIP *[44 MNK/SHM/NEC] Sisco's corpse (Dark Elf) ZONE: …", which /who
+    // also prints. That entry names a corpse, not a combatant, and reading it would file
+    // a sighting under "Sisco's corpse", a key no row will ever carry.
     id: 'who-entry',
-    re: /^\[(\d+)\s+([A-Za-z' ]+?)\]\s+([A-Za-z]+)\s+\((.+?)\)/,
+    re: /^\s*(?:AFK\s+)?\[(\d+)\s+([A-Z]{3}(?:\/[A-Z]{3})*)\]\s+([A-Za-z]+)\s+\(([^)]+)\)(?:\s*<([^>]+)>)?/,
     make: (m) => ({
       kind: 'who',
       who: m[3],
       level: Number(m[1]),
-      className: m[2].trim(),
+      // However many the character has — three, two, or one. Kept as a list rather than
+      // a joined string so the rule states what it read and the renderers decide how it
+      // reads; `className` is gone because nothing ever consumed it.
+      classes: m[2].split('/'),
       race: m[4],
+      // Parsed and carried, never displayed: guild names run long enough
+      // ("Four Inches Is Fine", "Heroes of Mithril Halls") that neither the overlay
+      // panel nor the History head line has the width for one. It is in the record if
+      // it is ever wanted.
+      guild: m[5] ?? null,
     }),
+  },
+  {
+    // (confirmed) "[ANONYMOUS] Raplah " — 6 lines in the live log.
+    //
+    // Matched for the one thing it does prove: the name belongs to a real player. It
+    // carries no level, no classes and no race, and says so with `anonymous` rather
+    // than with absent fields, so the roster can tell "went anonymous" apart from a
+    // reading that failed to parse — the first must not erase what /who said earlier.
+    //
+    // Same optional "AFK " prefix as the entry above ("AFK [ANONYMOUS] Rumgruk ", twice
+    // in the live log): being away changes nothing about what the line proves.
+    id: 'who-anonymous',
+    re: /^\s*(?:AFK\s+)?\[ANONYMOUS\]\s+([A-Za-z]+)/,
+    make: (m) => ({ kind: 'who', who: m[1], anonymous: true }),
   },
 
   // ----------------------------------------------------------------- proc flavour

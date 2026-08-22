@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isBoss, applyFilters, groupByDay, dayLabel,
-  pct, accPct, formatRate, formatDuration,
+  pct, accPct, formatRate, formatDuration, readingAge,
 } from '../src/renderer/history/organize.js';
 
 /** Local noon, so timezone offsets can never push a fixture across midnight. */
@@ -126,4 +126,36 @@ test('formatDuration: m:ss, hours only when real', () => {
   assert.equal(formatDuration(45_000), '0:45');
   assert.equal(formatDuration(95_000), '1:35');
   assert.equal(formatDuration(3_725_000), '1:02:05');
+});
+
+test('readingAge dates a /who against the pull, never against now', () => {
+  const pull = new Date(2026, 7, 22, 21, 0, 0).getTime();
+
+  // The ordinary case: somebody typed /who group on the way in.
+  assert.equal(readingAge(pull - 8 * 60_000, pull), 'read 8m before the pull');
+  assert.equal(readingAge(pull - 3 * 3_600_000, pull), 'read 3h before the pull');
+  assert.equal(readingAge(pull - 2 * 86_400_000, pull), 'read 2d before the pull');
+
+  // Seconds before the pull is not worth a number — it is simply current.
+  assert.equal(readingAge(pull - 4_000, pull), 'read moments before the pull');
+
+  // Typed mid-fight, which happens on a long one. There is no "before" to measure and
+  // none is invented.
+  assert.equal(readingAge(pull + 30_000, pull), 'read during the fight');
+  assert.equal(readingAge(pull, pull), 'read during the fight');
+
+  // Nothing to date: a record written before sightings were stamped, or a member /who
+  // never named. The caller draws its own placeholder rather than a phrase about a
+  // reading that does not exist.
+  assert.equal(readingAge(undefined, pull), null);
+  assert.equal(readingAge(pull - 60_000, undefined), null);
+});
+
+test('readingAge is stable however long after the fight it is read', () => {
+  // The point of dating against the pull: opening the same record a month later must
+  // print the same sentence it printed the night it was written.
+  const pull = new Date(2026, 7, 22, 21, 0, 0).getTime();
+  const reading = pull - 12 * 60_000;
+  assert.equal(readingAge(reading, pull), 'read 12m before the pull');
+  assert.equal(readingAge(reading, pull), readingAge(reading, pull));
 });

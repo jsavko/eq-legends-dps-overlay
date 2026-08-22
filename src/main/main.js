@@ -611,6 +611,28 @@ function persistEncounter(enc) {
     // keeps the flag off the overlay push does not apply here.
     const snap = enc.snapshot(enc.endTs, { timeline: true });
     if (snap.totalDamage === 0 && snap.totalDamageTaken === 0) return;
+
+    // Stamp each row with what /who last said about that member, as of this fight.
+    //
+    // This is the ONLY durable copy of a sighting anywhere, and it is durable only
+    // because of what it is attached to: EQ Legends lets a player change class between
+    // pulls, so "Emalina is a cleric" has no shelf life — but "the /who current when we
+    // pulled this mob said Emalina was 27 CLR/ROG/NEC" is a fact about a fight that has
+    // its own start and end, and a month from now it is still true. Nothing is written
+    // to config, and `roster.whoSightings` itself dies with the process.
+    //
+    // The absolute `ts` is kept and no age is precomputed, for the same reason: the
+    // History window dates the reading against the PULL, not against whenever the record
+    // is opened. `enc.snapshot()` builds fresh row objects each call, so writing to them
+    // here cannot leak into the live view.
+    //
+    // No RECORD_VERSION bump — the field is purely additive and an older record simply
+    // has none, which is the same absent-means-predates-the-feature contract the
+    // timeline buckets already rely on.
+    for (const row of snap.rows) {
+      const seen = parser.roster.sightingFor(row.name);
+      if (seen) row.who = { ...seen };
+    }
     const key = history.append({
       v: RECORD_VERSION,
       id: `${enc.startTs}-${enc.endTs}`,

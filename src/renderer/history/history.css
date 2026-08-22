@@ -463,11 +463,31 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
 #breakdown::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 
 #breakdown .b-head {
-  margin: 0 0 10px;
+  /* Tight against the /who line that always follows it; the pair is one block. */
+  margin: 0 0 3px;
   font-size: 13px;
   color: var(--ink-dim);
 }
 #breakdown .b-head b { color: var(--ink); font-weight: 600; }
+
+/*
+ * What /who said about this member, as of this fight — or, in faint ink, that it said
+ * nothing. Both states are drawn, and both occupy exactly this height.
+ *
+ * That fixed height is the whole point. This window's reason to exist is that clicking
+ * a fight, a member or a metric swaps content INSIDE a pane and moves nothing, and a
+ * line rendered only on the members who happened to be /who'd would push the abilities
+ * table down 16px the moment the reader clicked one. The deaths line in the stat strip
+ * above learned this the hard way.
+ */
+#breakdown .b-who {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--ink-dim);
+}
+#breakdown .b-who b { color: var(--ink); font-weight: 600; }
+#breakdown .b-who.is-absent { color: var(--ink-faint); }
 
 #breakdown h3 {
   margin: 14px 0 6px;
