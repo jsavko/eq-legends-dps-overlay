@@ -282,10 +282,6 @@ export class TriggerEngine {
       triggerName: trigger.name,
       label,
       kind: timer.kind,
-      // Which panel the row draws in. Carried, never decided: the engine has no opinion
-      // about screens and does not gain one here — it copies what the pack said so each
-      // panel's renderer can take its own share of one list.
-      panel: timer.panel,
       durationMs: timer.durationMs,
       endingMs: timer.endingMs,
       endingText: timer.endingText,
@@ -395,10 +391,6 @@ export class TriggerEngine {
       out.push({
         source: 'trigger',
         key: slot.key,
-        // A panel id, or `boss`. Every panel's renderer reads this one list and filters
-        // it, rather than main splitting the snapshot N ways — see the timers renderer
-        // for why the filtering has to happen on the renderer's side of the boundary.
-        panel: slot.panel ?? 'boss',
         // The panel's sub-line names where a row came from. For a learned row that is
         // the boss; for an imported one it is the pack, which is the honest answer to
         // "why is this on my screen".

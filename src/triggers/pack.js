@@ -34,15 +34,6 @@ export const DEFAULT_TIER = 2;
  *  into someone else's imported pack — see `myTriggersPack`. */
 export const MY_TRIGGERS_ID = 'my-triggers';
 
-/**
- * The reserved panel id: the boss-timer window, which is not one of the player's panels.
- *
- * It predates them, it has its own window, its own bounds key and its own switch, and it
- * is the default every pack in existence lands on. Reserved rather than seeded as a
- * player panel so that "delete this panel" can never be asked about it.
- */
-export const BOSS_PANEL = 'boss';
-
 /** Longest a timer may run. See `validateTrigger` for why there is a ceiling at all. */
 export const MAX_DURATION_MS = 24 * 60 * 60 * 1000;
 
@@ -132,29 +123,6 @@ function normalizeTimer(raw) {
   return {
     kind: raw.kind === 'repeating' ? 'repeating' : 'countdown',
     name: String(raw.name ?? ''),
-    /**
-     * Which panel this countdown draws in: the id of one of the player's own timer
-     * panels, or `BOSS_PANEL` for the fight's clock.
-     *
-     * An id rather than a two-value enum because the panels are the PLAYER'S — they name
-     * them, place them and switch them individually — so what a trigger stores has to be
-     * a reference to one of theirs, not a choice from a fixed pair we decided on.
-     *
-     * The default is `boss` and it has to stay `boss` forever. Every pack that exists
-     * predates this field: the sixteen shipped boss timers, every `.gtp` a guild has
-     * passed around, and every trigger the player has already authored. An upgrade that
-     * read an absent panel as anything else would silently relocate countdowns somebody
-     * had already placed and learned to glance at, which is the one thing this whole
-     * corner of the app is built not to do. Moving a row is something the player does,
-     * once, on purpose.
-     *
-     * A non-string normalizes rather than failing, on the same reasoning as everything
-     * else here: a hand-edited pack should degrade to something usable rather than
-     * refusing to load. An id naming a panel that no longer exists is NOT normalized
-     * away — the store is what knows which panels exist, and silently rewriting the
-     * reference here would destroy the player's assignment on a mere read.
-     */
-    panel: typeof raw.panel === 'string' && raw.panel ? raw.panel : BOSS_PANEL,
     durationMs: Math.min(MAX_DURATION_MS, Math.round(durationMs)),
     restart: ['restart', 'ignore'].includes(raw.restart) ? raw.restart : 'new',
     restartByName: raw.restartByName === true,
@@ -299,9 +267,6 @@ export function buildTrigger(form, id) {
       ? {
           kind: form.repeating ? 'repeating' : 'countdown',
           name: form.timerName || form.name,
-          // Straight through from the editor's DRAWS IN select. `normalizeTimer` is
-          // what turns silence — an older form, a pack built by a script — into `boss`.
-          panel: form.panel,
           durationMs,
           restart: form.restart ?? 'restart',
           restartByName: true,
@@ -489,23 +454,12 @@ export function packStats(input) {
   let live = 0;
   let timers = 0;
   let warnings = 0;
-  // Countdowns per panel. The same trap `live` exists for, one level down: a pack can
-  // import with every trigger switched on and still put nothing on screen, because all
-  // of its countdowns draw in a panel the player has turned off. "12 timers" beside an
-  // empty screen is a mystery with no way in; naming the panel is the way in.
-  const byPanel = {};
   for (const t of pack.triggers) {
     if (t.enabled && groupEnabled(pack, t.groupId)) live++;
-    if (t.timer) {
-      timers++;
-      byPanel[t.timer.panel] = (byPanel[t.timer.panel] ?? 0) + 1;
-    }
+    if (t.timer) timers++;
     if (t.warn) warnings++;
   }
-  return {
-    triggers: pack.triggers.length, live, timers, warnings,
-    groups: pack.groups.length, byPanel,
-  };
+  return { triggers: pack.triggers.length, live, timers, warnings, groups: pack.groups.length };
 }
 
 /** A trigger inherits its group's switch, and a group inherits its ancestors' —

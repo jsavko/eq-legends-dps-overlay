@@ -11,6 +11,7 @@ const CH = {
   CONFIG_CHANGED: 'config:changed',
   LOCK_CHANGED: 'overlay:lock-changed',
   CONFIG_GET: 'config:get',
+  PANEL_FIT: 'overlay:panel-fit',
 };
 
 const on = (channel) => (handler) =>
@@ -21,4 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   onConfig: on(CH.CONFIG_CHANGED),
   onLockChanged: on(CH.LOCK_CHANGED),
   getConfig: () => ipcRenderer.invoke(CH.CONFIG_GET),
+  /** How big this window needs to be. The one message that keeps it from being an
+      oversized invisible rectangle swallowing clicks meant for the window behind it. */
+  fit: (size) => ipcRenderer.send(CH.PANEL_FIT, size),
 });

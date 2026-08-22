@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>EQL Timers</title>
+  <link rel="stylesheet" href="box.css" />
+</head>
+<body data-arranging="false">
+  <!-- The window is sized to THIS element and nothing more — see box.js `fit()`. An
+       oversized invisible box would swallow every click that landed in the empty part
+       of it, which is exactly what made the previous attempt unusable while arranging. -->
+  <div id="box">
+    <!-- Always drawn. The box is shaped after the boss-timer panel, which is shaped
+         after EQ's own buff window: a titled frame you learn the position of. The title
+         is also the only thing that tells two boxes apart when both are running. -->
+    <div class="head" id="head">
+      <span class="name" id="name"></span>
+      <span class="hint" id="hint"></span>
+    </div>
+    <div id="rows"></div>
+  </div>
+  <script type="module" src="box.js"></script>
+</body>
+</html>

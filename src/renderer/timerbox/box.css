@@ -1,0 +1,222 @@
+/*
+ * One timer box: compact inline bars, and nothing else.
+ *
+ * Every rule here serves two ideas.
+ *
+ * **The bar is the row.** One line, one countdown: the name on the left, the time on the
+ * right, and the bar draining right-to-left underneath both. The text inside the bar is
+ * painted in a contrasting colour, so the row reports its own progress twice — by the
+ * bar's edge and by where the letters flip. At a glance across a room the second signal
+ * is the readable one.
+ *
+ * **Colour belongs to the bar, not to the box.** Boxes are told apart by where they are
+ * and what they are called; what you need mid-pull is which BAR is which. So the chrome
+ * here is deliberately colourless and every accent comes from `--accent`, written per row
+ * by box.js from that timer's own colour.
+ *
+ * The window is sized to `#box` exactly (see box.js), so there is no invisible margin
+ * anywhere to eat a click that was meant for the window behind it.
+ */
+
+/*
+ * The chrome is the boss-timer panel's, to the pixel: the same palette, the same 296px
+ * width, the same 30px row, the same header. That panel is now one of these boxes, and a
+ * new box should arrive looking like the one the player already knows rather than like a
+ * different app.
+ */
+:root {
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+  --slab:      #100d0a;
+  --edge:      #2e2620;
+  --ember:     #b9702a;
+  --ember-lit: #e0a53f;
+
+  /*
+   * Only the accent itself lives here, and only as a fallback. The two ends of the bar
+   * are NOT derived into variables at this level, and that is the whole point: a
+   * `--accent-deep` declared on :root substitutes :root's `--accent` once, and a row
+   * that later sets its own `--accent` inherits the already-computed value. Every bar
+   * then draws in the default colour no matter what the timer says — which is exactly
+   * what happened. The derivation belongs in the rule that uses it, where `var(--accent)`
+   * resolves against the row.
+   */
+  --accent:        #2f8f7a;
+  --on-accent:     #05100c;
+
+  --scale: 1;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+}
+
+body {
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: calc(13px * var(--scale));
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  /* Fit exactly: the window is this element's size, so any padding on body would be
+     dead space the window still owns and still blocks clicks in. */
+  width: max-content;
+}
+
+/*
+ * Shaped after the boss-timer panel, which is shaped after EQ's own buff window: a
+ * titled frame, top-anchored, that you learn the position of. That panel IS one of these
+ * now — it is a prebuilt category like any other, with the same chrome and the same
+ * settings — so there is one look here rather than two.
+ */
+#box {
+  width: 22.77em;   /* 296px at 1× — the boss panel's width */
+  background: linear-gradient(180deg, color-mix(in srgb, var(--slab) 94%, #3a2a18) 0%, var(--slab) 40%, var(--slab) 100%);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: 0 2px 18px rgba(0, 0, 0, 0.65), inset 0 1px 0 color-mix(in srgb, var(--ember) 26%, transparent);
+  overflow: hidden;
+}
+#box[hidden] { display: none; }
+
+/* --------------------------------------------------------------- arranging */
+
+/*
+ * Arranging is a MODE, not a side effect of the lock. The box goes solid, names itself
+ * and becomes a drag handle — because "put this where I want it" is a thing you do
+ * deliberately, and a box you can only find by unlocking the whole HUD and hoping is not
+ * findable at all.
+ */
+/* The title, always. It is what tells two boxes apart when both are running, and it is
+   the thing you learn to look at rather than read. */
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8em;
+  padding: 0.31em 0.62em 0.31em 0.69em;
+  background: color-mix(in srgb, var(--slab) 82%, #241a10);
+  border-bottom: 1px solid var(--edge);
+}
+body[data-arranging="true"] .head { -webkit-app-region: drag; }
+body[data-arranging="true"] #box {
+  background: rgba(14, 11, 9, 0.97);
+  border-color: var(--ink-faint);
+  border-style: dashed;
+  -webkit-app-region: drag;
+}
+.head .name {
+  font-size: 0.73em;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ember-lit);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Fixed line box whether or not there is anything to say, so the header cannot change
+   height and move every row below it. */
+.head .hint {
+  font-size: 0.85em;
+  line-height: 1.3;
+  min-height: 1.3em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------- rows */
+
+/*
+ * One row, one countdown, for as long as it lives. Fixed height in every state, because
+ * the whole value of a timer box is that the row you learned to glance at stays put.
+ */
+.row {
+  position: relative;
+  height: 2.31em;   /* 30px at 1× — the boss panel's row */
+  overflow: hidden;
+  border-bottom: 1px solid #191512;
+}
+.row:last-child { border-bottom: 0; }
+
+/* The bar. Drains right-to-left, and it is BRIGHT: the two-tone text depends on it being
+   something dark letters can stand on. */
+.row .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--fill, 0%);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 82%, #05100c),
+    color-mix(in srgb, var(--accent) 62%, #ffffff)
+  );
+  /* Pushes arrive at 4 Hz; the linear transition smooths the drain between them. */
+  transition: width 0.25s linear;
+}
+/* The mask that clips the dark text to exactly the bar's width. Same property, same
+   duration, same easing as the bar — that is what keeps the letters and the bar's edge
+   from ever separating. */
+.row .mask {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--fill, 0%);
+  overflow: hidden;
+  transition: width 0.25s linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .row .fill, .row .mask { transition: none; }
+}
+
+/* Both text layers are the same box in the same place. The masked copy gets the row's
+   full width explicitly, so narrowing the mask CROPS it rather than reflowing it — a
+   re-wrapped duplicate would show different words from the layer beneath. */
+.row .body {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 22.77em;
+  display: flex;
+  align-items: center;
+  gap: 0.62em;
+  padding: 0 0.69em;
+}
+.row .label {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.04em;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+.row .time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.08em;
+  color: color-mix(in srgb, var(--accent) 42%, #ffffff);
+  white-space: nowrap;
+}
+/* The masked duplicate: the same words, painted for standing on the bar. */
+.row .mask .label,
+.row .mask .time { color: var(--on-accent); }
+
+/* Spent: the countdown is over, the row is not — it lingers a moment rather than
+   blinking out, which reads as a glitch instead of as a timer finishing. */
+.row[data-spent] .fill { background: none; }
+.row[data-spent] .label { color: var(--ink-faint); font-weight: 400; }
+.row[data-spent] .time { color: var(--ink-faint); }
+
+/* A row the Preview button raised. It is on screen and it did not come from the log, so
+   it says so — the bar is unchanged, because the point of a preview is to look exactly
+   like the real thing. */
+.row[data-preview] .label::after {
+  content: " · preview";
+  color: var(--ink-faint);
+  font-weight: 400;
+  font-style: italic;
+}

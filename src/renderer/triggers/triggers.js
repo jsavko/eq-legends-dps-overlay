@@ -190,27 +190,9 @@ async function renderContents() {
     return;
   }
 
-  const origin = pack.origin === 'gina' ? 'imported from GINA' : 'yours';
-  $('pack-sub').textContent = [origin, darkPanels(pack)].filter(Boolean).join(' · ');
+  $('pack-sub').textContent = pack.origin === 'gina' ? 'imported from GINA' : 'yours';
   $('pack-note').textContent = pack.comments ?? '';
   await renderPackRows(pack);
-}
-
-/**
- * "12 timers, and none of them can draw" — said out loud, or nothing.
- *
- * The same trap `live` covers one level up: a pack can import with every trigger switched
- * on and still put nothing on screen, because the panel its countdowns are addressed to
- * is switched off or was removed. A player with an empty screen and a pack that says
- * "12 triggers · 12 on" has no way in to that; naming the panel is the way in.
- */
-function darkPanels(pack) {
-  const byPanel = pack.byPanel ?? {};
-  const dark = Object.entries(byPanel)
-    .filter(([id]) => panelLabel(id).off)
-    .reduce((n, [, count]) => n + count, 0);
-  if (!dark) return '';
-  return `${dark} timer${dark === 1 ? '' : 's'} draw in a panel that is off`;
 }
 
 function renderPresets(pack) {
@@ -343,13 +325,6 @@ function triggerRow(packId, trigger, measured) {
   const nameRow = document.createElement('div');
   nameRow.className = 'row-name';
   nameRow.append(text('span', trigger.name));
-  // Where its countdown draws, if it has one — visible without opening the dialog,
-  // because "which panel is this in" is the question the whole feature turns on and
-  // having to open every trigger to answer it would be the list refusing to say.
-  if (trigger.timer) {
-    const where = panelLabel(trigger.timer.panel ?? BOSS_PANEL);
-    nameRow.append(text('span', where.text, `row-panel${where.off ? ' off' : ''}`));
-  }
   wrap.append(nameRow, text('div', trigger.pattern, 'row-pattern'));
   li.append(wrap);
 
@@ -479,10 +454,6 @@ async function openEditor(packId, triggerId) {
     warnText: trigger.warn?.text ?? '',
     timerKind: trigger.timer ? (trigger.timer.kind === 'repeating' ? 'repeating' : 'countdown') : 'none',
     durationSec: trigger.timer ? Math.round(trigger.timer.durationMs / 1000) : 60,
-    // Where it draws. `normalizeTimer` guarantees a string here for anything that has
-    // been through the store, so the fallback only covers a trigger with no timer.
-    panel: trigger.timer?.panel ?? BOSS_PANEL,
-    newPanelName: '',
     earlyEndText: trigger.timer?.earlyEnders?.[0]?.pattern ?? '',
     test: null,
     errors: [],
@@ -518,10 +489,6 @@ async function newTrigger({ from = null } = {}) {
     warnText: from?.warnText ?? '',
     timerKind: from?.timerKind ?? 'none',
     durationSec: from?.durationSec ?? 60,
-    // A new trigger draws in the boss panel unless the author says otherwise — the same
-    // default every existing pack has, so "new" and "imported" behave alike.
-    panel: from?.panel ?? BOSS_PANEL,
-    newPanelName: '',
     earlyEndText: '',
     test: null,
     errors: [],
@@ -538,13 +505,6 @@ function showEditor() {
 
 /** The sentinel the "make one" option carries. Not a valid group id — those are `gN`. */
 const NEW_GROUP = '__new__';
-
-/** The same trick for panels. Not a valid panel id — those are `pN`, or `boss`. */
-const NEW_PANEL = '__new-panel__';
-
-/** The reserved id of the boss-timer window. Mirrors `BOSS_PANEL` in triggers/pack.js;
- *  a renderer cannot import from there, so it is repeated like the channel names are. */
-const BOSS_PANEL = 'boss';
 
 /** Draft -> inputs. Only on open: doing it on every keystroke would fight the caret. */
 function writeEditorFields() {
@@ -563,50 +523,7 @@ function writeEditorFields() {
   select.append(new Option('＋ New group…', NEW_GROUP));
   select.value = d.groups.some((g) => g.id === d.groupId) ? d.groupId : '';
   $('e-new-group').value = d.newGroupName;
-
-  // Boss timers first and always: it is the default, it cannot be deleted, and putting
-  // it anywhere but the top would make the safe answer the one you have to hunt for.
-  const panels = $('e-panel');
-  panels.replaceChildren();
-  panels.append(new Option('Boss timers', BOSS_PANEL));
-  for (const p of myPanels()) panels.append(new Option(p.title, p.id));
-  panels.append(new Option('＋ New panel…', NEW_PANEL));
-  // A trigger pointing at a panel that has since been removed falls back visibly rather
-  // than being silently rewritten: the select shows Boss timers and saving is what makes
-  // that true, so the player sees the move before it happens rather than after.
-  panels.value = optionValues(panels).includes(d.panel) ? d.panel : BOSS_PANEL;
-  $('e-new-panel').value = d.newPanelName;
 }
-
-/**
- * How a panel reads on a trigger row: its name, and whether it can currently draw.
- *
- * A panel that is switched off is named ANYWAY rather than hidden — the row still has an
- * assignment and the player still made it, and a trigger that silently stopped drawing
- * with nothing on screen saying why is the failure this label exists to prevent. A panel
- * that no longer exists says so outright for the same reason.
- */
-function panelLabel(id) {
-  if (id === BOSS_PANEL) return { text: 'Boss timers', off: false };
-  const panel = myPanels().find((p) => p.id === id);
-  if (!panel) return { text: 'panel removed', off: true };
-  return { text: panel.title, off: !panel.enabled };
-}
-
-/** The player's own panels, normalized out of config. */
-function myPanels() {
-  const list = Array.isArray(state.cfg?.timerPanels) ? state.cfg.timerPanels : [];
-  return list
-    .filter((p) => p && typeof p === 'object' && p.id)
-    .map((p, i) => ({
-      id: String(p.id),
-      title: String(p.title ?? `Timers ${i + 1}`),
-      enabled: p.enabled !== false,
-      bounds: p.bounds ?? null,
-    }));
-}
-
-const optionValues = (select) => [...select.options].map((o) => o.value);
 
 /** Inputs -> draft. */
 function readEditor() {
@@ -622,10 +539,6 @@ function readEditor() {
   const chosen = $('e-group').value;
   d.groupId = chosen === NEW_GROUP ? '' : chosen;
   d.newGroupName = chosen === NEW_GROUP ? $('e-new-group').value : '';
-
-  const panel = $('e-panel').value;
-  d.panel = panel === NEW_PANEL ? BOSS_PANEL : panel;
-  d.newPanelName = panel === NEW_PANEL ? $('e-new-panel').value : '';
 }
 
 /** Everything that is derived from the draft rather than typed into it. */
@@ -647,11 +560,6 @@ function syncEditor() {
   $('e-seconds').hidden = !timed;
   $('e-timer-hint').hidden = timed;
   $('e-early-wrap').hidden = !timed;
-  // Nowhere to draw a countdown that does not exist. Hidden rather than disabled: a
-  // greyed control implies there is a choice to be made here later in this dialog, and
-  // there is not — turning the timer on is what brings the question back.
-  $('e-panel-wrap').hidden = !timed;
-  $('e-new-panel').hidden = $('e-panel').value !== NEW_PANEL;
 
   // The name field appears only once "New group…" is chosen, so the common case — leaving
   // it alone, or filing into a group the pack already has — shows one control and not two.
@@ -716,19 +624,6 @@ function closeEditor() {
 async function saveDraft() {
   readEditor();
   const d = state.draft;
-
-  // A panel named in the dialog is created BEFORE the trigger is saved, so the trigger
-  // stores a real id rather than a name that would have to be resolved later. Creating
-  // it here rather than on its own channel is the same call `ensureGroup` makes for
-  // groups, and for the same reason: an empty panel is nothing, an empty pack is a
-  // destination you plan.
-  const named = String(d.newPanelName ?? '').trim();
-  if (named) {
-    const created = await ensurePanel(named);
-    d.panel = created;
-    d.newPanelName = '';
-  }
-
   const result = await window.api.saveTrigger({
     packId: d.packId,
     triggerId: d.triggerId,
@@ -739,7 +634,6 @@ async function saveDraft() {
       warnText: d.warnText,
       durationSec: d.timerKind === 'none' ? 0 : d.durationSec,
       repeating: d.timerKind === 'repeating',
-      panel: d.panel,
       earlyEndText: d.earlyEndText,
       groupId: d.groupId || null,
       newGroupName: d.newGroupName,
@@ -754,222 +648,6 @@ async function saveDraft() {
   closeEditor();
   state.selectedPack = landedIn;
   await refresh();
-}
-
-/* ------------------------------------------------------------------- timer panels */
-
-/**
- * Make a panel with this title, or hand back the id of the one already wearing it.
- *
- * The same "a name the list already uses IS the one you meant" rule `ensureGroup`
- * follows: two identically-titled panels would be two windows whose difference could
- * only be discovered by dragging one and seeing which moved.
- */
-async function ensurePanel(title) {
-  const existing = myPanels().find((p) => p.title.toLowerCase() === title.toLowerCase());
-  if (existing) return existing.id;
-
-  const id = nextPanelId();
-  const next = [...myPanels(), { id, title, enabled: true, bounds: null }];
-  await window.api.setConfig({ timerPanels: next });
-  state.cfg = await window.api.getConfig();
-  return id;
-}
-
-/** The next free `pN`, computed from what exists — never a stored counter, which would
- *  drift the moment the config file was hand-edited, and a collision here is two
- *  windows fighting over one bounds entry. */
-function nextPanelId() {
-  let max = 0;
-  for (const p of myPanels()) {
-    const n = /^p(\d+)$/.exec(p.id);
-    if (n) max = Math.max(max, Number(n[1]));
-  }
-  return `p${max + 1}`;
-}
-
-/** How many timers point at each panel, across every pack. Loaded rather than counted
- *  from the summary because it is what decides whether a panel can be deleted, and a
- *  stale count there would orphan somebody's triggers. */
-async function countByPanel() {
-  const counts = new Map();
-  for (const pack of state.packs) {
-    const body = await packBody(pack.id);
-    for (const t of body?.triggers ?? []) {
-      if (!t.timer) continue;
-      const id = t.timer.panel ?? BOSS_PANEL;
-      counts.set(id, (counts.get(id) ?? 0) + 1);
-    }
-  }
-  return counts;
-}
-
-async function openPanels() {
-  await renderPanelRows();
-  $('p-new').value = '';
-  $('panels').showModal();
-}
-
-async function renderPanelRows() {
-  const counts = await countByPanel();
-  const list = $('p-rows');
-  list.textContent = '';
-
-  if (!myPanels().length) {
-    // An empty list is a real state — the player can remove every panel — and it has to
-    // say what to do about itself rather than being a blank box.
-    list.append(text('li', 'No panels yet. Add one below, and countdowns can draw in it.', 'muted'));
-  }
-
-  for (const panel of myPanels()) {
-    const li = document.createElement('li');
-    const used = counts.get(panel.id) ?? 0;
-
-    const wrap = document.createElement('div');
-    wrap.className = 'd-text';
-
-    const title = document.createElement('input');
-    title.type = 'text';
-    title.value = panel.title;
-    title.addEventListener('change', async () => {
-      const next = myPanels().map((p) => (
-        p.id === panel.id ? { ...p, title: title.value.trim() || p.title } : p
-      ));
-      await writePanels(next);
-    });
-
-    wrap.append(title, text('div', used ? `${used} timer${used === 1 ? '' : 's'} draw here` : 'nothing draws here yet', 'd-sub'));
-
-    const onoff = document.createElement('button');
-    onoff.type = 'button';
-    onoff.className = 'secondary';
-    onoff.textContent = panel.enabled ? 'on' : 'off';
-    onoff.setAttribute('aria-pressed', String(panel.enabled));
-    onoff.addEventListener('click', async () => {
-      await writePanels(myPanels().map((p) => (
-        p.id === panel.id ? { ...p, enabled: !p.enabled } : p
-      )));
-    });
-
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'danger';
-    remove.textContent = 'Remove';
-    // Only when nothing points at it. A panel holding countdowns can always be switched
-    // OFF, which takes it off the screen and moves nobody's triggers; deleting it would
-    // have to send them somewhere, and the only somewhere is the boss panel — which is
-    // the exact outcome this whole feature exists to prevent.
-    remove.disabled = used > 0;
-    remove.title = used > 0
-      ? `${used} timer${used === 1 ? '' : 's'} draw here — move them first, or switch the panel off`
-      : 'Remove this panel';
-    remove.addEventListener('click', async () => {
-      await writePanels(myPanels().filter((p) => p.id !== panel.id));
-    });
-
-    li.append(wrap, onoff, remove);
-    list.append(li);
-  }
-}
-
-async function writePanels(next) {
-  await window.api.setConfig({ timerPanels: next });
-  state.cfg = await window.api.getConfig();
-  await renderPanelRows();
-}
-
-/**
- * "Measure my timers…" — read the player's own log and write down what it says.
- *
- * The scan takes a few seconds against a large log and runs in main, chunked and
- * yielding, so the overlay keeps tailing throughout. The button says so rather than
- * going quiet: a titlebar control that does nothing visible for four seconds reads as
- * broken, and this one is easy to press twice.
- */
-async function measureMyTimers() {
-  const button = $('measure');
-  const label = button.textContent;
-  button.disabled = true;
-  button.textContent = 'Reading your log…';
-  try {
-    const result = await window.api.mineBuffs();
-    await refresh({ keepSelection: false });
-    if (result.ok && result.packId) {
-      state.selectedPack = result.packId;
-      renderRail();
-      await renderContents();
-    }
-    openMeasureReport(result);
-  } finally {
-    button.disabled = false;
-    button.textContent = label;
-  }
-}
-
-function openMeasureReport(result) {
-  const body = $('r-body');
-  body.replaceChildren();
-
-  if (!result.ok) {
-    $('r-title').textContent = 'Could not measure';
-    body.append(text('p', result.error ?? 'unknown error', 'muted small'));
-    $('report').showModal();
-    return;
-  }
-
-  const found = result.candidates ?? [];
-  $('r-title').textContent = found.length
-    ? `Measured ${found.length} of your own timers`
-    : 'Nothing paired up yet';
-
-  if (!found.length) {
-    // The honest explanation rather than a shrug. A pair needs both halves and enough
-    // repetitions, and the commonest reason there are none is simply a short log.
-    body.append(text('p',
-      'A timer needs three things in your log: a line that appears when the effect lands, ' +
-      'a line that appears when it wears off, and at least three complete cycles of the two. ' +
-      'A fresh log has not seen enough yet — come back after a few sessions.',
-      'muted small'));
-    $('report').showModal();
-    return;
-  }
-
-  for (const c of found) {
-    const card = document.createElement('div');
-    card.className = 'report-file';
-
-    const row = document.createElement('div');
-    row.className = 'report-row';
-    row.append(text('span', c.name, 'report-name'));
-    row.append(Object.assign(document.createElement('span'), { className: 'spacer' }));
-    row.append(text('span', `${Math.round(c.durationMs / 1000)}s`, 'report-ok'));
-    row.append(text('span', `${c.samples} cycles`, c.loose ? 'report-drop' : 'muted small'));
-    card.append(row);
-
-    // The two lines the number was measured between. Shown because they ARE the
-    // derivation: a wrong pairing is obvious at a glance here and invisible anywhere
-    // else, and the player is the only one who can tell.
-    card.append(text('p', `starts: ${c.land}`, 'muted small'));
-    card.append(text('p', `ends: ${c.wearOff}`, 'muted small'));
-    if (c.ranks.length > 1) {
-      card.append(text('p',
-        `Cast as ${c.ranks.map((r) => r.name).join(', ')} — ranks differ in length, so this ` +
-        'is the middle of them. Split it into one trigger per rank to be exact.',
-        'muted small'));
-    }
-    body.append(card);
-  }
-
-  body.append(text('p',
-    'Every number is the median of last-land → wear-off in YOUR log. A recast refreshes, ' +
-    'so the clock starts at the last landing, not the first. Nothing here was read off a ' +
-    'spell table — which is the point, and also why these are candidates: the two lines ' +
-    'under each row are what the number was measured between, so a wrong pairing is ' +
-    'obvious here and nowhere else. Delete the ones that are wrong; they are ordinary ' +
-    'triggers now.',
-    'muted small'));
-
-  $('report').showModal();
 }
 
 /* ------------------------------------------------------------------ report dialog */
@@ -1163,21 +841,6 @@ function wire() {
   });
 
   $('open-durations').addEventListener('click', openDurations);
-
-  $('open-panels').addEventListener('click', openPanels);
-  $('p-add').addEventListener('click', async () => {
-    const title = $('p-new').value.trim();
-    if (!title) return;
-    await ensurePanel(title);
-    $('p-new').value = '';
-    await renderPanelRows();
-  });
-  // Closing the panels dialog redraws the list behind it: a rename shows on every row
-  // that names the panel, and a panel switched off changes what the pack sub-lines say.
-  $('p-close').addEventListener('click', async () => {
-    $('panels').close();
-    await refresh();
-  });
   $('d-save').addEventListener('click', saveDurations);
   $('d-cancel').addEventListener('click', () => $('durations').close());
   // Reset fills the fields and stops — Save is still the only thing that writes, so
@@ -1191,8 +854,6 @@ function wire() {
       await refresh();
     });
   }
-
-  $('measure').addEventListener('click', measureMyTimers);
 
   $('import').addEventListener('click', async () => {
     const result = await window.api.import();
@@ -1286,14 +947,6 @@ function wire() {
   for (const id of ['e-name', 'e-pattern', 'e-warn', 'e-early', 'e-duration']) {
     $(id).addEventListener('input', () => { readEditor(); syncEditor(); });
   }
-  $('e-panel').addEventListener('change', () => {
-    // Same as the group select below: syncEditor reveals the name field, so focus has to
-    // follow it or the player is left looking at a box nothing typed into.
-    readEditor();
-    syncEditor();
-    if ($('e-panel').value === NEW_PANEL) $('e-new-panel').focus();
-  });
-  $('e-new-panel').addEventListener('input', () => { readEditor(); syncEditor(); });
   $('e-timer-kind').addEventListener('change', () => { readEditor(); syncEditor(); });
   $('e-new-group').addEventListener('input', () => { readEditor(); syncEditor(); });
   $('e-group').addEventListener('change', () => {

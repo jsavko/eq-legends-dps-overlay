@@ -56,7 +56,7 @@
  */
 
 import { escapeRegex } from './tokens.js';
-import { normalize, BOSS_PANEL } from './pack.js';
+import { normalize } from './pack.js';
 // The one import outside `src/triggers/`, and the same justification `engine.js` gives
 // for `parseTimestamp`: it is a pure function, and the alternative — a second opinion
 // here about which lines are combat — is a copy that would drift out of agreement with
@@ -482,7 +482,7 @@ export function linePattern(body) {
  * banner across the eyeline for "your buff has thirty seconds left" is the kind of
  * interruption the alerts window exists to ration.
  */
-export function buffTrigger(candidate, { id, groupId = null, panel = BOSS_PANEL }) {
+export function buffTrigger(candidate, { id, groupId = null }) {
   return {
     id,
     name: candidate.name,
@@ -502,7 +502,6 @@ export function buffTrigger(candidate, { id, groupId = null, panel = BOSS_PANEL 
       restartByName: true,
       endingMs: null,
       endingText: null,
-      panel,
       // The measured wear-off line, so a buff that is dispelled, clicked off or lost to a
       // zone takes its row with it instead of counting down to a number that stopped
       // meaning anything. This is the same mechanism the boss pack uses for a death line.
@@ -544,9 +543,7 @@ function provenanceLine(c) {
  * is a real gesture; these are all the same caster — you — and a group per spell would be
  * a group per row, which is a switch beside a switch.
  */
-export function packFromBuffs(candidates, {
-  id, name, comments = '', modified = '', panel = BOSS_PANEL,
-} = {}) {
+export function packFromBuffs(candidates, { id, name, comments = '', modified = '' } = {}) {
   return normalize({
     id,
     name,
@@ -559,7 +556,7 @@ export function packFromBuffs(candidates, {
     shipped: false,
     enabled: true,
     groups: [],
-    triggers: candidates.map((c, i) => buffTrigger(c, { id: `t${i + 1}`, panel })),
+    triggers: candidates.map((c, i) => buffTrigger(c, { id: `t${i + 1}` })),
   });
 }
 

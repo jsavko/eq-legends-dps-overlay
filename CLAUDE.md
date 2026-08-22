@@ -55,7 +55,7 @@ node scripts/collect-unknown.js <log>                      # report lines no rul
 node scripts/backfill-history.js <log> --dir <dir>         # replay a log into the encounter history store (dedup-safe, --dry-run supported)
 node scripts/gina-dryrun.js <pack.gtp> --log <log>         # replay a GINA pack against a log: per-trigger hit counts, a sample line, and the dead list
 node scripts/mine-rhythms.js <log> [--write <pack.json>]   # measure boss recast intervals offline and print them as candidate triggers; writes nothing without --write
-node scripts/mine-buffs.js <log> [--write <pack.json>]     # measure how long YOUR OWN effects last, by pairing landing prose with wear-off prose; writes nothing without --write
+node scripts/mine-buffs.js <log> [--write <pack.json>]     # measure how long YOUR OWN effects last, pairing landing prose with wear-off prose; writes nothing without --write
 node scripts/mine-gina.js <dir> [--min 2]                  # spell names recurring across independent GINA packs; prints candidates, never writes
 ```
 
@@ -71,29 +71,39 @@ A second, slower flow branches off at encounter close: parser `onEncounterEnd` �
 JSONL history store → History window. `docs/architecture.md` walks the whole pipeline
 with the actual event kinds and record shapes.
 
-**Several windows float over or beside the game**, each with its own bounds key and none
-deriving its placement from another's: the **meter** (`bounds`), the **alerts** banner
-stack (`alertsBounds`, top-centre — a warning must cross your eyeline), the **boss
-timers** panel (`timersBounds`, wherever you keep the buff window — a countdown is a
-fixture you consult), **the player's own timer panels** (as many as they make, each with
-a title and bounds inside `timerPanels`), the **History** browser (`historyBounds`), and
-the **Triggers** manager (`triggersBounds`). The same snapshot is pushed to the meter,
-the alerts and every timer panel. What those share is the *gesture*, not the position:
-one `applyLock` unlock makes the whole HUD draggable, and Ctrl+Shift+H hides it together.
-History and Triggers are not part of the HUD — they take real mouse input, scroll their
-panes, and are opened between pulls.
+**Windows float over or beside the game**, each with its own bounds and none deriving
+its placement from another's: the **meter** (`bounds`), the **alerts** banner stack
+(`alertsBounds`, top-centre — a warning must cross your eyeline), **any number of timer
+boxes** (positions in `timers.json`), the **History** browser (`historyBounds`), the
+**Triggers** manager (`triggersBounds`) and the **Timers** manager (`timerSetupBounds`).
+The meter and the alerts share the *gesture*, not the position: one `applyLock` unlock
+makes them draggable, and Ctrl+Shift+H hides the HUD together. History, Triggers and
+Timers are not part of the HUD — they take real mouse input, scroll their panes, and are
+opened between pulls.
 
-**Timer panels are the player's, and the boss panel is not one of them.** A trigger's
-`timer.panel` names where its countdown draws: `'boss'` — the default, and what every
-pack that predates the field gets — or the id of a panel in `config.timerPanels`. One
-renderer (`src/renderer/timerpanel/`) serves them all, told which it is by `?panel=<id>`
-on its file URL; each filters the one `triggerTimers` list itself rather than main
-splitting it, for the reason in `timers.js#applyConfig` (the push loop skips unchanged
-ticks, so a renderer that can only learn from the NEXT snapshot sits wrong during a
-lull). The separation is not tidiness: slots are claimed in first-armed order and never
-re-sorted, so a 146-second buff cast during the pull-in would claim the boss panel's top
-slot and hold it for the whole fight — the same failure two mob self-buffs caused on a
-Plane of Fear pull, where the Maestro's Superior Healing armed last and drew below them.
+**Timer boxes are the player's, and the boss timers are one of them.** `src/timers/` is a
+fourth sibling of the parser — pure Node, fed the same lines, knowing nothing about
+encounters or packs. A timer is four things: a name, the log text that starts it, how long
+it runs, and which box it draws in; plus a colour, which belongs to the **bar** and not to
+the box, because boxes are told apart by where they are and what they are called while
+what you need mid-pull is which bar is which. The player makes boxes, names them, colours
+the bars and places them; `boss` is the one box that ships prebuilt and gets its rows from
+the trigger packs instead of from anything they typed. `src/renderer/timerbox/` renders
+them all, told which it is by `?category=<id>` on its file URL, and the Timers window
+(`src/renderer/timersetup/`, tray → Timers… or Ctrl+Shift+T) is the single place they are
+made, named, coloured and placed.
+
+Two things a timer box does that no other click-through window does, both from one
+requirement — it has to be draggable, and a draggable window is not click-through:
+
+- **It is sized to its content.** Every other panel buys safety with a generously
+  oversized invisible box, which is fine while click-through and disastrous the moment it
+  is not: an invisible rectangle swallows every click landing in the empty part of it,
+  including clicks meant for a window behind it. The renderer measures itself and
+  `TIMERS_FIT` resizes the window, so an idle box is nothing at all.
+- **Placement is a MODE.** `Arrange on screen` in the Timers window makes every box solid,
+  named and grabbable at once. Unlocking the whole HUD and hoping is not a way to find a
+  window that draws nothing between fights.
 
 **`src/parser/` is pure Node — no Electron imports anywhere.** That is why the whole
 scoring pipeline is unit-testable in WSL and replayable offline. Keep it that way.
@@ -176,34 +186,16 @@ nobody should rebuild it.
 snapshot. Rows are reused, not rebuilt (bar transitions survive pushes). `breakdown.js`
 is pure (column arithmetic, unit-tested).
 
-**`src/renderer/timers/`** — the boss-timer panel: countdown rows in fixed slots, shaped
-after EQ's buff window. Every row comes from a trigger pack — there is exactly one source
-now, and the shipped boss timers are just the first pack in it. Slot lifetime lives in
-`engine.js` (`since`, `state`, the spent linger), not here, so the honesty rules stay
-unit-testable; this renderer only paints. A slot is claimed on the first match and never
-re-sorted by what is due next; a re-match restarts it *in place* rather than adding a
-second row. Numbers carry no `~`: the tilde meant "estimate" and there are no estimates
-left here — an authored duration is exact, and "exact" and "right for your server" are
-different claims, which is what the pack's own description is for. Between fights the
-panel is *gone* — not an empty frame — except while unlocked, where the drag placeholder
-shows because an empty window cannot be positioned. It is not tied to an encounter at
-all: pack timers are frequently out-of-combat by nature (respawns, spell durations), so
-the panel exists whenever any row does. It filters `triggerTimers` to `panel === 'boss'`,
-which is where every pack that predates player-defined panels draws and must go on
-drawing.
-
-**`src/renderer/timerpanel/`** — one of the player's OWN timer panels, and the renderer
-for all of them: which panel a window is arrives as `?panel=<id>` on its file URL,
-because it is needed in the first frame and a window waiting for a message would paint
-somebody else's rows first. Every rule the boss panel holds applies here unchanged —
-fixed row height in every state, engine order, never re-sorted, no scroll container. What
-differs is that the bar is the row's main event rather than a wash behind it, and **the
-text inside the draining bar is painted in a contrasting colour**, so the row reports its
-own progress twice: by the bar's edge, and by where the letters flip from dark-on-bright
-to light-on-dark. That is two identical text layers, one inside a mask whose width is the
-same fraction as the bar — both transitioning `width`, so they can never drift apart the
-way an animated `clip-path` against a custom property would. The sub-line names the FULL
-duration, because a fraction of an unknown total is not information.
+**`src/renderer/timerbox/`** — one timer box, and the renderer for all of them. The bar
+IS the row: one line, the name left, the time right, the bar draining right-to-left
+underneath both, and **the text inside the bar painted in a contrasting colour** so the
+row reports its progress twice — by the bar's edge and by where the letters flip. That is
+two identical text layers, one inside a mask whose width is the same fraction as the bar,
+both transitioning `width` so they cannot drift apart. Chrome is the old boss panel's to
+the pixel, because that panel is now one of these boxes and a new box should arrive
+looking like the one the player already knows. Slot lifetime lives in
+`src/timers/runtime.js`, not here; this renderer only paints, measures itself and reports
+its size.
 
 **`src/renderer/history/`** — the History window: three fixed panes (fight list rail →
 fight stats → members + full breakdown). Every click swaps content *inside* a pane;
@@ -255,7 +247,7 @@ clear the list and it is the same fight with more rows.
   (alerts, timers) buy the same guarantee with a generously oversized invisible box
   instead of geometry code: sized for the worst realistic content at the largest text
   size, so nothing is ever clipped.
-- **A timer row never moves — in any panel.** That window exists because the timers used to sit
+- **A timer row never moves — in any box.** That window exists because the timers used to sit
   at the bottom of the alert stack, where a measured session displaced them 524 times
   and hid them behind their own cast warning 10,525 times. So: slots come from the
   engine in first-armed order and are *never* re-sorted by what is due next; a slot is
@@ -266,15 +258,13 @@ clear the list and it is the same fight with more rows.
   death: a slain caster's rows leave immediately, because a countdown for a corpse is not
   information and on the common single-boss pull the panel simply empties rather than
   shifting — arranged now by each shipped trigger naming its own caster's death line as
-  an early ender, so the rule lives in a pack a player can read. Every rule here applies
-  identically to the player's own panels, and it is *why* they are separate panels: a
-  buff is cast during the pull-in, before the boss has cast anything, and at 146 seconds
-  it outlasts most pulls — so in one shared list it would claim the top slot and hold it
-  for the whole fight. That is not hypothetical from the other direction. Two mob
-  self-buffs once held both slots on a Plane of Fear pull for fifteen minutes while
-  Maestro of Rancor's Superior Healing, the cast that undoes the kill, armed last and
-  drew below them. Two panels is the only arrangement in which "a row never moves" and
-  "the boss's cast is the row I need" are both true.
+  an early ender, so the rule lives in a pack a player can read. All of it applies
+  identically to the player's own boxes, and it is *why* they are separate boxes: a buff
+  is cast during the pull-in, before the boss has cast anything, and at 146 seconds it
+  outlasts most pulls — so in one shared list it would claim the top slot and hold it for
+  the whole fight. Not hypothetical: two mob self-buffs once held both slots on a Plane of
+  Fear pull for fifteen minutes while Maestro of Rancor's Superior Healing, the cast that
+  undoes the kill, armed last and drew below them.
 - **The history window never reflows.** Selecting a fight, member, metric or filter
   swaps content inside a fixed pane; panes must sit on the same pixel for every fight.
   (Example of the failure class: a deaths line that rendered only on death-fights pushed
@@ -293,6 +283,13 @@ clear the list and it is the same fight with more rows.
   `setIgnoreMouseEvents(true, {forward: true})` approach delivers nothing here. Rows
   must not move under the cursor: near the screen bottom the window bottom-anchors and
   the panel opens *above* the rows (`data-panel="above"`).
+- **Every renderer script must parse as an ES MODULE.** `node --check some.js` parses a
+  `.js` file as CommonJS, where a duplicate function declaration is legal; every renderer
+  here is loaded with `<script type="module">`, where it is a SyntaxError. A file that
+  fails this opens its window, attaches its preload, and never runs a line of its own —
+  which looks exactly like a panel with nothing to show, and is undetectable from main.
+  `tests/renderer-modules.test.js` copies each file to `.mjs` before checking it, because
+  the extension is what selects the grammar.
 - **A timer's duration comes from the player's own log, never from a table.** Buff length
   in EverQuest depends on the caster's level, on the RANK of the spell — `Spirit of the
   Puma V` and `VI` differ by thirteen seconds in one session of the live log — and on

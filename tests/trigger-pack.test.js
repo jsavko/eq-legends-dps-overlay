@@ -21,9 +21,7 @@ import { exportGinaPackage, exportGinaXml, EXPORT_LOSSES } from '../src/triggers
 import {
   normalize, validate, validateTrigger, packStats, buildTrigger,
   createTrigger, updateTrigger, deleteTrigger, myTriggersPack, compilePack, PACK_VERSION,
-  BOSS_PANEL,
 } from '../src/triggers/pack.js';
-import { seedPack } from '../src/triggers/seed-pack.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'gina');
 const load = (name) => parseGinaPackage(fs.readFileSync(path.join(FIXTURES, name)), { name });
@@ -350,90 +348,7 @@ test('packStats separates "imported" from "actually running"', () => {
   // Three of the five committed fixtures ship EnableByDefault=False, so a report saying
   // "imported 5" while nothing fires is the exact mystery `live` exists to prevent.
   assert.deepEqual(packStats(load('common-casting.gtp').pack),
-    { triggers: 5, live: 0, timers: 0, warnings: 5, groups: 2, byPanel: {} });
+    { triggers: 5, live: 0, timers: 0, warnings: 5, groups: 2 });
   assert.deepEqual(packStats(load('respawn-slice.gtp').pack),
-    { triggers: 4, live: 4, timers: 4, warnings: 0, groups: 3, byPanel: { boss: 4 } });
-});
-
-// ------------------------------------------------------------------------- panels
-
-test('a timer draws in the boss panel unless something says otherwise', () => {
-  // The default is load-bearing and permanent. Every pack that exists predates the field
-  // — the shipped boss timers, every .gtp a guild passes around, every trigger already
-  // authored here — and an upgrade that read an absent panel as anything else would
-  // silently relocate countdowns the player had placed and learned to glance at.
-  const absent = normalize({ id: 'p', name: 'p', triggers: [
-    { id: 't1', name: 'x', pattern: '^a$', timer: { name: 'x', durationMs: 1000 } },
-  ] });
-  assert.equal(absent.triggers[0].timer.panel, BOSS_PANEL);
-
-  // A non-string is not a panel reference. Normalized rather than refused, on the same
-  // "degrade to usable, never fail to load" rule the whole module follows.
-  for (const junk of [null, 0, false, '', 42, {}]) {
-    const odd = normalize({ id: 'p', name: 'p', triggers: [
-      { id: 't1', name: 'x', pattern: '^a$', timer: { name: 'x', durationMs: 1000, panel: junk } },
-    ] });
-    assert.equal(odd.triggers[0].timer.panel, BOSS_PANEL, `${JSON.stringify(junk)} is not a panel`);
-  }
-
-  // An id naming a panel that no longer exists is NOT normalized away: the store knows
-  // which panels exist and this module does not, so rewriting it here would destroy the
-  // player's assignment on a mere read.
-  const gone = normalize({ id: 'p', name: 'p', triggers: [
-    { id: 't1', name: 'x', pattern: '^a$', timer: { name: 'x', durationMs: 1000, panel: 'p9' } },
-  ] });
-  assert.equal(gone.triggers[0].timer.panel, 'p9');
-});
-
-test('every shipped boss timer draws in the boss panel', () => {
-  // The one that would be noticed last and hurt most: the sixteen countdowns this app
-  // ships must keep landing where they have always landed.
-  const seeded = normalize(seedPack());
-  assert.ok(seeded.triggers.length >= 16);
-  for (const t of seeded.triggers) {
-    assert.equal(t.timer?.panel, BOSS_PANEL, `${t.name} moved panels`);
-  }
-});
-
-test('an imported GINA pack lands in the boss panel — the format cannot say otherwise', () => {
-  const { pack } = load('respawn-slice.gtp');
-  const timed = normalize(pack).triggers.filter((t) => t.timer);
-  assert.ok(timed.length);
-  for (const t of timed) assert.equal(t.timer.panel, BOSS_PANEL);
-});
-
-test('the panel survives create → update → normalize', () => {
-  const created = createTrigger(myTriggersPack(), {
-    name: 'Spirit of the Puma',
-    pattern: 'You begin to snarl as your features become feline.',
-    literal: true,
-    durationSec: 146,
-    panel: 'p1',
-  });
-  assert.ok(created.ok, created.errors.join('; '));
-  assert.equal(created.trigger.timer.panel, 'p1');
-
-  // An edit that does not mention the panel leaves it where it was — silence is not a
-  // request to move a row back to the boss window.
-  const moved = updateTrigger(created.pack, created.trigger.id, {
-    name: 'Spirit of the Puma',
-    pattern: 'You begin to snarl as your features become feline.',
-    literal: true,
-    durationSec: 146,
-    panel: 'p2',
-  });
-  assert.ok(moved.ok, moved.errors.join('; '));
-  assert.equal(moved.trigger.timer.panel, 'p2');
-  assert.equal(normalize(moved.pack).triggers[0].timer.panel, 'p2');
-});
-
-test('packStats counts timers per panel, so a dark panel can be named', () => {
-  const mixed = normalize({ id: 'p', name: 'p', triggers: [
-    { id: 't1', name: 'a', pattern: '^a$', timer: { name: 'a', durationMs: 1000 } },
-    { id: 't2', name: 'b', pattern: '^b$', timer: { name: 'b', durationMs: 1000, panel: 'p1' } },
-    { id: 't3', name: 'c', pattern: '^c$', timer: { name: 'c', durationMs: 1000, panel: 'p1' } },
-    { id: 't4', name: 'd', pattern: '^d$', warn: { text: 'd' } },
-  ] });
-  assert.deepEqual(packStats(mixed).byPanel, { boss: 1, p1: 2 });
-  assert.equal(packStats(mixed).timers, 3, 'a warning-only trigger is not a timer');
+    { triggers: 4, live: 4, timers: 4, warnings: 0, groups: 3 });
 });

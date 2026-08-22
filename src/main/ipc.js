@@ -171,17 +171,46 @@ export const CHANNELS = {
   TRIGGERS_TEST_PATTERN: 'triggers:test-pattern',
   /** Replay a whole pack against the player's log and report what actually fires. */
   TRIGGERS_DRY_RUN: 'triggers:dry-run',
+
+  // ------------------------------------------------------------------ timer boxes
   /**
-   * "Measure my own timers from my log."
-   *
-   * Its own channel rather than a flavour of the dry-run, because it is the opposite
-   * operation: the dry-run asks what an existing pack does against the log, and this
-   * asks the log what pack to write. It saves the result as an ordinary editable pack —
-   * the numbers have to come from the player's own log, since buff length depends on
-   * their level, the rank they cast and their AAs, and a table we shipped would be wrong
-   * for everybody in a slightly different way.
+   * The player's own countdown boxes: categories they name and place, and the timers in
+   * them. A separate channel family from TRIGGERS_* on purpose — a timer here is a name,
+   * a log line, a duration and a colour, and none of the pack machinery is involved.
    */
-  TRIGGERS_MINE_BUFFS: 'triggers:mine-buffs',
+  TIMERS_GET: 'timers:get',
+  TIMERS_SAVE_CATEGORY: 'timers:save-category',
+  TIMERS_REMOVE_CATEGORY: 'timers:remove-category',
+  TIMERS_SAVE_TIMER: 'timers:save-timer',
+  TIMERS_REMOVE_TIMER: 'timers:remove-timer',
+  /** Turn on the mode where every box goes solid, names itself and can be dragged. */
+  TIMERS_ARRANGE: 'timers:arrange',
+  /** Put a sample row in one box now, so it can be seen and found. */
+  TIMERS_PREVIEW: 'timers:preview',
+  /** Measure the player's own effects out of their own log — buff length depends on
+   *  their level, the rank they cast and their AAs, so it cannot come from a table. */
+  TIMERS_MEASURE: 'timers:measure',
+  /** Take every preview row off the screen. A button that reveals something and offers
+   *  no way to put it back is a button that leaves a mess on the player's screen. */
+  TIMERS_CLEAR_PREVIEWS: 'timers:clear-previews',
+  /**
+   * A click-through panel telling us how big it needs to be.
+   *
+   * The alerts and the drops popup were sized for their worst realistic content and left
+   * that size always — fine while they are click-through, and blocking the moment they
+   * are not: an invisible 640x720 rectangle over the top of the screen swallows every
+   * click meant for whatever is behind it. Each anchors differently (the alerts by their
+   * top CENTRE, the drops by their bottom-right corner), so main keeps the anchor and
+   * only the size comes from here.
+   */
+  PANEL_FIT: 'overlay:panel-fit',
+  /** Main → box: the rows for that box, plus its title. */
+  TIMERS_PUSH: 'timers:push',
+  /** Main → box: arranging on or off. */
+  TIMERS_ARRANGING: 'timers:arranging',
+  /** Box → main: how big this window needs to be. The one message that keeps a box from
+   *  being an oversized invisible rectangle that swallows other windows' clicks. */
+  TIMERS_FIT: 'timers:fit',
   /**
    * The rules this app ships with, switched from the same window as imported packs.
    *

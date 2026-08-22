@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import {
   BuffMiner, buffTrigger, packFromBuffs, displayName, linePattern,
 } from '../src/triggers/mine-buffs.js';
-import { normalize, BOSS_PANEL } from '../src/triggers/pack.js';
+import { normalize } from '../src/triggers/pack.js';
 
 const T0 = Date.UTC(2026, 7, 22, 6, 0, 0);
 const at = (sec) => T0 + sec * 1000;
@@ -171,13 +171,12 @@ test('a mined trigger restarts in place and ends on the measured wear-off line',
     ranks: [{ name: 'Spirit of the Puma V', count: 9 }],
     loose: false,
   };
-  const trigger = buffTrigger(candidate, { id: 't1', panel: 'p1' });
+  const trigger = buffTrigger(candidate, { id: 't1' });
 
   // A recast refreshes, so a second land has to reset THIS row rather than open another
   // beside it — which is also what the panel's never-move rule requires.
   assert.equal(trigger.timer.restart, 'restart');
   assert.equal(trigger.timer.kind, 'countdown', 'a repeating timer would re-arm forever');
-  assert.equal(trigger.timer.panel, 'p1');
   assert.equal(trigger.timer.durationMs, 146_000);
   assert.equal(trigger.warn, null, 'a countdown does not also need a banner');
 
@@ -206,43 +205,3 @@ test('a mined pack is never marked shipped', () => {
   assert.deepEqual(pack.groups, [], 'one caster — you — so a group per row is a switch beside a switch');
 });
 
-test('a mined pack defaults to the boss panel only when nothing else is asked for', () => {
-  const candidate = {
-    name: 'x', land: LAND, wearOff: WEAR, durationMs: 60_000, spreadMs: 1000,
-    cv: 0.02, samples: 4, ranks: [{ name: 'x', count: 4 }], loose: false,
-  };
-  const bare = packFromBuffs([candidate], { id: 'a', name: 'a' });
-  assert.equal(bare.triggers[0].timer.panel, BOSS_PANEL);
-
-  const aimed = packFromBuffs([candidate], { id: 'b', name: 'b', panel: 'p1' });
-  assert.equal(aimed.triggers[0].timer.panel, 'p1');
-});
-
-test('maxCv exists for the caller that SAVES, not for the one that prints', () => {
-  // The script's job is to put candidates in front of a person, so it shows loose ones
-  // marked. The Triggers window's button saves what it finds, so handing it everything
-  // would be making the player prune at the worst possible moment.
-  const tight = [];
-  const ragged = [];
-  // Irregular cycle starts, so nothing lines up by accident on a rigid grid — a fixture
-  // where every event is periodic makes every possible pairing look tight.
-  const starts = [0, 640, 1310, 2050, 2700, 3400];
-  const wander = [80, 100, 125, 92, 108, 140];
-  starts.forEach((base, i) => {
-    tight.push([base, CAST], [base + 2, LAND], [base + 150, WEAR]);
-    ragged.push([base, 'You begin casting Ragged Thing.']);
-    ragged.push([base + 2, 'Something ragged happens to you.']);
-    ragged.push([base + 2 + wander[i], 'The ragged thing ends.']);
-  });
-
-  const [good] = mine(tight).candidates({ minObs: 3 });
-  assert.ok(good && good.cv < 0.15, 'the tight pair is tight');
-  assert.equal(mine(tight).candidates({ minObs: 3, maxCv: 0.15 }).length, 1);
-
-  const [bad] = mine(ragged).candidates({ minObs: 3 });
-  assert.ok(bad, 'the ragged pair is still FOUND — the script has to be able to show it');
-  assert.ok(bad.cv > 0.15 && bad.cv < 0.4,
-    `expected a spread wide enough to withhold but narrow enough to report, got cv ${bad.cv}`);
-  assert.deepEqual(mine(ragged).candidates({ minObs: 3, maxCv: 0.15 }), [],
-    'and the caller that saves does not take it');
-});

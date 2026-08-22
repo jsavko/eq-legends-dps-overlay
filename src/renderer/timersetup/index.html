@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;" />
+  <title>Timers</title>
+  <link rel="stylesheet" href="timersetup.css" />
+</head>
+<body>
+  <!--
+    Two fixed panes on the History window's model: the rail is BOXES, the middle is the
+    timers in the selected box. Nothing reflows — selecting a box swaps the content of
+    the middle pane and moves nothing else.
+
+    "Arrange on screen" lives in the titlebar because it is a property of ALL the boxes
+    at once, not of the one selected: placing them is one gesture over the whole HUD.
+  -->
+  <header id="titlebar">
+    <h1>Timers</h1>
+    <span id="summary" class="muted"></span>
+    <span class="spacer"></span>
+    <button id="arrange" class="primary">Arrange on screen</button>
+  </header>
+
+  <!-- Only while something is stopping the boxes drawing. Never a permanent banner: a
+       warning that is always there is furniture, and furniture is not read. -->
+  <div id="alarm" hidden>
+    <span id="alarm-text"></span>
+    <button id="alarm-fix" class="secondary"></button>
+  </div>
+
+  <aside id="rail">
+    <p class="rail-head">BOXES</p>
+    <ol id="boxes"></ol>
+    <footer id="rail-foot">
+      <input id="new-box" type="text" spellcheck="false" placeholder="New box name" />
+      <button id="add-box" class="primary">+ Add box</button>
+    </footer>
+  </aside>
+
+  <main id="contents">
+    <div id="contents-head">
+      <div class="head-row">
+        <h2 id="box-name"></h2>
+        <span id="box-sub" class="muted"></span>
+        <span class="spacer"></span>
+        <button id="preview-box" class="secondary">Show me this box</button>
+        <button id="new-timer" class="primary">+ New timer</button>
+      </div>
+      <p id="box-note" class="muted small"></p>
+    </div>
+
+    <!-- The built-in box: its rows come from trigger packs, so there is nothing to edit
+         here and saying so is better than an empty list that looks broken. -->
+    <div id="builtin" hidden>
+      <p>
+        This box shows the countdowns from your <b>trigger packs</b> — the boss timers this
+        app ships with, and anything you have imported. There is nothing to type here.
+      </p>
+      <p class="muted small">
+        It is a box like any other otherwise: name it, place it, switch it off. What goes
+        in it is managed in the Triggers window.
+      </p>
+    </div>
+
+    <ol id="rows"></ol>
+
+    <div id="empty" hidden>
+      <p>Nothing in this box yet.</p>
+      <p class="muted small">
+        Add a timer by hand, or let the app read your log and work out how long your own
+        effects actually last — buff length depends on your level, the rank you cast and
+        your AAs, so nobody can tell you that but your own log.
+      </p>
+      <button id="measure" class="secondary">Measure my timers from my log…</button>
+    </div>
+  </main>
+
+  <!-- ------------------------------------------------------------ timer editor -->
+  <!--
+    Four fields and a colour. Deliberately not the trigger editor: that one deals in
+    regex, groups, early enders and provenance because it runs packs a stranger wrote.
+    This one is "what is it called, what line starts it, how long, what colour".
+  -->
+  <dialog id="editor">
+    <form method="dialog" class="dialog-form">
+      <header class="dialog-head">
+        <h3 id="e-title">New timer</h3>
+      </header>
+      <div class="dialog-body">
+        <label class="field">
+          <span class="kicker">NAME</span>
+          <input id="e-name" type="text" spellcheck="false" placeholder="Spirit of the Puma" />
+        </label>
+
+        <div class="field">
+          <div class="field-head">
+            <span class="kicker">STARTS WHEN THE LOG SAYS</span>
+            <span class="spacer"></span>
+            <div class="seg" role="group">
+              <button type="button" id="e-contains" class="seg-btn" aria-pressed="true">contains</button>
+              <button type="button" id="e-exact" class="seg-btn" aria-pressed="false">exact line</button>
+              <button type="button" id="e-regex" class="seg-btn" aria-pressed="false">regex</button>
+            </div>
+          </div>
+          <input id="e-starts" type="text" spellcheck="false" class="mono"
+                 placeholder="You begin to snarl as your features become feline." />
+          <p class="muted small">
+            Paste the line straight out of your log. “contains” is usually what you want —
+            it ignores the timestamp and anything either side.
+          </p>
+          <p id="e-error" class="error mono" hidden></p>
+        </div>
+
+        <div class="field">
+          <span class="kicker">LASTS</span>
+          <div class="row">
+            <input id="e-min" type="number" min="0" max="1440" step="1" /> <span class="muted small">min</span>
+            <input id="e-sec" type="number" min="0" max="59" step="1" /> <span class="muted small">sec</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="kicker">BAR COLOUR</span>
+          <div class="row">
+            <div id="e-swatches" class="swatches"></div>
+            <input id="e-color" type="color" />
+          </div>
+          <p class="muted small">
+            Each bar has its own colour — that is what tells them apart mid-pull, not the
+            box they are in.
+          </p>
+        </div>
+
+        <label class="field">
+          <span class="kicker">ENDS EARLY WHEN THE LOG SAYS <span class="muted small">optional</span></span>
+          <input id="e-ends" type="text" spellcheck="false" class="mono"
+                 placeholder="The spirit of the puma departs." />
+        </label>
+
+        <div class="field">
+          <span class="kicker">IN BOX</span>
+          <select id="e-box"></select>
+        </div>
+
+        <ul id="e-errors" class="errors" hidden></ul>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" id="e-save" class="primary">Save</button>
+        <button type="button" id="e-preview" class="secondary">Preview on screen</button>
+        <button type="button" id="e-cancel" class="secondary">Cancel</button>
+        <span class="spacer"></span>
+        <button type="button" id="e-delete" class="danger">Delete</button>
+      </footer>
+      <p id="e-preview-note" class="muted small"></p>
+    </form>
+  </dialog>
+
+  <!-- ------------------------------------------------------------ measure report -->
+  <dialog id="report">
+    <div class="dialog-form">
+      <header class="dialog-head">
+        <h3 id="r-title"></h3>
+      </header>
+      <div class="dialog-body" id="r-body"></div>
+      <footer class="dialog-foot">
+        <button type="button" id="r-close" class="primary">Done</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <script type="module" src="timersetup.js"></script>
+</body>
+</html>

@@ -3,12 +3,10 @@
  * Mine an EverQuest log for how long the player's own effects last, and print them as a
  * candidate trigger pack.
  *
- *   node scripts/mine-buffs.js <eqlog file> [--min 3] [--all] [--panel p1]
- *                              [--write <file>] [--json]
+ *   node scripts/mine-buffs.js <eqlog file> [--min 3] [--all] [--write <file>] [--json]
  *
  *   --min N       how many complete cycles before a pair is a candidate (default 3)
  *   --all         include the loose pairs in a written pack (default: tight ones only)
- *   --panel ID    which timer panel the written triggers draw in (default: boss)
  *   --write FILE  write the pack JSON here. Without this, nothing is written at all
  *   --json        machine-readable candidates instead of the review table
  *
@@ -29,28 +27,25 @@ import fs from 'node:fs';
 
 import { parseTimestamp } from '../src/parser/timestamp.js';
 import { BuffMiner, packFromBuffs } from '../src/triggers/mine-buffs.js';
-import { BOSS_PANEL } from '../src/triggers/pack.js';
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
 const includeLoose = args.includes('--all');
 const minIdx = args.indexOf('--min');
 const minObs = minIdx !== -1 ? Number(args[minIdx + 1]) || 3 : 3;
-const panelIdx = args.indexOf('--panel');
-const panel = panelIdx !== -1 ? args[panelIdx + 1] : BOSS_PANEL;
 const writeIdx = args.indexOf('--write');
 const writeTo = writeIdx !== -1 ? args[writeIdx + 1] : null;
 // Everything that is a flag's VALUE rather than the log path. Computed from the flag
 // positions rather than by pattern, since a log path and a filename look alike.
 const flagValues = new Set(
-  [minIdx, panelIdx, writeIdx].filter((i) => i !== -1).map((i) => args[i + 1]),
+  [minIdx, writeIdx].filter((i) => i !== -1).map((i) => args[i + 1]),
 );
 const logPath = args.find((a) => !a.startsWith('--') && !flagValues.has(a));
 
 if (!logPath) {
   console.error(
     'usage: node scripts/mine-buffs.js <eqlog file> [--min 3] [--all] ' +
-    '[--panel p1] [--write <file>] [--json]',
+    '[--write <file>] [--json]',
   );
   process.exit(1);
 }
@@ -105,10 +100,9 @@ if (writeTo) {
       'is the point: buff length depends on your level, the rank you cast and your AAs. ' +
       'Exact about this character; every row is yours to correct.',
     modified: new Date(lastTs ?? Date.now()).toISOString().slice(0, 10),
-    panel,
   });
   fs.writeFileSync(writeTo, `${JSON.stringify(pack, null, 2)}\n`);
-  console.log(`\nwrote ${chosen.length} triggers to ${writeTo} (panel: ${panel})`);
+  console.log(`\nwrote ${chosen.length} triggers to ${writeTo}`);
 }
 
 function print(c) {
