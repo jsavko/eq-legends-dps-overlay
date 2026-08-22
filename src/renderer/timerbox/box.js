@@ -26,7 +26,6 @@ const rowList = document.getElementById('rows');
 /** Which box this window is. Never changes for the life of the window. */
 const CATEGORY_ID = new URLSearchParams(location.search).get('category') ?? '';
 
-let cfg = null;
 let arranging = false;
 let lastRows = [];
 /** @type {Map<string, {el, layers: Array<{label, time}>}>} row elements by timer id */
@@ -36,9 +35,7 @@ let lastFit = { width: 0, height: 0 };
 
 init();
 
-async function init() {
-  applyConfig(await window.api.getConfig());
-  window.api.onConfig(applyConfig);
+function init() {
   window.api.onArranging((on) => {
     arranging = on;
     document.body.dataset.arranging = String(on);
@@ -51,6 +48,7 @@ async function init() {
     if (payload?.name != null && nameEl.textContent !== payload.name) {
       nameEl.textContent = payload.name;
     }
+    applyLook(payload?.look);
     lastRows = (payload?.rows ?? []).filter((r) => r.categoryId === CATEGORY_ID);
     repaint();
   });
@@ -58,10 +56,24 @@ async function init() {
   if (document.fonts?.ready) document.fonts.ready.then(fit);
 }
 
-function applyConfig(config) {
-  cfg = config;
-  document.documentElement.style.setProperty('--scale', config?.scale ?? 1);
-  repaint();
+/**
+ * The box's shape: how wide it is, how tall a row is, how big the text is.
+ *
+ * It arrives with the rows rather than being read from config, and it arrives already in
+ * pixels — main multiplies the player's stored numbers by the global text scale, because
+ * one place should know what a stored 296 means on screen and that place is testable.
+ * Everything else in the stylesheet is `em` against the font size, so these three values
+ * carry the whole look between them.
+ *
+ * Written on the ROOT rather than on `#box`, so the fallbacks in the stylesheet are what
+ * the first frame draws with and there is never a moment of collapsed chrome.
+ */
+function applyLook(look) {
+  if (!look) return;
+  const root = document.documentElement.style;
+  root.setProperty('--box-width', `${look.width}px`);
+  root.setProperty('--row-height', `${look.rowHeight}px`);
+  root.setProperty('--box-font', `${look.fontSize}px`);
 }
 
 /**

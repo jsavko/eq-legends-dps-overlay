@@ -44,6 +44,28 @@ export const PALETTE = [
   '#b9702a', '#4f9c3a', '#c04f7a', '#7a7f8c',
 ];
 
+/**
+ * How a box is SHAPED: how wide it is, how tall one row is, how big the text is.
+ *
+ * The defaults are not chosen, they are measured off the chrome this generalises. The
+ * boss panel was 22.77em wide with a 2.31em row over 13px text, which computes to 296.0
+ * and 30.03 — so a player who never opens these controls sees the panel they already
+ * know, pixel for pixel, rather than something close to it.
+ *
+ * The floors matter more than the ceilings. A 100px box cannot show a spell name and a
+ * 6px row is a box you cannot find, and both of those are one careless drag away;
+ * whereas a box that is too big merely wastes screen the player can SEE being wasted.
+ *
+ * Size lives here and not on the timer, for the same reason colour lives on the timer
+ * and not here: the box is what has a place on the screen, and the bar is what you have
+ * to tell apart mid-pull.
+ */
+export const LOOK = {
+  width:     { min: 180, max: 800, def: 296 },
+  rowHeight: { min: 14,  max: 80,  def: 30 },
+  fontSize:  { min: 9,   max: 32,  def: 13 },
+};
+
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
 /**
@@ -89,6 +111,12 @@ export function normalize(input) {
       x: Number.isFinite(c.x) ? Math.round(c.x) : null,
       y: Number.isFinite(c.y) ? Math.round(c.y) : null,
       enabled: c.enabled !== false,
+      // What it looks like. Three independent numbers rather than one multiplier,
+      // because "wide box, tight rows" and "narrow box, big text" are both layouts
+      // somebody wants and a single scale can express neither.
+      width: clampLook('width', c.width),
+      rowHeight: clampLook('rowHeight', c.rowHeight),
+      fontSize: clampLook('fontSize', c.fontSize),
     }));
 
   const known = new Set(categories.map((c) => c.id));
@@ -112,6 +140,44 @@ export function normalize(input) {
     }));
 
   return { v: 1, categories, timers };
+}
+
+/** One of the three look numbers, clamped into its range. Silent repair rather than
+ *  refusal: `timers.json` is a file a player can hand-edit, and a typo there should cost
+ *  them the value they typed, never the box. */
+export function clampLook(field, value) {
+  const spec = LOOK[field];
+  if (!spec) return null;
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return spec.def;
+  return Math.min(spec.max, Math.max(spec.min, n));
+}
+
+/**
+ * The three numbers a box actually draws at, in pixels.
+ *
+ * Effective size is the stored value times the global text scale, and MULTIPLICATION
+ * rather than replacement is the whole point: `scale` moves every HUD window together
+ * and always has, so a per-box width has to ride on it rather than argue with it. At
+ * scale 1 on an untouched box this returns 296 / 30 / 13 — the chrome as it shipped.
+ *
+ * Pure, and computed in main rather than in the box renderer, so the arithmetic the
+ * whole feature rests on is unit-testable in WSL like `layout.js` is.
+ */
+export function boxLook(category, scale = 1) {
+  const c = category && typeof category === 'object' ? category : {};
+  const factor = Number(scale);
+  const f = Number.isFinite(factor) && factor > 0 ? factor : 1;
+  return {
+    // Whole pixels for the two that decide the window's size — the window is integer
+    // pixels either way, and a fractional width would round differently in the renderer's
+    // measurement than in the box's own layout.
+    width: Math.round(clampLook('width', c.width) * f),
+    rowHeight: Math.round(clampLook('rowHeight', c.rowHeight) * f),
+    // Text keeps two decimals: a font rounded to whole pixels quantises the scale slider
+    // into visible steps, and nothing measures against this directly.
+    fontSize: Math.round(clampLook('fontSize', c.fontSize) * f * 100) / 100,
+  };
 }
 
 function clampDuration(value) {
@@ -246,13 +312,17 @@ function normalizeCategory(raw) {
 
 export function updateCategory(model, id, patch) {
   const base = normalize(model);
+  // Re-normalized on the way out, which it did not need to be while a patch could only
+  // carry a name and a switch. A look patch arrives from a slider and could carry any
+  // number at all, and the caller keeps this model in memory as well as writing it — so
+  // the clamps have to run here rather than only inside the store's save.
   return {
     ok: true,
     errors: [],
-    model: {
+    model: normalize({
       ...base,
       categories: base.categories.map((c) => (c.id === id ? { ...c, ...patch, id: c.id } : c)),
-    },
+    }),
   };
 }
 

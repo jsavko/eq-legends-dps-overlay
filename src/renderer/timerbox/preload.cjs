@@ -10,17 +10,16 @@ const CH = {
   TIMERS_PUSH: 'timers:push',
   TIMERS_ARRANGING: 'timers:arranging',
   TIMERS_FIT: 'timers:fit',
-  CONFIG_CHANGED: 'config:changed',
-  CONFIG_GET: 'config:get',
 };
 
 const on = (channel) => (handler) =>
   ipcRenderer.on(channel, (_event, payload) => handler(payload));
 
+// No config channel here any more. A box used to read the global text scale itself; it
+// is now told its size in pixels with every push, which is one number arriving one way
+// instead of two halves of a size arriving on two channels and having to agree.
 contextBridge.exposeInMainWorld('api', {
   onTimers: on(CH.TIMERS_PUSH),
   onArranging: on(CH.TIMERS_ARRANGING),
-  onConfig: on(CH.CONFIG_CHANGED),
-  getConfig: () => ipcRenderer.invoke(CH.CONFIG_GET),
   fit: (size) => ipcRenderer.send(CH.TIMERS_FIT, size),
 });

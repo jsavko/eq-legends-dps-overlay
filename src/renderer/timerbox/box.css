@@ -23,6 +23,12 @@
  * width, the same 30px row, the same header. That panel is now one of these boxes, and a
  * new box should arrive looking like the one the player already knows rather than like a
  * different app.
+ *
+ * Arrive looking like it — not stay that way. Width, row height and text size are the
+ * player's, set per box in the Timers window and sent in with every push, so those three
+ * numbers are variables here and the defaults are what the old fixed chrome measured.
+ * Everything else is expressed in `em` against the box's own font size, which is what
+ * makes one text-size control move the padding, the header and the labels together.
  */
 :root {
   --ink:       #f0e3c4;
@@ -45,7 +51,16 @@
   --accent:        #2f8f7a;
   --on-accent:     #05100c;
 
-  --scale: 1;
+  /*
+   * The box's shape, in pixels, and these three values are FALLBACKS — main sends the
+   * real ones with every push, already multiplied by the global text scale. They are
+   * here so the first frame, before any push has arrived, draws the box the player knows
+   * rather than a collapsed one: 296 x 30 over 13px text is exactly what the em-based
+   * chrome that preceded them computed to.
+   */
+  --box-width:  296px;
+  --row-height: 30px;
+  --box-font:   13px;
 }
 
 * { box-sizing: border-box; }
@@ -60,7 +75,7 @@ html, body {
 
 body {
   font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  font-size: calc(13px * var(--scale));
+  font-size: var(--box-font);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
   /* Fit exactly: the window is this element's size, so any padding on body would be
@@ -75,7 +90,7 @@ body {
  * settings — so there is one look here rather than two.
  */
 #box {
-  width: 22.77em;   /* 296px at 1× — the boss panel's width */
+  width: var(--box-width);
   background: linear-gradient(180deg, color-mix(in srgb, var(--slab) 94%, #3a2a18) 0%, var(--slab) 40%, var(--slab) 100%);
   border: 1px solid var(--edge);
   border-radius: 3px;
@@ -138,7 +153,7 @@ body[data-arranging="true"] #box {
  */
 .row {
   position: relative;
-  height: 2.31em;   /* 30px at 1× — the boss panel's row */
+  height: var(--row-height);
   overflow: hidden;
   border-bottom: 1px solid #191512;
 }
@@ -178,7 +193,11 @@ body[data-arranging="true"] #box {
 .row .body {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 22.77em;
+  /* The box's full width, and it has to TRACK it. Narrowing the mask must crop this
+     layer, not re-wrap it: a duplicate that reflowed would show different words from the
+     layer underneath, and a literal width here would be wrong at every size but the
+     default the moment the box became resizable. */
+  width: var(--box-width);
   display: flex;
   align-items: center;
   gap: 0.62em;

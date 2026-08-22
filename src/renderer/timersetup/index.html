@@ -49,6 +49,48 @@
         <button id="new-timer" class="primary">+ New timer</button>
       </div>
       <p id="box-note" class="muted small"></p>
+
+      <!--
+        What the box LOOKS like: how wide, how tall a row, how big the text.
+
+        Drawn for every box, the built-in one included, and never hidden — the pane has to
+        sit on the same pixel whichever box is selected, and a strip that came and went
+        would move the timer list under the cursor. Three sliders rather than one scale
+        because "wide box, tight rows" and "narrow box, big text" are both layouts
+        somebody wants.
+
+        Inline rather than behind a button, because the question being answered is "does
+        this cover my health bar" and only the box itself can answer it: dragging one of
+        these puts a sample row in that box on screen and changes it as you drag.
+      -->
+      <div id="look">
+        <div class="look-row">
+          <label class="look-label" for="look-width">WIDTH</label>
+          <input id="look-width" type="range" />
+          <output class="look-out" id="look-width-out"></output>
+        </div>
+        <div class="look-row">
+          <label class="look-label" for="look-rowHeight">ROW</label>
+          <input id="look-rowHeight" type="range" />
+          <output class="look-out" id="look-rowHeight-out"></output>
+        </div>
+        <div class="look-row">
+          <label class="look-label" for="look-fontSize">TEXT</label>
+          <input id="look-fontSize" type="range" />
+          <output class="look-out" id="look-fontSize-out"></output>
+        </div>
+        <div class="look-foot">
+          <!-- Always in the layout, empty when there is nothing to say, so the strip
+               cannot change height and shove the list below it. -->
+          <span id="look-note" class="muted small"></span>
+          <span class="spacer"></span>
+          <!-- Take another box's size wholesale. Matching two boxes by eye means dragging
+               three sliders to numbers you cannot read off the other one, which is a
+               thing people try and quietly fail at. -->
+          <select id="look-copy" title="Take the size of another box"></select>
+          <button id="look-reset" class="secondary">Reset to default</button>
+        </div>
+      </div>
     </div>
 
     <!-- The built-in box: its rows come from trigger packs, so there is nothing to edit

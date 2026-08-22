@@ -187,6 +187,89 @@ input[type="color"] {
 #contents-head h2 { margin: 0; font-size: 17px; font-weight: 700; }
 #box-note { margin: 6px 0 0; }
 
+/* ------------------------------------------------------------------- look */
+
+/*
+ * The three size controls, under the box title.
+ *
+ * A fixed three-column grid — label, slider, readout — so the numbers line up down the
+ * right edge and the sliders all start and end at the same x. That alignment is the
+ * whole reason this reads as one control rather than three: what the player is doing is
+ * shaping ONE box, and the three rows are its dimensions.
+ *
+ * Nothing here is ever hidden. The pane must sit on the same pixel for every box, so the
+ * strip is drawn for the built-in box too (its rows come from packs, but its shape is
+ * still the player's), and the note line keeps its height when it has nothing to say.
+ */
+#look {
+  margin-top: 12px;
+  display: grid;
+  gap: 7px;
+}
+.look-row {
+  display: grid;
+  grid-template-columns: 62px minmax(120px, 320px) 64px;
+  align-items: center;
+  gap: 12px;
+}
+.look-label {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--ink-faint);
+}
+.look-out {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+  font-weight: 700;
+  text-align: right;
+}
+.look-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* Fixed line box: the clipping note appears and disappears as the sliders cross, and
+     a strip that grew a line when it did would shove the timer list down under the
+     cursor of somebody who is dragging. */
+  min-height: 30px;
+  max-width: 580px;
+}
+#look-note { max-width: 42ch; }
+/* Narrow, because the longest thing in it is a box name and the strip's right edge is
+   where the eye already is for the readouts. */
+#look-copy { max-width: 190px; }
+
+/*
+ * Styled explicitly rather than left to the platform. A default range control renders
+ * light-grey-on-white here, which on this palette reads as disabled — and a control that
+ * looks disabled does not get dragged.
+ */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: var(--gold);
+  border: 1px solid #1a1206;
+}
+input[type="range"]:hover::-webkit-slider-thumb { background: #f2bd5c; }
+
 #builtin { padding: 18px 20px; }
 #builtin p { margin: 0 0 8px; max-width: 68ch; line-height: 1.55; }
 

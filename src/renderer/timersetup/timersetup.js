@@ -22,6 +22,9 @@ const $ = (id) => document.getElementById(id);
 const state = {
   model: { categories: [], timers: [] },
   palette: [],
+  /** The ranges the size sliders may take, sent by main so the control and the model's
+   *  clamp cannot disagree. Empty until the first refresh. */
+  lookLimits: null,
   muted: false,
   arranging: false,
   selected: null,
@@ -55,6 +58,7 @@ async function refresh() {
   const data = await window.api.get();
   state.model = { categories: data.categories ?? [], timers: data.timers ?? [] };
   state.palette = data.palette ?? [];
+  state.lookLimits = data.lookLimits ?? state.lookLimits;
   state.muted = Boolean(data.muted);
   state.arranging = Boolean(data.arranging);
   if (!state.model.categories.some((c) => c.id === state.selected)) {
@@ -162,6 +166,7 @@ function renderContents() {
 
   $('box-name').textContent = category.name;
   $('box-sub').textContent = category.enabled ? '' : 'switched off';
+  renderLook(category);
   $('box-note').textContent = category.builtin
     ? 'Built in. It can be renamed, placed and switched off like any other box.'
     : 'Rename it by double-clicking the title, place it with Arrange on screen.';
@@ -204,6 +209,130 @@ const duration = (ms) => {
   const total = Math.round(ms / 1000);
   return total < 60 ? `${total}s` : `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
+
+/* ------------------------------------------------------------------ the look */
+
+/** The three fields, in the order they are drawn. Also the ids: `look-width` and so on. */
+const LOOK_FIELDS = ['width', 'rowHeight', 'fontSize'];
+
+/**
+ * Write the size controls from the selected box.
+ *
+ * Every box gets them, the built-in one included: its ROWS come from the trigger packs,
+ * but its shape is the player's exactly as its name and its position already are.
+ */
+function renderLook(category) {
+  const limits = state.lookLimits;
+  for (const field of LOOK_FIELDS) {
+    const input = $(`look-${field}`);
+    const spec = limits?.[field];
+    if (spec) {
+      input.min = spec.min;
+      input.max = spec.max;
+      // Width steps in fours because it is the one measured in hundreds — a 1px step
+      // there is 620 drags from end to end and no visible difference between two of them.
+      input.step = field === 'width' ? 4 : 1;
+    }
+    input.value = category[field] ?? spec?.def ?? 0;
+  }
+  renderLookCopy(category);
+  renderLookOut();
+}
+
+/**
+ * The other boxes, offered as sizes to take.
+ *
+ * Rebuilt on every render rather than once, because boxes are made and renamed in this
+ * same window — a list built at startup would offer a box that no longer exists under a
+ * name it no longer has. The box you are looking at is not in its own list: "copy from
+ * here to here" is a control that can only disappoint.
+ */
+function renderLookCopy(category) {
+  const select = $('look-copy');
+  const others = state.model.categories.filter((c) => c.id !== category.id);
+  select.replaceChildren(new Option('Copy size from…', ''));
+  for (const other of others) select.append(new Option(other.name, other.id));
+  select.value = '';
+  // Disabled rather than hidden on a one-box install: the strip must keep its height,
+  // and a control that vanishes is one the player never learns is there.
+  select.disabled = others.length === 0;
+}
+
+/** The readouts and the clipping note, from whatever the sliders currently say. */
+function renderLookOut() {
+  const look = readLook();
+  for (const field of LOOK_FIELDS) $(`look-${field}-out`).textContent = `${look[field]}px`;
+  // Said, not enforced. Short rows with big text is a real layout when the names are
+  // short, and silently overriding a number somebody just dragged to is worse than
+  // telling them what it will do — the row clips, it does not scroll (the boxes never
+  // scroll), so the cost is a name they cannot fully read.
+  $('look-note').textContent = look.rowHeight < look.fontSize * 1.35
+    ? 'The rows are shorter than the text — names will be clipped.'
+    : '';
+}
+
+const readLook = () => Object.fromEntries(
+  LOOK_FIELDS.map((field) => [field, Number($(`look-${field}`).value)]),
+);
+
+/**
+ * A slider moved: repaint the readouts, make sure the box being sized is actually on
+ * screen, and get the change to it.
+ *
+ * The model held here is updated in place rather than by re-reading from main, because a
+ * refresh mid-drag would write the stored value back into the control the player has
+ * hold of and fight them for it.
+ */
+function onLookInput() {
+  const category = selected();
+  if (!category) return;
+  const look = readLook();
+  Object.assign(category, look);
+  renderLookOut();
+  showBox(category);
+  queueLookSave(category.id, look);
+}
+
+/**
+ * Put a sample row in the box being sized, if there is not one there already.
+ *
+ * A box with nothing running draws nothing at all — the window shrinks to nothing and
+ * parks itself off-screen. So without this, sizing a box between pulls is done blind,
+ * which is the entire reason these controls are inline rather than behind a modal.
+ */
+function showBox(category) {
+  if (state.showing.has(category.id)) return;
+  state.showing.add(category.id);
+  renderPreviewButton();
+  window.api
+    .preview({ categoryId: category.id, name: category.name, durationSec: 3600 })
+    .then((result) => showPreviewResult($('box-note'), result));
+}
+
+/**
+ * Persist the size, at most every `LOOK_SAVE_MS`, and always once more at the end.
+ *
+ * A slider drag fires continuously and each save is a whole-file write plus a resize of
+ * a live window, so it is throttled rather than sent per pixel. Trailing is the half
+ * that matters: the position the player let go at is the one that has to reach the file,
+ * and it is the one a plain throttle drops.
+ */
+const LOOK_SAVE_MS = 120;
+let lookSaveTimer = null;
+let lookPending = null;
+
+function queueLookSave(id, look) {
+  lookPending = { id, look };
+  if (lookSaveTimer) return;
+  lookSaveTimer = setTimeout(async () => {
+    lookSaveTimer = null;
+    const job = lookPending;
+    lookPending = null;
+    if (job) await window.api.saveCategory({ id: job.id, look: job.look });
+    // Anything that arrived while that was in flight gets its own turn.
+    if (lookPending) queueLookSave(lookPending.id, lookPending.look);
+  }, LOOK_SAVE_MS);
+}
 
 /* ---------------------------------------------------------------- the editor */
 
@@ -566,6 +695,29 @@ function wire() {
     state.showing.add(category.id);
     renderPreviewButton();
     showPreviewResult($('box-note'), result);
+  });
+
+  for (const field of LOOK_FIELDS) {
+    // `input` rather than `change`: the point of these is that the box on screen moves
+    // under the cursor while the slider does.
+    $(`look-${field}`).addEventListener('input', onLookInput);
+  }
+  $('look-copy').addEventListener('change', () => {
+    const source = state.model.categories.find((c) => c.id === $('look-copy').value);
+    // Back to the prompt immediately. It is an action, not a setting — leaving the box's
+    // name sitting in it would read as "this box's size is linked to that one", which is
+    // a promise nothing here keeps.
+    $('look-copy').value = '';
+    if (!source) return;
+    for (const field of LOOK_FIELDS) $(`look-${field}`).value = source[field];
+    onLookInput();
+  });
+
+  $('look-reset').addEventListener('click', () => {
+    const category = selected();
+    if (!category || !state.lookLimits) return;
+    for (const field of LOOK_FIELDS) $(`look-${field}`).value = state.lookLimits[field].def;
+    onLookInput();
   });
 
   $('new-timer').addEventListener('click', () => openEditor(null));

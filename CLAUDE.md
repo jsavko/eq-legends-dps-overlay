@@ -91,7 +91,15 @@ the bars and places them; `boss` is the one box that ships prebuilt and gets its
 the trigger packs instead of from anything they typed. `src/renderer/timerbox/` renders
 them all, told which it is by `?category=<id>` on its file URL, and the Timers window
 (`src/renderer/timersetup/`, tray → Timers… or Ctrl+Shift+T) is the single place they are
-made, named, coloured and placed.
+made, named, coloured, sized and placed.
+
+**A box's SIZE is the player's too** — width, row height and text size, three independent
+numbers per box stored beside its position in `timers.json`. Independent because "wide box,
+tight rows" and "narrow box, big text" are both layouts somebody wants and one multiplier
+can express neither. `boxLook()` in `src/timers/model.js` is the whole of the arithmetic:
+stored value × the global `scale`, clamped, computed in main and pushed to the box with
+its rows. The defaults (296 / 30 / 13) are what the old fixed em-based chrome computed
+to, so an untouched box is the panel that shipped, pixel for pixel.
 
 Two things a timer box does that no other click-through window does, both from one
 requirement — it has to be draggable, and a draggable window is not click-through:
@@ -191,9 +199,13 @@ IS the row: one line, the name left, the time right, the bar draining right-to-l
 underneath both, and **the text inside the bar painted in a contrasting colour** so the
 row reports its progress twice — by the bar's edge and by where the letters flip. That is
 two identical text layers, one inside a mask whose width is the same fraction as the bar,
-both transitioning `width` so they cannot drift apart. Chrome is the old boss panel's to
-the pixel, because that panel is now one of these boxes and a new box should arrive
-looking like the one the player already knows. Slot lifetime lives in
+both transitioning `width` so they cannot drift apart — which is also why `.row .body`
+must track `--box-width` rather than name a number: a duplicate that re-wrapped at some
+other width would show different words from the layer beneath it. Chrome is the old boss
+panel's to the pixel by DEFAULT, because that panel is now one of these boxes and a new
+box should arrive looking like the one the player already knows; width, row height and
+text size then come in with every push (`--box-width`, `--row-height`, `--box-font`) and
+everything else is `em` against them. Slot lifetime lives in
 `src/timers/runtime.js`, not here; this renderer only paints, measures itself and reports
 its size.
 

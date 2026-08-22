@@ -16,8 +16,8 @@ import path from 'node:path';
 
 import {
   normalize, defaultModel, addCategory, updateCategory, removeCategory,
-  addTimer, updateTimer, removeTimer, validateTimer, compile, color,
-  BOSS_CATEGORY, PALETTE, MAX_DURATION_MS,
+  addTimer, updateTimer, removeTimer, validateTimer, compile, color, boxLook,
+  BOSS_CATEGORY, PALETTE, MAX_DURATION_MS, LOOK,
 } from '../src/timers/model.js';
 import { TimersRuntime, SPENT_LINGER_MS } from '../src/timers/runtime.js';
 import { TimersStore } from '../src/main/timers-store.js';
@@ -130,6 +130,79 @@ test('renaming a box leaves its position and its timers alone', () => {
   assert.equal(box.x, 100);
   assert.equal(box.y, 200);
   assert.equal(renamed.timers[0].categoryId, 'c1');
+});
+
+test('a box has a size of its own, and it starts as the chrome that shipped', () => {
+  // 296 x 30 over 13px text is what the old fixed em-based chrome computed to, so a
+  // player who never touches these controls sees the panel they already know rather
+  // than something close to it.
+  for (const box of defaultModel().categories) {
+    assert.equal(box.width, 296);
+    assert.equal(box.rowHeight, 30);
+    assert.equal(box.fontSize, 13);
+  }
+
+  // Including the built-in one: its ROWS come from the trigger packs, but its shape is
+  // the player's exactly as its name and its position already are.
+  const boss = defaultModel().categories.find((c) => c.id === BOSS_CATEGORY);
+  assert.equal(boss.builtin, true);
+  assert.equal(boss.width, 296);
+});
+
+test('a hand-edited size is clamped rather than refused', () => {
+  // `timers.json` is a file a player can open, and a typo in it should cost them the
+  // value they typed, never the box.
+  const model = normalize({
+    categories: [
+      { id: 'c1', width: 5000, rowHeight: 2, fontSize: 'huge' },
+      { id: 'c2', width: 12, rowHeight: 44.6, fontSize: 18 },
+    ],
+    timers: [],
+  });
+  const [a, b] = model.categories;
+  assert.equal(a.width, LOOK.width.max);
+  assert.equal(a.rowHeight, LOOK.rowHeight.min);
+  assert.equal(a.fontSize, LOOK.fontSize.def, 'junk falls back to the default');
+  assert.equal(b.width, LOOK.width.min);
+  assert.equal(b.rowHeight, 45, 'and a fraction is rounded, not dropped');
+  assert.equal(b.fontSize, 18);
+});
+
+test('resizing a box leaves everything else about it alone, and is clamped', () => {
+  // The size patch comes from a slider and travels the same channel as a rename, so it
+  // must not be able to move a box the player placed — or ask for a width the model
+  // would refuse and silently do nothing.
+  let model = defaultModel();
+  model = updateCategory(model, 'c1', { x: 100, y: 200, name: 'Buffs' }).model;
+  model = addTimer(model, PUMA).model;
+  const resized = updateCategory(model, 'c1', { width: 420, rowHeight: 22, fontSize: 16 }).model;
+
+  const box = resized.categories.find((c) => c.id === 'c1');
+  assert.equal(box.width, 420);
+  assert.equal(box.rowHeight, 22);
+  assert.equal(box.fontSize, 16);
+  assert.equal(box.name, 'Buffs');
+  assert.equal(box.x, 100);
+  assert.equal(box.y, 200);
+  assert.equal(resized.timers.length, 1);
+
+  const silly = updateCategory(resized, 'c1', { width: 9000 }).model;
+  assert.equal(silly.categories.find((c) => c.id === 'c1').width, LOOK.width.max);
+});
+
+test('what a box draws at is what it stores, times the global text scale', () => {
+  // Multiplication rather than replacement: `scale` moves every HUD window together and
+  // always has, so a per-box width rides on it rather than arguing with it.
+  assert.deepEqual(boxLook({ width: 296, rowHeight: 30, fontSize: 13 }, 1),
+    { width: 296, rowHeight: 30, fontSize: 13 });
+  assert.deepEqual(boxLook({ width: 400, rowHeight: 22, fontSize: 15 }, 1.5),
+    { width: 600, rowHeight: 33, fontSize: 22.5 });
+
+  // A box with nothing stored, and a scale that is missing or nonsense, both have to
+  // produce the shipped chrome rather than a collapsed window.
+  assert.deepEqual(boxLook({}), { width: 296, rowHeight: 30, fontSize: 13 });
+  assert.deepEqual(boxLook(null, 0), { width: 296, rowHeight: 30, fontSize: 13 });
+  assert.deepEqual(boxLook(undefined, 'big'), { width: 296, rowHeight: 30, fontSize: 13 });
 });
 
 test('a timer says every way it is wrong at once', () => {

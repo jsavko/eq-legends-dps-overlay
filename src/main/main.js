@@ -48,7 +48,7 @@ import { TimersStore } from './timers-store.js';
 import { TimersRuntime } from '../timers/runtime.js';
 import {
   addCategory, updateCategory, removeCategory, addTimer, updateTimer, removeTimer,
-  BOSS_CATEGORY, PALETTE,
+  BOSS_CATEGORY, PALETTE, LOOK, boxLook, clampLook,
 } from '../timers/model.js';
 import {
   setLogEnabled, isLogEnabled, eqclientIniPath, runningLogReaders, GAME_PROCESS,
@@ -2292,11 +2292,38 @@ function pushTimerRows() {
   }
   rows.sort((a, b) => a.since - b.since);
 
+  // The box's shape travels with its rows, the way its name does, so a resize applies
+  // without rebuilding the window — a rebuild would drop the box back to its default
+  // corner, which is the same reason a rename does not rebuild it either. The scale
+  // multiplication happens here rather than in the renderer so there is one place that
+  // knows what a stored 296 means in pixels, and that place is unit-tested.
+  const scale = config.get('scale');
   for (const [id, win] of timerBoxes) {
     if (!win || win.isDestroyed()) continue;
     const category = timersRuntime.categories.find((c) => c.id === id);
-    win.webContents.send(CHANNELS.TIMERS_PUSH, { name: category?.name ?? '', rows });
+    win.webContents.send(CHANNELS.TIMERS_PUSH, {
+      name: category?.name ?? '',
+      look: boxLook(category, scale),
+      rows,
+    });
   }
+}
+
+/**
+ * The size fields out of whatever the manager sent, clamped, and nothing else.
+ *
+ * A whitelist rather than a spread, because this patch is applied straight onto a
+ * category: an unfiltered object from the renderer could rewrite `x`, `y` or `builtin`
+ * and move a box the player had placed, or make the boss box deletable.
+ */
+function lookPatch(look) {
+  if (!look || typeof look !== 'object') return {};
+  const patch = {};
+  for (const field of Object.keys(LOOK)) {
+    if (look[field] == null) continue;
+    patch[field] = clampLook(field, look[field]);
+  }
+  return patch;
 }
 
 /** Turn placement mode on or off across every box at once. */
@@ -2801,6 +2828,10 @@ function registerIpc() {
     // timers window answers to its own switch, and to the same mute.
     if (ALERT_KEYS.some((key) => patch[key] !== undefined)) syncAlertsWindow();
     if (TIMER_KEYS.some((key) => patch[key] !== undefined)) syncTimersWindow();
+    // The boxes are told their size in pixels rather than working it out from the scale
+    // themselves, so the settings slider has to re-send it. Without this the whole HUD
+    // resizes and the timer boxes alone sit at the old size until the next timer fires.
+    if (patch.scale !== undefined) pushTimerRows();
     if (DROPS_KEYS.some((key) => patch[key] !== undefined)) syncDropsWindow();
     // One block, one predicate — the master switch decides whether the tracker exists at
     // all and the seven categories decide what it reads, so any touch of it re-derives
@@ -3052,6 +3083,11 @@ function registerIpc() {
   ipcMain.handle(CHANNELS.TIMERS_GET, () => ({
     ...(timersStore?.load() ?? { categories: [], timers: [] }),
     palette: PALETTE,
+    // The ranges the size sliders may take. Sent rather than repeated in the renderer,
+    // so the clamp the model enforces and the limit the control offers are the same
+    // numbers — a slider that could ask for a width the model would refuse is a control
+    // that silently does nothing at one end.
+    lookLimits: LOOK,
     // So the manager can say "your timers are muted" rather than leaving the player to
     // discover it by watching nothing happen.
     muted: config.get('alertsMuted') === true,
@@ -3059,10 +3095,14 @@ function registerIpc() {
     problems: timersRuntime?.problems() ?? [],
   }));
 
-  ipcMain.handle(CHANNELS.TIMERS_SAVE_CATEGORY, (_e, { id, name, enabled } = {}) => {
+  ipcMain.handle(CHANNELS.TIMERS_SAVE_CATEGORY, (_e, { id, name, enabled, look } = {}) => {
     const model = timersStore.load();
     const result = id
-      ? updateCategory(model, id, { ...(name != null ? { name } : {}), ...(enabled != null ? { enabled } : {}) })
+      ? updateCategory(model, id, {
+        ...(name != null ? { name } : {}),
+        ...(enabled != null ? { enabled } : {}),
+        ...lookPatch(look),
+      })
       : addCategory(model, name);
     if (!result.ok) return { ok: false, errors: result.errors };
     return commitTimers(result.model, { id: result.id ?? id });
