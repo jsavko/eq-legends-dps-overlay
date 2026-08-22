@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>My timers — panel mockups</title>
+<style>
+/*
+ * Mockups for the second timer panel: the player's OWN countdowns — buffs to recast,
+ * cooldowns, respawns — in a window placed independently of the boss timers.
+ *
+ * Everything is at 1:1 pixel scale in the shipping palette and type. This file is a
+ * mockup, not a component, so the CSS is deliberately flat and duplicated per variant
+ * rather than factored: a variant has to be changeable without touching its neighbours.
+ *
+ * The brief: "a small timer overlay I can set where I want that shows total duration
+ * with a bar slowly draining until it's gone."
+ */
+:root {
+  --ink:       #f0e3c4;
+  --ink-dim:   #a8977a;
+  --ink-faint: #6d6350;
+  --slab:      #100d0a;
+  --edge:      #2e2620;
+  --ember:     #b9702a;
+  --ember-lit: #e0a53f;
+
+  /* The my-timers accent. Deliberately NOT the boss panel's ember and not the alerts'
+     red: the two timer panels sit on one screen at the same time, and which one you are
+     looking at has to be answerable by colour from three feet away. */
+  --jade:      #2f8f7a;
+  --jade-lit:  #6fd9b8;
+  --jade-warn: #ffd27a;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 26px 30px 60px;
+  /* A murky dungeon-ish backdrop so the panels are judged the way they will be seen:
+     floating over the game, not on a design canvas. */
+  background: radial-gradient(120% 90% at 30% 0%, #1d2422 0%, #0b0d0c 55%, #070808 100%);
+  font-family: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+h1 {
+  font-size: 15px; font-weight: 700; letter-spacing: 0.26em; text-transform: uppercase;
+  color: var(--jade-lit); margin: 0 0 4px;
+}
+h2 {
+  font-size: 13px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ember-lit); margin: 34px 0 3px;
+}
+p.note { font-size: 13px; color: var(--ink-dim); margin: 0 0 16px; max-width: 62ch; line-height: 1.5; }
+p.note b { color: var(--ink); font-weight: 600; }
+.spread { display: flex; gap: 34px; align-items: flex-start; flex-wrap: wrap; }
+.cap { font-size: 12px; color: var(--ink-faint); margin: 7px 0 0; letter-spacing: 0.06em; }
+
+/* ================================================================ shared panel shell */
+.panel {
+  width: 320px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--slab) 94%, #143028) 0%, var(--slab) 40%, var(--slab) 100%);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: 0 2px 18px rgba(0,0,0,0.65), inset 0 1px 0 color-mix(in srgb, var(--jade) 30%, transparent);
+  overflow: hidden;
+}
+.phead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 5px 9px 5px 10px;
+  border-bottom: 1px solid var(--edge);
+  background: color-mix(in srgb, var(--slab) 82%, #0d2a22);
+}
+.phead .title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--jade-lit); white-space: nowrap;
+}
+.phead .who { font-size: 12px; color: var(--ink-dim); line-height: 1.3; min-height: 1.3em; }
+
+/* ============================================================ variant A — bar is the row */
+/* The boss panel's trick, scaled up: the bar is the row's background and drains
+   right-to-left underneath the text. One line of chrome, smallest footprint. */
+.a .slot {
+  position: relative; display: flex; align-items: center; gap: 9px;
+  height: 44px; padding: 0 10px;
+  border-bottom: 1px solid #191512; overflow: hidden;
+}
+.a .slot:last-child { border-bottom: 0; }
+.a .fill {
+  position: absolute; inset: 0 auto 0 0;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--jade) 52%, transparent), color-mix(in srgb, var(--jade) 20%, transparent));
+  border-right: 1px solid color-mix(in srgb, var(--jade-lit) 60%, transparent);
+}
+.a .names { position: relative; z-index: 1; display: flex; flex-direction: column; line-height: 1.2; min-width: 0; flex: 1; }
+.a .spell { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a .of { font-size: 12px; color: var(--ink-dim); }
+.a .due {
+  position: relative; z-index: 1; font-variant-numeric: tabular-nums; font-weight: 700;
+  font-size: 20px; color: var(--jade-lit); white-space: nowrap;
+}
+.a .slot[data-ending] .fill { background: linear-gradient(90deg, color-mix(in srgb, var(--jade-warn) 40%, transparent), color-mix(in srgb, var(--jade) 18%, transparent)); }
+.a .slot[data-ending] .due { color: var(--jade-warn); }
+.a .slot[data-ending] .of { color: var(--ink); }
+.a .slot[data-lapsed] .fill { background: none; border-right: 0; }
+.a .slot[data-lapsed] .due { color: var(--ink-faint); }
+.a .slot[data-lapsed] .spell { color: var(--ink-faint); font-weight: 400; }
+.a .slot[data-lapsed] .of { color: #4a4237; font-style: italic; }
+
+/* ====================================================== variant B — a dedicated bar rail */
+/* Name and remaining on a text line, the bar its own element beneath it. The most
+   literal reading of "a bar that is slowly draining": the bar is a thing, not a wash. */
+.b .slot {
+  display: flex; flex-direction: column; justify-content: center; gap: 5px;
+  height: 48px; padding: 0 10px;
+  border-bottom: 1px solid #191512;
+}
+.b .slot:last-child { border-bottom: 0; }
+.b .line { display: flex; align-items: baseline; gap: 8px; }
+.b .spell { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.b .due { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 17px; color: var(--jade-lit); }
+.b .of { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.b .rail { position: relative; height: 7px; border-radius: 2px; background: #1b1714; overflow: hidden; }
+.b .rail i {
+  position: absolute; inset: 0 auto 0 0; display: block;
+  background: linear-gradient(90deg, var(--jade), var(--jade-lit));
+}
+.b .slot[data-ending] .rail i { background: linear-gradient(90deg, #c9903a, var(--jade-warn)); }
+.b .slot[data-ending] .due { color: var(--jade-warn); }
+.b .slot[data-lapsed] .rail i { background: #2a2520; }
+.b .slot[data-lapsed] .due { color: var(--ink-faint); }
+.b .slot[data-lapsed] .spell { color: var(--ink-faint); font-weight: 400; }
+
+/* ======================================================== variant C — compact one-liner */
+/* One line, bar inline between the name and the clock. Smallest of the three; the
+   trade is that the bar is short, so the fraction is harder to read at a glance. */
+.c .slot {
+  display: flex; align-items: center; gap: 9px;
+  height: 32px; padding: 0 10px;
+  border-bottom: 1px solid #191512;
+}
+.c .slot:last-child { border-bottom: 0; }
+.c .spell { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+.c .rail { position: relative; flex: 1; height: 8px; border-radius: 2px; background: #1b1714; overflow: hidden; }
+.c .rail i { position: absolute; inset: 0 auto 0 0; display: block; background: linear-gradient(90deg, var(--jade), var(--jade-lit)); }
+.c .due { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; color: var(--jade-lit); min-width: 44px; text-align: right; }
+.c .slot[data-ending] .rail i { background: linear-gradient(90deg, #c9903a, var(--jade-warn)); }
+.c .slot[data-ending] .due { color: var(--jade-warn); }
+.c .slot[data-lapsed] .rail i { background: #2a2520; }
+.c .slot[data-lapsed] .due, .c .slot[data-lapsed] .spell { color: var(--ink-faint); }
+
+/* ============================================================== the drag placeholder */
+.placeholder {
+  width: 320px; margin-top: 4px; padding: 9px 12px; text-align: center;
+  background: rgba(16,13,10,0.88); border: 1px dashed var(--ink-faint); border-radius: 3px;
+}
+.placeholder .verb { display: block; color: var(--jade-lit); font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; font-size: 11px; }
+.placeholder .hint { color: var(--ink-dim); font-size: 12px; }
+
+/* ============================================================== 1.8× — the scale test */
+/* The settings offer up to 1.8×. Everything above is em-against-a-scaled-base in the
+   real renderer, so the whole panel grows together; here it is simulated with a
+   transform so the mock stays one stylesheet. */
+.scaled { transform: scale(1.8); transform-origin: top left; }
+.scale-box { width: 600px; height: 330px; }
+</style>
+</head>
+<body>
+
+<h1>My timers — panel mockups</h1>
+<p class="note">
+  A second countdown panel for the player’s <b>own</b> timers, placed independently of the
+  boss panel. Jade rather than ember so the two are told apart by colour at a glance.
+  Rows are fixed-height in every state and never re-sorted — the boss panel’s rules, held
+  here for the same reason. Three variants of one row; everything else is identical.
+</p>
+
+<h2>Variant A — the bar is the row</h2>
+<p class="note">
+  The boss panel’s trick at a larger size: the bar is the row’s background, draining
+  right-to-left underneath the text. Smallest footprint, and the two panels read as
+  siblings. 44px rows.
+</p>
+<div class="spread">
+  <div>
+    <div class="panel a">
+      <div class="phead"><span class="title">My timers</span><span class="who"></span></div>
+      <div>
+        <div class="slot"><i class="fill" style="width:73%"></i>
+          <span class="names"><span class="spell">Spirit of the Puma</span><span class="of">of 2:26</span></span>
+          <span class="due">1:47</span></div>
+        <div class="slot"><i class="fill" style="width:41%"></i>
+          <span class="names"><span class="spell">Spirit of the Wolf</span><span class="of">of 6:00</span></span>
+          <span class="due">2:28</span></div>
+        <div class="slot" data-ending><i class="fill" style="width:9%"></i>
+          <span class="names"><span class="spell">Talisman of Alacrity</span><span class="of">recast now</span></span>
+          <span class="due">0:14</span></div>
+        <div class="slot" data-lapsed><i class="fill" style="width:0%"></i>
+          <span class="names"><span class="spell">Shield of Songs</span><span class="of">done</span></span>
+          <span class="due">—</span></div>
+      </div>
+    </div>
+    <p class="cap">armed · armed · ending · lapsed</p>
+  </div>
+  <div>
+    <div class="panel a">
+      <div class="phead"><span class="title">My timers</span><span class="who"></span></div>
+      <div>
+        <div class="slot"><i class="fill" style="width:96%"></i>
+          <span class="names"><span class="spell">Spirit of the Puma</span><span class="of">of 2:26</span></span>
+          <span class="due">2:20</span></div>
+      </div>
+    </div>
+    <p class="cap">one row, just cast</p>
+    <div class="placeholder" style="margin-top:16px">
+      <span class="verb">My timers</span>
+      <span class="hint">drag to place — your timers appear here</span>
+    </div>
+    <p class="cap">unlocked drag placeholder</p>
+  </div>
+</div>
+
+<h2>Variant B — a dedicated bar rail</h2>
+<p class="note">
+  Name and remaining on a text line; the bar is its own element beneath it. The most
+  literal reading of the brief — the bar is a <b>thing</b>, not a wash behind text, and
+  the fraction is readable without the numbers. 48px rows.
+</p>
+<div class="spread">
+  <div>
+    <div class="panel b">
+      <div class="phead"><span class="title">My timers</span><span class="who"></span></div>
+      <div>
+        <div class="slot">
+          <span class="line"><span class="spell">Spirit of the Puma</span><span class="due">1:47</span><span class="of">/ 2:26</span></span>
+          <span class="rail"><i style="width:73%"></i></span></div>
+        <div class="slot">
+          <span class="line"><span class="spell">Spirit of the Wolf</span><span class="due">2:28</span><span class="of">/ 6:00</span></span>
+          <span class="rail"><i style="width:41%"></i></span></div>
+        <div class="slot" data-ending>
+          <span class="line"><span class="spell">Talisman of Alacrity</span><span class="due">0:14</span><span class="of">/ 4:30</span></span>
+          <span class="rail"><i style="width:9%"></i></span></div>
+        <div class="slot" data-lapsed>
+          <span class="line"><span class="spell">Shield of Songs</span><span class="due">—</span><span class="of">done</span></span>
+          <span class="rail"><i style="width:100%"></i></span></div>
+      </div>
+    </div>
+    <p class="cap">armed · armed · ending · lapsed</p>
+  </div>
+  <div>
+    <div class="panel b">
+      <div class="phead"><span class="title">My timers</span><span class="who"></span></div>
+      <div>
+        <div class="slot">
+          <span class="line"><span class="spell">Spirit of the Puma</span><span class="due">2:20</span><span class="of">/ 2:26</span></span>
+          <span class="rail"><i style="width:96%"></i></span></div>
+      </div>
+    </div>
+    <p class="cap">one row, just cast</p>
+  </div>
+</div>
+
+<h2>Variant C — compact one-liner</h2>
+<p class="note">
+  One line, bar inline between the name and the clock. Smallest of the three at 32px
+  rows; the trade is a short bar, so the fraction is harder to read from a distance and
+  the full duration has nowhere to go.
+</p>
+<div class="spread">
+  <div>
+    <div class="panel c">
+      <div class="phead"><span class="title">My timers</span><span class="who"></span></div>
+      <div>
+        <div class="slot"><span class="spell">Spirit of the Puma</span><span class="rail"><i style="width:73%"></i></span><span class="due">1:47</span></div>
+        <div class="slot"><span class="spell">Spirit of the Wolf</span><span class="rail"><i style="width:41%"></i></span><span class="due">2:28</span></div>
+        <div class="slot" data-ending><span class="spell">Talisman of Alacrity</span><span class="rail"><i style="width:9%"></i></span><span class="due">0:14</span></div>
+        <div class="slot" data-lapsed><span class="spell">Shield of Songs</span><span class="rail"><i style="width:100%"></i></span><span class="due">—</span></div>
+      </div>
+    </div>
+    <p class="cap">armed · armed · ending · lapsed</p>
+  </div>
+</div>
+
+<h2>Variant B at 1.8× — the largest text size the settings offer</h2>
+<p class="note">
+  The whole panel scales together against <code>--scale</code>, exactly as the boss panel
+  and the alerts do. Shown because the box that holds this window is invisible and
+  click-through: a clipped row would be a silently hidden one, so the box has to be sized
+  for this, not for 1×.
+</p>
+<div class="scale-box">
+  <div class="scaled">
+    <div class="panel b">
+      <div class="phead"><span class="title">My timers</span><span class="who"></span></div>
+      <div>
+        <div class="slot">
+          <span class="line"><span class="spell">Spirit of the Puma</span><span class="due">1:47</span><span class="of">/ 2:26</span></span>
+          <span class="rail"><i style="width:73%"></i></span></div>
+        <div class="slot" data-ending>
+          <span class="line"><span class="spell">Talisman of Alacrity</span><span class="due">0:14</span><span class="of">/ 4:30</span></span>
+          <span class="rail"><i style="width:9%"></i></span></div>
+        <div class="slot" data-lapsed>
+          <span class="line"><span class="spell">Shield of Songs</span><span class="due">—</span><span class="of">done</span></span>
+          <span class="rail"><i style="width:100%"></i></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>Beside the boss panel — how the two read together</h2>
+<p class="note">
+  Both windows on screen at once, which is the arrangement that matters: ember is the
+  fight’s clock, jade is yours. They are placed independently and neither derives a pixel
+  from the other.
+</p>
+<div class="spread">
+  <div>
+    <div class="panel" style="width:296px;background:linear-gradient(180deg,color-mix(in srgb,var(--slab) 94%,#3a2a18) 0%,var(--slab) 40%,var(--slab) 100%);box-shadow:0 2px 18px rgba(0,0,0,.65), inset 0 1px 0 color-mix(in srgb,var(--ember) 26%,transparent)">
+      <div class="phead" style="background:color-mix(in srgb,var(--slab) 82%,#241a10)"><span class="title" style="color:var(--ember-lit)">Boss timers</span><span class="who"></span></div>
+      <div class="a">
+        <div class="slot" style="height:30px">
+          <i class="fill" style="width:52%;background:linear-gradient(90deg,color-mix(in srgb,var(--ember) 42%,transparent),color-mix(in srgb,var(--ember) 16%,transparent));border-right:1px solid color-mix(in srgb,var(--ember-lit) 55%,transparent)"></i>
+          <span class="due" style="font-size:14px;color:var(--ember-lit);order:-1;min-width:34px;text-align:right">32s</span>
+          <span class="names"><span class="spell" style="font-size:12.5px">Superior Healing</span><span class="of" style="font-size:10.5px">Boss timers (measured on oggok)</span></span></div>
+        <div class="slot" style="height:30px">
+          <i class="fill" style="width:81%;background:linear-gradient(90deg,color-mix(in srgb,var(--ember) 42%,transparent),color-mix(in srgb,var(--ember) 16%,transparent));border-right:1px solid color-mix(in srgb,var(--ember-lit) 55%,transparent)"></i>
+          <span class="due" style="font-size:14px;color:var(--ember-lit);order:-1;min-width:34px;text-align:right">50s</span>
+          <span class="names"><span class="spell" style="font-size:12.5px">Shadow Vortex</span><span class="of" style="font-size:10.5px">Boss timers (measured on oggok)</span></span></div>
+      </div>
+    </div>
+    <p class="cap">the existing boss panel, unchanged</p>
+  </div>
+  <div>
+    <div class="panel b">
+      <div class="phead"><span class="title">My timers</span><span class="who"></span></div>
+      <div>
+        <div class="slot">
+          <span class="line"><span class="spell">Spirit of the Puma</span><span class="due">1:47</span><span class="of">/ 2:26</span></span>
+          <span class="rail"><i style="width:73%"></i></span></div>
+        <div class="slot" data-ending>
+          <span class="line"><span class="spell">Talisman of Alacrity</span><span class="due">0:14</span><span class="of">/ 4:30</span></span>
+          <span class="rail"><i style="width:9%"></i></span></div>
+      </div>
+    </div>
+    <p class="cap">the new one</p>
+  </div>
+</div>
+
+</body>
+</html>

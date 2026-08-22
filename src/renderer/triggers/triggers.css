@@ -565,3 +565,38 @@ input[aria-invalid="true"] { border-color: var(--bad); background: #160d0b; }
   cursor: pointer;
 }
 .linkish:hover { color: var(--ink); }
+
+/* --------------------------------------------------------------- timer panels */
+
+/*
+ * Which panel a countdown draws in, on the trigger row itself. Quiet — it is a fact
+ * about the row, not a claim on the eye — but never absent while the trigger has a
+ * timer, because "why is this not on my screen" is exactly the question it answers.
+ */
+.row-panel {
+  margin-left: 0.55rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+/* Switched off, or gone. Struck rather than merely dimmed: dim reads as "less
+   important", and this one is saying the row cannot draw at all. */
+.row-panel.off {
+  color: var(--ink-faint);
+  border-style: dashed;
+  text-decoration: line-through;
+}
+
+/* The panels dialog reuses the duration rows' geometry — same three-part shape (a
+   label block, a control, a control) and no reason for a second layout. Its title
+   field is a text box rather than a number, so it needs room to be a name. */
+#p-rows .d-text input[type="text"] {
+  width: 100%;
+  max-width: 18rem;
+}
+#p-rows li button { flex: 0 0 auto; }

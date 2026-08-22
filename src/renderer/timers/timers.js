@@ -47,7 +47,11 @@ async function init() {
  */
 function rows(snapshot) {
   if (cfg?.triggerTimers === false) return [];
-  return snapshot.triggerTimers ?? [];
+  // This panel's share of the one list. A row carrying no `panel` at all is one from a
+  // pack written before panels existed, and it belongs here — that absence is exactly
+  // what `normalizeTimer` turns into `boss`, and reading it any other way would have
+  // relocated every countdown in every existing pack on the upgrade that added them.
+  return (snapshot.triggerTimers ?? []).filter((t) => (t.panel ?? 'boss') === 'boss');
 }
 
 /**

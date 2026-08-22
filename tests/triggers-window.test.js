@@ -77,3 +77,45 @@ test('the editor can file a trigger into a group, new or existing', () => {
   assert.match(script, /newGroupName/, 'the form does not carry a new group name');
   assert.match(script, /groupId/, 'the form does not carry a group id');
 });
+
+test('the editor can send a countdown to a panel, new or existing', () => {
+  // The same shape as the group control above and for the same reason — the list is the
+  // player's and has no fixed length, so a select and a name field rather than a pair of
+  // buttons. A missing id here is a control that silently does nothing.
+  assert.ok(idsInHtml.has('e-panel') && idsInHtml.has('e-new-panel'));
+  assert.ok(idsInHtml.has('e-panel-wrap'), 'the DRAWS IN field has nothing to hide');
+  assert.match(script, /newPanelName/, 'the form does not carry a new panel name');
+  assert.match(script, /panel: d\.panel/, 'the form does not carry the panel through to save');
+  assert.match(script, /ensurePanel/, 'a panel named in the editor is never created');
+});
+
+test('the panels dialog can rename, switch and remove — and refuses a removal that orphans', () => {
+  for (const id of ['open-panels', 'panels', 'p-rows', 'p-new', 'p-add', 'p-close']) {
+    assert.ok(idsInHtml.has(id), `the panels dialog is missing #${id}`);
+  }
+  // Delete is offered only when nothing points at the panel. A panel holding countdowns
+  // can always be switched OFF, which takes it off the screen and moves nobody's
+  // triggers; deleting it would have to send them to the boss window, which is the exact
+  // outcome this whole feature exists to prevent.
+  assert.match(script, /remove\.disabled = used > 0/,
+    'a panel with timers in it must not be removable');
+  assert.match(script, /countByPanel/, 'nothing counts what points at a panel');
+});
+
+test('a trigger row says which panel it draws in, including when that panel cannot draw', () => {
+  // "Why is this not on my screen" is the question the whole feature turns on, and having
+  // to open every trigger to answer it would be the list refusing to say.
+  assert.match(script, /panelLabel/);
+  assert.match(script, /'panel removed'/, 'a dangling panel reference says so');
+  assert.match(css, /\.row-panel\s*\{/, 'the label has no style to draw with');
+  assert.match(css, /\.row-panel\.off\s*\{/, 'a dark panel is not marked');
+});
+
+test('"Measure my timers" is wired all the way to the channel', () => {
+  // The durations cannot come from anywhere but the player's own log — buff length
+  // depends on their level, the rank they cast and their AAs — so this path is the
+  // feature, not a convenience on top of it.
+  assert.ok(idsInHtml.has('measure'));
+  assert.match(script, /window\.api\.mineBuffs/);
+  assert.match(script, /openMeasureReport/);
+});

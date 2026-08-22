@@ -269,7 +269,7 @@ test('the group tree flattens with its path, and disabled groups disable their c
   // The pack ships EnableByDefault=False — respected, not overridden, because it is
   // what its author chose. packStats is how the import report says so out loud.
   assert.equal(pack.groups.every((g) => g.enabled === false), true);
-  assert.deepEqual(packStats(pack), { triggers: 5, live: 0, timers: 0, warnings: 5, groups: 2 });
+  assert.deepEqual(packStats(pack), { triggers: 5, live: 0, timers: 0, warnings: 5, groups: 2, byPanel: {} });
 });
 
 test('a NoTimer trigger is a warning chip and nothing else', () => {

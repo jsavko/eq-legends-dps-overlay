@@ -21,6 +21,7 @@ const CH = {
   TRIGGERS_DELETE_TRIGGER: 'triggers:delete-trigger',
   TRIGGERS_TEST_PATTERN: 'triggers:test-pattern',
   TRIGGERS_DRY_RUN: 'triggers:dry-run',
+  TRIGGERS_MINE_BUFFS: 'triggers:mine-buffs',
   TRIGGERS_SET_BUILTIN: 'triggers:set-builtin',
   TRIGGERS_SET_PRESET: 'triggers:set-preset',
 };
@@ -45,6 +46,7 @@ contextBridge.exposeInMainWorld('api', {
   deleteTrigger: (payload) => ipcRenderer.invoke(CH.TRIGGERS_DELETE_TRIGGER, payload),
   testPattern: (payload) => ipcRenderer.invoke(CH.TRIGGERS_TEST_PATTERN, payload),
   dryRun: (payload) => ipcRenderer.invoke(CH.TRIGGERS_DRY_RUN, payload),
+  mineBuffs: (payload) => ipcRenderer.invoke(CH.TRIGGERS_MINE_BUFFS, payload),
 
   setBuiltin: (key, enabled) => ipcRenderer.invoke(CH.TRIGGERS_SET_BUILTIN, { key, enabled }),
   setPreset: (name) => ipcRenderer.invoke(CH.TRIGGERS_SET_PRESET, name),

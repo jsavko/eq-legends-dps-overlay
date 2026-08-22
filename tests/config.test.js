@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled, timersEnabled, dropsEnabled,
-  ALERT_CATEGORIES, ALERT_PRESETS, TIMER_KEYS, WARN_GROUPS, WARN_KEYS,
+  ALERT_CATEGORIES, ALERT_PRESETS, TIMER_KEYS, PANEL_KEYS, WARN_GROUPS, WARN_KEYS,
+  allTimerPanels, timerPanelsFor, panelTitle, nextPanelId,
   warnKeyFor, warnGroupOn, presetOf,
   SESSION_CATEGORIES, sessionEnabled, sessionLineEnabled, sessionCategories, partyListFor,
   DURATION_DEFAULTS, DURATION_KEYS, durationSec, alertTtls,
@@ -548,4 +549,69 @@ test('the drops popup has one switch, and mute wins over it like the timers', ()
   const legacy = { ...DEFAULTS };
   delete legacy.dropsOverlay;
   assert.equal(dropsEnabled(legacy), true);
+});
+
+// ------------------------------------------------------------- the player's panels
+
+test('a fresh install has one timer panel, ready to be renamed', () => {
+  // Seeded rather than empty so the feature is discoverable: an empty list means the
+  // editor's DRAWS IN select offers only "Boss timers", and a player would have to find
+  // the Panels dialog before the feature existed for them at all.
+  assert.deepEqual(DEFAULTS.timerPanels, [
+    { id: 'p1', title: 'My timers', enabled: true, bounds: null },
+  ]);
+  assert.deepEqual(PANEL_KEYS, ['timerPanels', 'alertsMuted']);
+});
+
+test('a half-written panel entry degrades rather than becoming an unaddressable window', () => {
+  // This key is the one array-of-objects in the config, so the one-level-deep merge in
+  // load() cannot repair it the way it repairs a missing scalar. A panel with no id is a
+  // window that can never be closed, dragged or switched, so it is dropped outright;
+  // everything else gets a fallback.
+  const cfg = { timerPanels: [
+    { id: 'p1' },
+    { title: 'no id at all' },
+    null,
+    'not an object',
+    { id: 'p2', title: 'Cooldowns', enabled: false, bounds: { x: 1, y: 2, width: 3, height: 4 } },
+  ] };
+  assert.deepEqual(allTimerPanels(cfg), [
+    { id: 'p1', title: 'Timers 1', enabled: true, bounds: null },
+    { id: 'p2', title: 'Cooldowns', enabled: false, bounds: { x: 1, y: 2, width: 3, height: 4 } },
+  ]);
+  assert.deepEqual(allTimerPanels({}), [], 'a config with no panels has no panels');
+  assert.deepEqual(allTimerPanels(null), []);
+});
+
+test('panels lose to mute, and a switched-off one is simply absent', () => {
+  // Two states, one answer. Downstream, "muted" and "switched off" need no separate
+  // handling and therefore cannot drift apart — main creates a window for what this
+  // returns and closes everything else.
+  const cfg = { timerPanels: [
+    { id: 'p1', title: 'Buffs', enabled: true },
+    { id: 'p2', title: 'Cooldowns', enabled: false },
+  ] };
+  assert.deepEqual(timerPanelsFor(cfg).map((p) => p.id), ['p1']);
+  assert.deepEqual(timerPanelsFor({ ...cfg, alertsMuted: true }), []);
+  assert.deepEqual(timerPanelsFor(DEFAULTS).map((p) => p.id), ['p1']);
+});
+
+test('panelTitle answers for the boss window too, and never returns nothing', () => {
+  // It feeds a window header and a select, both of which would rather say something
+  // slightly wrong than be blank.
+  const cfg = { timerPanels: [{ id: 'p1', title: 'Buffs', enabled: true }] };
+  assert.equal(panelTitle(cfg, 'boss'), 'Boss timers');
+  assert.equal(panelTitle(cfg, 'p1'), 'Buffs');
+  assert.equal(panelTitle(cfg, 'p9'), 'Timers', 'a removed panel still has a name to show');
+  assert.equal(panelTitle(null, 'p1'), 'Timers');
+});
+
+test('nextPanelId never collides with an id that already exists', () => {
+  // A collision is two windows fighting over one bounds entry. Computed from what is
+  // there rather than from a stored counter, which drifts the moment somebody
+  // hand-edits the file.
+  assert.equal(nextPanelId({ timerPanels: [] }), 'p1');
+  assert.equal(nextPanelId(DEFAULTS), 'p2');
+  assert.equal(nextPanelId({ timerPanels: [{ id: 'p7' }, { id: 'p2' }] }), 'p8');
+  assert.equal(nextPanelId({ timerPanels: [{ id: 'buffs' }] }), 'p1', 'a hand-named id is skipped');
 });

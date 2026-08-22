@@ -429,3 +429,65 @@ test('setWarnTtl ignores values a chip could not survive', () => {
   engine.setWarnTtl(NaN);
   assert.equal(engine.warnTtlMs, TRIGGER_WARN_TTL_MS);
 });
+
+// -------------------------------------------------------------------- panels
+
+test('a row carries the panel its trigger names, and the boss panel by default', () => {
+  const engine = engineWith(pack([
+    { id: 't1', name: 'Boss cast', pattern: '^Boss begins casting Doom\\.$',
+      timer: { name: 'Doom', durationMs: 60_000 } },
+    { id: 't2', name: 'My buff', pattern: '^You begin to snarl\\.$',
+      timer: { name: 'Puma', durationMs: 146_000, panel: 'p1' } },
+  ]));
+
+  engine.feed(line('Boss begins casting Doom.', T0));
+  engine.feed(line('You begin to snarl.', at(1000)));
+
+  const rows = engine.timers(at(2000));
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((r) => r.ability === 'Doom').panel, 'boss');
+  assert.equal(rows.find((r) => r.ability === 'Puma').panel, 'p1');
+});
+
+test('two panels each keep first-armed order within themselves', () => {
+  // The never-move rule, per panel. The engine emits ONE list and each panel's renderer
+  // filters it, so what has to hold is that filtering the list preserves the order —
+  // which it does as long as the engine never re-sorts by what is due next.
+  const engine = engineWith(pack([
+    { id: 't1', name: 'B1', pattern: '^b1$', timer: { name: 'B1', durationMs: 90_000 } },
+    { id: 't2', name: 'M1', pattern: '^m1$', timer: { name: 'M1', durationMs: 90_000, panel: 'p1' } },
+    { id: 't3', name: 'B2', pattern: '^b2$', timer: { name: 'B2', durationMs: 10_000 } },
+    { id: 't4', name: 'M2', pattern: '^m2$', timer: { name: 'M2', durationMs: 10_000, panel: 'p1' } },
+  ]));
+
+  // Interleaved, and the short ones armed LAST — the arrangement that would betray any
+  // sort by `dueMs`, which is the exact bug the timers window was built to replace.
+  engine.feed(line('b1', T0));
+  engine.feed(line('m1', at(1000)));
+  engine.feed(line('b2', at(2000)));
+  engine.feed(line('m2', at(3000)));
+
+  const rows = engine.timers(at(4000));
+  assert.deepEqual(rows.map((r) => r.ability), ['B1', 'M1', 'B2', 'M2']);
+  assert.deepEqual(rows.filter((r) => r.panel === 'boss').map((r) => r.ability), ['B1', 'B2']);
+  assert.deepEqual(rows.filter((r) => r.panel === 'p1').map((r) => r.ability), ['M1', 'M2']);
+});
+
+test('a re-match restarts the row in place without changing its panel', () => {
+  // A buff being recast is the common case on this panel — it refreshes, and refreshing
+  // must reset THIS row rather than open a second one beside it or move it elsewhere.
+  const engine = engineWith(pack([
+    { id: 't1', name: 'My buff', pattern: '^land$',
+      timer: { name: 'Puma', durationMs: 100_000, restart: 'restart', panel: 'p1' } },
+  ]));
+
+  engine.feed(line('land', T0));
+  const first = engine.timers(at(1000))[0];
+
+  engine.feed(line('land', at(50_000)));
+  const after = engine.timers(at(51_000));
+  assert.equal(after.length, 1, 'a refresh is not a second row');
+  assert.equal(after[0].panel, 'p1');
+  assert.equal(after[0].since, first.since, 'and it does not move');
+  assert.equal(Math.round(after[0].dueMs / 1000), 99, 'the countdown restarted');
+});

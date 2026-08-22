@@ -39,6 +39,20 @@
          together, each with its own number. -->
     <button id="open-durations" class="secondary">Durations…</button>
 
+    <!-- The player's own timer panels: named, switched and placed by them. Beside
+         Durations because it is the same kind of thing — a property of the OUTPUT
+         rather than of any one source. The boss-timer window is deliberately not in
+         here: it is not one of theirs, it has its own switch in the tray, and being
+         outside the list is what makes "delete this panel" unaskable about it. -->
+    <button id="open-panels" class="secondary">Panels…</button>
+
+    <!-- The other way a pack gets made: measured out of the player's own log rather
+         than downloaded from somebody's Discord. Beside Import because it answers the
+         same question — "where do my triggers come from" — and because the durations it
+         finds cannot come from anywhere else: buff length depends on your level, the
+         rank you cast and your AAs. -->
+    <button id="measure" class="secondary">Measure my timers…</button>
+
     <button id="import" class="primary">Import…</button>
   </header>
 
@@ -167,6 +181,19 @@
           </div>
         </div>
 
+        <!-- Which panel the countdown draws in. A select rather than a pair of buttons
+             because the list is the player's and has no fixed length — and it defaults
+             to Boss timers, which is where every trigger that predates panels draws and
+             must go on drawing. -->
+        <div class="field" id="e-panel-wrap">
+          <span class="kicker">DRAWS IN</span>
+          <div class="row">
+            <select id="e-panel"></select>
+            <input id="e-new-panel" type="text" spellcheck="false" placeholder="Buffs" hidden />
+            <span class="muted small">a window of its own, placed where you put it</span>
+          </div>
+        </div>
+
         <label class="field" id="e-early-wrap">
           <span class="kicker">ENDS EARLY ON</span>
           <input id="e-early" type="text" spellcheck="false" class="mono"
@@ -259,6 +286,36 @@
         <button type="button" id="i-close" class="primary">Close</button>
         <span class="spacer"></span>
         <button type="button" id="i-start-from" class="secondary">Start a trigger from this…</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- ------------------------------------------------------------ panels -->
+  <!--
+    Rename, switch and remove the player's own timer panels. Delete is offered only when
+    a panel holds nothing: a panel with countdowns in it can always be switched OFF,
+    which takes it off the screen without moving anybody's triggers, and silently
+    relocating them into the boss window is the one outcome this whole feature exists to
+    prevent.
+  -->
+  <dialog id="panels">
+    <div class="dialog-form">
+      <header class="dialog-head">
+        <h3>Timer panels</h3>
+        <p class="muted small">
+          Each panel is a window of its own. Unlock the overlay (Ctrl+Shift+L) to drag one
+          where you want it; a countdown says which panel it draws in when you edit it.
+        </p>
+      </header>
+      <div class="dialog-body">
+        <ol id="p-rows" class="duration-rows"></ol>
+        <div class="row">
+          <input id="p-new" type="text" spellcheck="false" placeholder="New panel name" />
+          <button type="button" id="p-add" class="secondary">＋ Add panel</button>
+        </div>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" id="p-close" class="primary">Done</button>
       </footer>
     </div>
   </dialog>

@@ -11,6 +11,10 @@ import path from 'node:path';
 import { SESSION_CATEGORIES } from '../session/rules.js';
 import { storeKey } from './history.js';
 import { DEFAULT_MOBILE_PORT } from './mobile.js';
+// The reserved panel id, imported rather than restated: `pack.js` is where a trigger's
+// panel reference is normalized, and two copies of the string would be two chances to
+// disagree about which panel is the boss one.
+import { BOSS_PANEL } from '../triggers/pack.js';
 
 /** Where the Daybreak launcher installs EverQuest Legends by default. */
 export const DEFAULT_LOG_DIR =
@@ -190,6 +194,36 @@ export const DEFAULTS = {
    * config written under the old scheme forward.
    */
   triggerTimers: true,
+  /**
+   * The player's OWN countdown panels — as many as they want, each with a title, a
+   * switch and a position of its own.
+   *
+   * Separate panels rather than more rows in the boss one, for a measured reason: slots
+   * are claimed in first-armed order and are never re-sorted, so a buff cast during the
+   * pull-in permanently outranks every boss cast for the rest of the fight. That failure
+   * is already on record from the other direction — two mob self-buffs once held both
+   * slots on a Plane of Fear pull for fifteen minutes while Maestro of Rancor's Superior
+   * Healing, the cast that undoes the kill, armed last and drew below them. A player
+   * buffing themselves is the same shape and worse, since a 146-second buff outlasts
+   * most pulls.
+   *
+   * Player-defined rather than one fixed second panel because what goes in them is
+   * theirs: buffs, item cooldowns, AA refreshes and repop clocks are different KINDS of
+   * waiting, wanted in different corners of the screen, and which kinds a given player
+   * has depends on their class and their AAs. So they name the panels and decide what
+   * lands where; this app supplies the mechanism and one seeded panel to start from.
+   *
+   * The boss-timer window is deliberately NOT in this list. It predates them, it has its
+   * own key, window and switch, and being outside the list is what makes "delete this
+   * panel" a question that can never be asked about it.
+   *
+   * Shape: `{ id, title, enabled, bounds }`. `bounds` is null until the panel is dragged
+   * somewhere, exactly like every other window's key — and it is the panel's own, never
+   * derived from another window's, for the usual climbing-window reason.
+   */
+  timerPanels: [
+    { id: 'p1', title: 'My timers', enabled: true, bounds: null },
+  ],
   /** Short cue on a NEW tier-3 warning. Off by default — sound is opt-in, always. */
   castAlertSound: false,
   /**
@@ -377,6 +411,9 @@ export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
 /** Every key that can change whether the boss-timer window should exist. */
 export const TIMER_KEYS = ['triggerTimers', 'alertsMuted'];
 
+/** Every key that can change which of the player's own timer panels should exist. */
+export const PANEL_KEYS = ['timerPanels', 'alertsMuted'];
+
 /** Every key that can change whether the engaged-drops popup window should exist. */
 export const DROPS_KEYS = ['dropsOverlay', 'alertsMuted'];
 
@@ -532,6 +569,66 @@ export function alertsEnabled(cfg) {
 export function timersEnabled(cfg) {
   if (!cfg || cfg.alertsMuted) return false;
   return cfg.triggerTimers !== false;
+}
+
+/**
+ * Every timer panel the player has, normalized — whatever the stored value turns out
+ * to be.
+ *
+ * Defensive because this one key is an ARRAY OF OBJECTS, which nothing else in the
+ * config is: the one-level-deep merge in `load()` cannot repair a half-written entry the
+ * way it repairs a missing scalar, and a panel with no id would be a window that could
+ * never be addressed, closed or dragged. Every field therefore has a fallback, and an
+ * entry that is not an object at all is dropped rather than guessed at.
+ */
+export function allTimerPanels(cfg) {
+  const raw = Array.isArray(cfg?.timerPanels) ? cfg.timerPanels : [];
+  return raw
+    .filter((p) => p && typeof p === 'object' && p.id)
+    .map((p, i) => ({
+      id: String(p.id),
+      title: String(p.title ?? `Timers ${i + 1}`),
+      enabled: p.enabled !== false,
+      bounds: p.bounds && typeof p.bounds === 'object' ? p.bounds : null,
+    }));
+}
+
+/**
+ * The panels that should have a window right now.
+ *
+ * Mute wins, exactly as it does for the boss timers and the drops popup: a panel that
+ * kept counting through "shut up for this pull" would be the one surface ignoring the
+ * hotkey. A panel switched off individually is simply absent from the list, which is the
+ * same answer main acts on — so "muted" and "switched off" need no separate handling
+ * downstream, and cannot drift apart.
+ */
+export function timerPanelsFor(cfg) {
+  if (!cfg || cfg.alertsMuted) return [];
+  return allTimerPanels(cfg).filter((p) => p.enabled);
+}
+
+/** A panel's title, or a readable stand-in. Never throws and never returns empty: this
+ *  feeds a window header and a select, and both would rather say something wrong than
+ *  nothing at all. */
+export function panelTitle(cfg, id) {
+  if (id === BOSS_PANEL) return 'Boss timers';
+  return allTimerPanels(cfg).find((p) => p.id === id)?.title ?? 'Timers';
+}
+
+/**
+ * The next free panel id.
+ *
+ * Computed from what exists rather than from a stored counter, for the same reason
+ * `nextTriggerId` is: a counter in the file drifts the moment somebody hand-edits it,
+ * and a colliding id here means two windows fighting over one bounds entry.
+ */
+export function nextPanelId(cfg) {
+  let max = 0;
+  for (const p of allTimerPanels(cfg)) {
+    const n = /^p(\d+)$/.exec(p.id);
+    if (n) max = Math.max(max, Number(n[1]));
+  }
+  return `p${max + 1}`;
 }
 
 /**

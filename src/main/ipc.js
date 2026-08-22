@@ -172,6 +172,17 @@ export const CHANNELS = {
   /** Replay a whole pack against the player's log and report what actually fires. */
   TRIGGERS_DRY_RUN: 'triggers:dry-run',
   /**
+   * "Measure my own timers from my log."
+   *
+   * Its own channel rather than a flavour of the dry-run, because it is the opposite
+   * operation: the dry-run asks what an existing pack does against the log, and this
+   * asks the log what pack to write. It saves the result as an ordinary editable pack —
+   * the numbers have to come from the player's own log, since buff length depends on
+   * their level, the rank they cast and their AAs, and a table we shipped would be wrong
+   * for everybody in a slightly different way.
+   */
+  TRIGGERS_MINE_BUFFS: 'triggers:mine-buffs',
+  /**
    * The rules this app ships with, switched from the same window as imported packs.
    *
    * These write ordinary config keys — `castAlerts`, the six `warn*`, `summonAlerts`,

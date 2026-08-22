@@ -21,8 +21,8 @@ import { LogParser } from '../parser/index.js';
 import { nearestName } from '../parser/entities.js';
 import { Tailer, listLogs } from './tailer.js';
 import {
-  ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, DROPS_KEYS, MOBILE_KEYS,
-  alertsEnabled, timersEnabled, dropsEnabled, partyListFor,
+  ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, PANEL_KEYS, DROPS_KEYS, MOBILE_KEYS,
+  alertsEnabled, timersEnabled, timerPanelsFor, allTimerPanels, dropsEnabled, partyListFor,
   ALERT_PRESETS, warnKeyFor, presetOf, sessionEnabled, sessionCategories,
   DURATION_KEYS, DURATION_DEFAULTS, durationSec, alertTtls,
 } from './config.js';
@@ -42,6 +42,7 @@ import { createTrigger, updateTrigger, deleteTrigger, packStats } from '../trigg
 import { installSeedPack } from '../triggers/seed-pack.js';
 import { patternTemplate } from '../triggers/tokens.js';
 import { dryRunLog, readLogTail, testPattern } from '../triggers/dryrun.js';
+import { mineBuffsLog, packFromBuffs } from '../triggers/mine-buffs.js';
 import {
   setLogEnabled, isLogEnabled, eqclientIniPath, runningLogReaders, GAME_PROCESS,
 } from './eqconfig.js';
@@ -77,6 +78,16 @@ const STALE_LOG_MS = 10 * 60 * 1000;
 /** @type {BrowserWindow|null} */ let triggersWindow = null;
 /** @type {BrowserWindow|null} */ let alertsWindow = null;
 /** @type {BrowserWindow|null} */ let timersWindow = null;
+/**
+ * The player's own timer panels, keyed by panel id.
+ *
+ * A Map rather than a handful of module-level handles because there is no fixed number
+ * of them — the player adds and removes panels, and every list in this file that used to
+ * name `timersWindow` now has to reach these too. `panelWindows()` is the accessor those
+ * lists use, so a new list can never quietly forget them.
+ * @type {Map<string, BrowserWindow>}
+ */
+const timerPanelWindows = new Map();
 /** @type {BrowserWindow|null} */ let dropsWindow = null;
 /** @type {LogParser|null} */    let parser = null;
 /** @type {Tailer|null} */       let tailer = null;
@@ -172,6 +183,8 @@ let saveHistoryBoundsTimer = null;
 let saveTriggersBoundsTimer = null;
 let saveAlertsBoundsTimer = null;
 let saveTimersBoundsTimer = null;
+/** @type {Map<string, NodeJS.Timeout>} per-panel bounds debounce, keyed by panel id */
+const savePanelBoundsTimers = new Map();
 let saveDropsBoundsTimer = null;
 /**
  * The engaged-drops popup's lifetime, advanced once per push tick by the pure state
@@ -241,6 +254,9 @@ async function main() {
     if (alertsEnabled(config.all)) createAlerts();
     // The timers get their own, on their own switch — see createTimersWindow.
     if (timersEnabled(config.all)) createTimersWindow();
+    // ...and the player's own countdowns get a window each, on a switch and a position
+    // of their own. Not more rows in the boss panel: see `timerPanels` in config.js.
+    syncTimerPanels();
     // And the engaged-drops popup, likewise — see createDropsWindow.
     if (dropsEnabled(config.all)) createDropsWindow();
   } else {
@@ -1123,7 +1139,13 @@ function startPushLoop() {
     lastQuestChipsRevision = questChipsRevision;
 
     overlayWindow.webContents.send(CHANNELS.SNAPSHOT, snapshot);
-    for (const win of [alertsWindow, timersWindow]) {
+    // ONE snapshot to all three. The two timer panels each filter `triggerTimers` by
+    // lane on their own side rather than main handing each a pre-split list, for the
+    // reason spelled out in `timers.js#applyConfig`: this loop skips unchanged ticks, so
+    // a renderer that can only learn about a change from the NEXT snapshot can sit wrong
+    // for minutes during a lull. Filtering in the renderer keeps both panels correct on
+    // a config push, and keeps this side's contract a single list.
+    for (const win of [alertsWindow, timersWindow, ...panelWindows()]) {
       if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.SNAPSHOT, snapshot);
     }
     // The phones get their own build, WITH the timeline — and only when somebody is
@@ -1560,6 +1582,21 @@ function refreshTrayMenu() {
           ...alertToggle('Boss spell timers', 'triggerTimers'),
           toolTip: 'A panel of its own — unlock the overlay to place it',
         },
+        // ...and one row per panel the player has made, each its own window placed on
+        // its own. Generated from the list rather than written out, because the list is
+        // theirs: they add, rename and remove panels in the Triggers window and this
+        // menu has to be able to say so without anybody editing this file.
+        ...allTimerPanels(config.all).map((panel) => ({
+          label: panel.title,
+          type: 'checkbox',
+          checked: panel.enabled,
+          toolTip: 'Your own timers — unlock the overlay to place this panel',
+          click: () => setAlertOption({
+            timerPanels: allTimerPanels(config.all).map((p) => (
+              p.id === panel.id ? { ...p, enabled: !p.enabled } : p
+            )),
+          }),
+        })),
       ],
     },
     { type: 'separator' },
@@ -2013,6 +2050,112 @@ function createTimersWindow() {
 }
 
 /**
+ * One of the player's own timer panels.
+ *
+ * The timers window's contract exactly — invisible generously-sized box, transparent,
+ * click-through on the shared lock, no geometry machinery, its own bounds written only
+ * by its own move handler. What differs is that there are N of these, the player names
+ * them, and each one knows which panel it is from the `?panel=` on its file URL.
+ *
+ * Why they exist apart from the boss panel at all: slots are claimed in first-armed
+ * order and are never re-sorted, which is the rule the timers window was built to hold
+ * (524 measured displacements). A personal buff is the worst possible thing to put in
+ * that ordering — it is cast during the pull-in, before the boss has cast anything, and
+ * at 146 seconds it outlasts most pulls, so it would claim the top slot and hold it for
+ * the whole fight. The same failure is on record from the other direction: two mob
+ * self-buffs once held both slots on a Plane of Fear pull for fifteen minutes while
+ * Maestro of Rancor's Superior Healing — the cast that undoes the kill — armed last and
+ * drew below them.
+ *
+ * Why the player defines them rather than getting one fixed second panel: buffs, item
+ * cooldowns, AA refreshes and repop clocks are different kinds of waiting, wanted in
+ * different corners of the screen, and which of them a player even has depends on their
+ * class and their AAs.
+ *
+ * The panel id rides on the URL rather than arriving over IPC because the renderer needs
+ * it in its first frame — to pick its rows out of the snapshot and to find its own title
+ * — and a window that has to wait for a message to learn what it is would paint someone
+ * else's rows first.
+ */
+function createTimerPanelWindow(panel) {
+  if (timerPanelWindows.has(panel.id)) return;
+
+  const area = screen.getPrimaryDisplay().workArea;
+  // Same generosity as the boss panel and load-bearing for the same reason: the box is
+  // invisible and click-through, so a clipped countdown would be a silently hidden one
+  // and there is no scroll anywhere to recover it.
+  //
+  // BIGGER than the boss panel's box, and the arithmetic is why rather than caution.
+  // These rows are 2.93em against a 15px base where the boss panel's are 2.31em against
+  // 13px, so at the 1.8x the settings offer they are 79px against 54px — and a buff bar
+  // legitimately holds ten rows where a fight rarely produced four. Ten rows plus the
+  // header is 828px, which a 560px box would have quietly cut off at six.
+  const width = 620;
+  const height = 900;
+  // Panels added later step down the screen so a second one does not open exactly on
+  // top of the first — placement is the player's, but two windows landing on the same
+  // pixel would look like one window and only one of them could be found to be dragged.
+  const index = allTimerPanels(config.all).findIndex((p) => p.id === panel.id);
+  const bounds = panel.bounds ?? {
+    width,
+    height,
+    x: area.x + area.width - width - 20,
+    // Above the boss panel's 40 %: this is the panel you glance at the way you glance
+    // at EQ's own buff window. The panel top-anchors inside the box, so this puts its
+    // first row near the top-right quarter of the screen.
+    y: area.y + Math.round(area.height * 0.06) + Math.max(0, index) * 40,
+  };
+
+  const win = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    icon: path.join(ASSETS, 'icon-256.png'),
+    focusable: true,
+    webPreferences: {
+      preload: path.join(RENDERER, 'timerpanel', 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  timerPanelWindows.set(panel.id, win);
+
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.loadFile(path.join(RENDERER, 'timerpanel', 'index.html'), { query: { panel: panel.id } });
+
+  win.on('ready-to-show', () => {
+    if (win.isDestroyed()) return;
+    win.setIgnoreMouseEvents(config.get('locked'));
+    win.webContents.send(CHANNELS.LOCK_CHANGED, config.get('locked'));
+    if (!overlayVisible) win.hide();
+  });
+
+  // Read-modify-write, because this key is one array holding every panel's placement and
+  // a whole-key overwrite from a stale copy would take the other panels' positions with
+  // it. Debounced like every other window's, so a drag writes once.
+  const remember = () => {
+    clearTimeout(savePanelBoundsTimers.get(panel.id));
+    savePanelBoundsTimers.set(panel.id, setTimeout(() => {
+      if (win.isDestroyed()) return;
+      const next = allTimerPanels(config.all).map((p) => (
+        p.id === panel.id ? { ...p, bounds: win.getBounds() } : p
+      ));
+      config.set({ timerPanels: next });
+    }, 400));
+  };
+  win.on('moved', remember);
+  win.on('closed', () => {
+    if (timerPanelWindows.get(panel.id) === win) timerPanelWindows.delete(panel.id);
+  });
+}
+
+/**
  * The engaged-drops popup: the quest ledger's answer to "we are fighting this boss —
  * what do I still need from it", floating in a corner while the fight runs and while
  * the corpse is looted.
@@ -2106,6 +2249,38 @@ function syncTimersWindow() {
   else timersWindow?.close();
 }
 
+/** Every live panel window, in config order. The one accessor every window list uses,
+ *  so adding a panel never means remembering N call sites. */
+function panelWindows() {
+  return [...timerPanelWindows.values()].filter((w) => w && !w.isDestroyed());
+}
+
+/**
+ * Bring the player's timer panels into line with the settings.
+ *
+ * The create-or-close decision of `syncTimersWindow`, over a SET rather than one window:
+ * a panel that should exist and does not is opened, one that should not is closed, and
+ * one that merely changed its title keeps its window and its position and is simply told
+ * the new name. That last case is the one worth being careful about — rebuilding a window
+ * on a rename would drop it back to its default corner, and the player would have paid
+ * for a typo with a window they had placed.
+ */
+function syncTimerPanels() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const wanted = timerPanelsFor(config.all);
+  const keep = new Set(wanted.map((p) => p.id));
+
+  for (const [id, win] of timerPanelWindows) {
+    if (keep.has(id)) continue;
+    timerPanelWindows.delete(id);
+    if (win && !win.isDestroyed()) win.close();
+  }
+  for (const panel of wanted) {
+    if (timerPanelWindows.has(panel.id)) continue;
+    createTimerPanelWindow(panel);
+  }
+}
+
 /** And for the engaged-drops popup, from its own one switch (mute wins here too). */
 function syncDropsWindow() {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
@@ -2122,7 +2297,7 @@ function syncDropsWindow() {
  * switched off rather than at whatever minute the next snapshot arrives.
  */
 function broadcastConfig(cfg) {
-  for (const win of [overlayWindow, alertsWindow, timersWindow, dropsWindow, setupWindow]) {
+  for (const win of [overlayWindow, alertsWindow, timersWindow, ...panelWindows(), dropsWindow, setupWindow]) {
     if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.CONFIG_CHANGED, cfg);
   }
 }
@@ -2138,6 +2313,7 @@ function setAlertOption(patch) {
   const after = config.set(patch);
   syncAlertsWindow();
   syncTimersWindow();
+  syncTimerPanels();
   // Mute owns this window too — it is a consult surface like the timers.
   syncDropsWindow();
   broadcastConfig(after);
@@ -2181,7 +2357,7 @@ function applyLock(locked) {
   // reposition the warnings, the timers and the drops popup too, and a separate
   // hotkey per window would just be things to forget instead of one. Placement stays
   // separate — only the GESTURE is shared.
-  for (const win of [alertsWindow, timersWindow, dropsWindow]) {
+  for (const win of [alertsWindow, timersWindow, ...panelWindows(), dropsWindow]) {
     if (!win || win.isDestroyed()) continue;
     win.setIgnoreMouseEvents(locked);
     win.webContents.send(CHANNELS.LOCK_CHANGED, locked);
@@ -2239,7 +2415,7 @@ function toggleVisible() {
   if (overlayVisible) {
     overlayWindow.showInactive();   // show without stealing focus from the game
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
-    for (const win of [alertsWindow, timersWindow, dropsWindow]) {
+    for (const win of [alertsWindow, timersWindow, ...panelWindows(), dropsWindow]) {
       if (!win || win.isDestroyed()) continue;
       win.showInactive();
       win.setAlwaysOnTop(true, 'screen-saver');
@@ -2248,6 +2424,7 @@ function toggleVisible() {
     overlayWindow.hide();
     alertsWindow?.hide();
     timersWindow?.hide();
+    for (const win of panelWindows()) win.hide();
     dropsWindow?.hide();
   }
   refreshTrayMenu();
@@ -2489,6 +2666,7 @@ function registerIpc() {
     // timers window answers to its own switch, and to the same mute.
     if (ALERT_KEYS.some((key) => patch[key] !== undefined)) syncAlertsWindow();
     if (TIMER_KEYS.some((key) => patch[key] !== undefined)) syncTimersWindow();
+    if (PANEL_KEYS.some((key) => patch[key] !== undefined)) syncTimerPanels();
     if (DROPS_KEYS.some((key) => patch[key] !== undefined)) syncDropsWindow();
     // One block, one predicate — the master switch decides whether the tracker exists at
     // all and the seven categories decide what it reads, so any touch of it re-derives
@@ -2729,6 +2907,70 @@ function registerIpc() {
     if (!pack) return { ok: false, error: 'no such pack' };
     try {
       return { ok: true, ...(await measurePack(pack, { rankTolerant })) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  /**
+   * "Measure my own timers from my log."
+   *
+   * The numbers have to come from the player's own log and there is no honest shortcut:
+   * buff length depends on their level, on the RANK of the spell — `Spirit of the Puma V`
+   * and `VI` differ by thirteen seconds in one session of the live log — and on their
+   * AAs. A table we shipped would be wrong for everybody in a different way, and wrong in
+   * the direction that matters, because a countdown that ends early is one you learn to
+   * trust before it lies to you.
+   *
+   * Saved rather than previewed-then-saved, which is the same call the GINA import makes:
+   * the report is information ABOUT the pack, not a condition of keeping it, and a pack
+   * sitting in the rail can be edited row by row or removed in one click. Aimed at the
+   * player's first panel rather than the boss one — a buff countdown squatting the top
+   * slot of the boss panel for a whole fight is the failure this feature exists to
+   * prevent, so landing them there by default would be a joke at the player's expense.
+   */
+  ipcMain.handle(CHANNELS.TRIGGERS_MINE_BUFFS, async (_e, opts = {}) => {
+    if (!tailer?.filePath) return { ok: false, error: 'no log file is being read yet' };
+    try {
+      // Stricter than the offline script's defaults, on purpose. The script prints for a
+      // person to read and marks what is loose; this SAVES what it finds, so it asks for
+      // effects seen enough times to be sure of and tight enough to be one number. Against
+      // three weeks of the live log that is the difference between ninety-three rows to
+      // prune and sixteen to glance at.
+      const result = await mineBuffsLog(tailer.filePath, {
+        minObs: opts.minObs ?? 5,
+        maxCv: opts.maxCv ?? 0.15,
+      });
+      const chosen = opts.includeLoose ? result.candidates : result.candidates.filter((c) => !c.loose);
+      if (!chosen.length) {
+        return { ok: true, saved: false, ...result, candidates: chosen };
+      }
+
+      // Somewhere to put them. A player who has removed every panel gets one back rather
+      // than a pack whose every row draws in the boss window.
+      const panels = allTimerPanels(config.all);
+      let panel = panels[0]?.id;
+      if (!panel) {
+        panel = 'p1';
+        config.set({ timerPanels: [{ id: panel, title: 'My timers', enabled: true, bounds: null }] });
+        syncTimerPanels();
+      }
+
+      const pack = packFromBuffs(chosen, {
+        id: triggerStore.freeId('my-timers'),
+        name: 'My timers (measured from my log)',
+        comments:
+          `${chosen.length} countdowns measured from ${result.lines.toLocaleString()} lines ` +
+          'of your own log. Every duration is the median of the cycles actually observed — ' +
+          'nobody read these off a spell table, which is the point: buff length depends on ' +
+          'your level, the rank you cast and your AAs. Every row is yours to correct.',
+        modified: new Date().toISOString().slice(0, 10),
+        panel,
+      });
+      const saved = triggerStore.save(pack);
+      if (!saved.ok) return { ok: false, error: (saved.errors ?? ['could not save']).join('; ') };
+      reloadTriggerPacks();
+      return { ok: true, saved: true, packId: pack.id, ...result, candidates: chosen };
     } catch (err) {
       return { ok: false, error: err.message };
     }
