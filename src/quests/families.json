@@ -1,0 +1,206 @@
+{
+  "attribution": {
+    "what": "Member lists for the six Plane of Sky quest sources that name a FAMILY of mobs rather than one mob.",
+    "why": "posky.json writes six of its eighteen source strings as prose the log will never print as a creature name — \"bee\" mobs, spiroc mobs, drake/sphinx/spirit mobs, essence/soul mobs. The drops popup matches an engaged mob against a source by equality, so those six could never fire, and the items behind them were invisible on exactly the mobs being farmed. This file is what makes them matchable.",
+    "howEstablished": "Islands were derived from the player's own log, not from a wiki: Plane of Sky is climbed one island at a time and every session's kill order shows the same ladder — blade storm before Noble Dojorn (1.5), azarack before Protector of Sky (2), the harpies and gazers before Gorgalosk (3), the essence/soul mobs around Keeper of Souls and Overseer of Air (4), the spirocs around The Spiroc Lord (5), the bees around Bazzt Zzzt (6), the sphinxes and drakes and undine spirits around Sister of the Spire (7), then the two Veeshan bosses (8). Measured over 854 Sky kills in 28 sessions of eqlog_Rhale_oggok.txt; every member below was killed on the island its family belongs to, or is named verbatim in the source string it sits under.",
+    "how": "'log' means this character's own log recorded the mob dropping an item ONLY this family sources — measured, not read. 'hand' means it was added by review: killed on the family's island under the family's own naming, or named verbatim in the dataset's source string.",
+    "audit": "scripts/mine-families.js replays a log against this file and prints three things — every Sky mob no chip and no family claims (the list that stops a member table failing silently), the drop evidence per family, and which of these entries the log has actually seen.",
+    "notPartOfPosky": "Deliberately a separate file, on the effects.json / effects-legends.json precedent: scripts/fetch-posky.js rewrites the dataset wholesale and must never be able to clobber a hand-reviewed supplement.",
+    "asOf": "2026-08-24",
+    "boss": "Each family also names the island's own boss — the mob the dataset names outright for that island's other items. A family source string is prose ('\"bee\" mobs'), and putting that prose on a popup row tells the player nothing they can act on; the boss name does. It is stated here rather than parsed out of the blob text, because four of the six blobs contain no name at all and reading one out of the other two would be the text interpretation this project keeps refusing. Island 4 names Keeper of Souls: Overseer of Air is on the same island but is the efreeti-loot boss shared with islands 1.5 and 8, while Keeper of Souls is the one the dataset names for island 4's own thirteen items."
+  },
+  "families": [
+    {
+      "island": "6",
+      "mob": "\"bee\" mobs",
+      "boss": "Bazzt Zzzt",
+      "note": "The island-6 bixie trash around Bazzt Zzzt. Four spellings, none of which contains the word 'bee' — which is the whole reason substring matching was never an option here. Bazzt Zzzt himself is deliberately NOT a member: the log has him dropping thirteen other quest items and never a Bixie Essence, while two of the bees drop it, so the dataset's distinction between him and his bees is one the evidence supports.",
+      "members": [
+        {
+          "name": "Bzzzt",
+          "how": "log"
+        },
+        {
+          "name": "Bazzzazzt",
+          "how": "log"
+        },
+        {
+          "name": "Bzzazzt",
+          "how": "hand"
+        },
+        {
+          "name": "Bizazzzt",
+          "how": "hand"
+        }
+      ]
+    },
+    {
+      "island": "6",
+      "mob": "Bazzt Zzzt \"Bees\"",
+      "boss": "Bazzt Zzzt",
+      "note": "The dataset's second, differently-spelled bee blob — and the one that sources the Adamantium Earring, the item this whole file exists for. It names the boss AND his bees, so it gets both: matching it to the other bee family instead would mean deciding two prose strings mean the same thing, which is text interpretation rather than measurement. Bazzt Zzzt is a member here because the string says so.",
+      "members": [
+        {
+          "name": "Bazzt Zzzt",
+          "how": "hand"
+        },
+        {
+          "name": "Bzzzt",
+          "how": "hand"
+        },
+        {
+          "name": "Bazzzazzt",
+          "how": "hand"
+        },
+        {
+          "name": "Bzzazzt",
+          "how": "hand"
+        },
+        {
+          "name": "Bizazzzt",
+          "how": "hand"
+        }
+      ]
+    },
+    {
+      "island": "5",
+      "mob": "spiroc mobs",
+      "boss": "The Spiroc Lord",
+      "note": "The island-5 spiroc trash. The Spiroc Lord is a chip of his own inside the same source string, so he is not listed here — a family must not duplicate a row the dataset already places. Every name below was killed between Overseer of Air and The Spiroc Lord in the log's own kill order, every session.",
+      "members": [
+        {
+          "name": "spiroc arbiter",
+          "how": "hand"
+        },
+        {
+          "name": "spiroc banisher",
+          "how": "hand"
+        },
+        {
+          "name": "spiroc caller",
+          "how": "hand"
+        },
+        {
+          "name": "spiroc expulser",
+          "how": "hand"
+        },
+        {
+          "name": "spiroc revolter",
+          "how": "hand"
+        },
+        {
+          "name": "spiroc vanquisher",
+          "how": "hand"
+        },
+        {
+          "name": "spiroc walker",
+          "how": "hand"
+        },
+        {
+          "name": "Spiroc Guardian",
+          "how": "hand"
+        }
+      ]
+    },
+    {
+      "island": "7",
+      "mob": "drake/sphinx/spirit mobs",
+      "boss": "Sister of the Spire",
+      "note": "Island 7's three kinds, read literally: the drakes, the sphinx, the spirit. 'a greater sphinx' is separately a named chip of its own for one other item, and appears here too because this family genuinely sources two more. The thunder spirits are NOT here — they are Agnarr's island above this one and the log's kill order never puts them on 7.",
+      "members": [
+        {
+          "name": "greater sphinx",
+          "how": "log"
+        },
+        {
+          "name": "undine spirit",
+          "how": "log"
+        },
+        {
+          "name": "fatestealer drake",
+          "how": "hand"
+        },
+        {
+          "name": "windrider drake",
+          "how": "hand"
+        },
+        {
+          "name": "heartsbane drake",
+          "how": "hand"
+        }
+      ]
+    },
+    {
+      "island": "4",
+      "mob": "essence/soul mobs, Eternal Spirit",
+      "boss": "Keeper of Souls",
+      "note": "The island-4 trash around Keeper of Souls and Overseer of Air: three essence mobs and three soul mobs, which is the entire island-4 vocabulary this log has ever killed. Eternal Spirit is named verbatim in the source string and has never appeared in the log — unverified, not wrong, and the audit script says so.",
+      "members": [
+        {
+          "name": "essence carrier",
+          "how": "hand"
+        },
+        {
+          "name": "essence harvester",
+          "how": "hand"
+        },
+        {
+          "name": "essence tamer",
+          "how": "hand"
+        },
+        {
+          "name": "soul carrier",
+          "how": "hand"
+        },
+        {
+          "name": "soul harvester",
+          "how": "hand"
+        },
+        {
+          "name": "soul tamer",
+          "how": "hand"
+        },
+        {
+          "name": "Eternal Spirit",
+          "how": "hand"
+        }
+      ]
+    },
+    {
+      "island": "4",
+      "mob": "soul/essence griffons (maybe also Eternal Spirit)",
+      "boss": "Keeper of Souls",
+      "note": "The wizard test's spelling of the family above — same island, same item, same six mobs. Listed separately rather than aliased because parseSources keys a chip on its own text and two chips that happen to describe one set are still two statements the dataset made. Note what is NOT here: the log proves Efreeti Statuette actually drops off Noble Dojorn, Overseer of Air and the Hand of Veeshan, and those three are reached by the learned index instead — folding them in here on that evidence is the multi-source over-generalisation this whole design refuses.",
+      "members": [
+        {
+          "name": "essence carrier",
+          "how": "hand"
+        },
+        {
+          "name": "essence harvester",
+          "how": "hand"
+        },
+        {
+          "name": "essence tamer",
+          "how": "hand"
+        },
+        {
+          "name": "soul carrier",
+          "how": "hand"
+        },
+        {
+          "name": "soul harvester",
+          "how": "hand"
+        },
+        {
+          "name": "soul tamer",
+          "how": "hand"
+        },
+        {
+          "name": "Eternal Spirit",
+          "how": "hand"
+        }
+      ]
+    }
+  ]
+}

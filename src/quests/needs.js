@@ -18,11 +18,12 @@
  * THE TWO SURFACES DIVERGE HERE, ON PURPOSE. The window's "By boss" rail is
  * `bossNeeds` and stays the dataset's own islands and bosses, because the rail
  * answers "where do I go next" and thirty-seven trash mobs is noise in that
- * question. The popup is `dropGroups`, which unions the dataset with what this
- * character's own log has PROVED a mob drops, because it answers "is this corpse
- * worth looting" and those same thirty-seven are the whole point. Both read one
- * outstanding-items walk, so they can differ about grouping and never about what is
- * owed — which was the original reason this module is in the pure layer.
+ * question. The popup is `dropGroups`, which unions that with the shipped family
+ * member lists and with what this character's own log has PROVED a mob drops, because
+ * it answers "is this corpse worth looting" and those same thirty-seven are the whole
+ * point. Both read one outstanding-items walk, so they can differ about grouping and
+ * never about what is owed — which was the original reason this module is in the pure
+ * layer.
  *
  * Nothing here imports the dataset. `src/quests/index.js` reads `posky.json` off
  * disk with `fs`, and this module is loaded by the Quests window's renderer — so the
@@ -132,8 +133,20 @@ function outstanding(snapshot) {
  * hiding that would be data invisible on scan. A learned row passes the mob's own key,
  * so its dataset chips all list as alternatives, which is exactly right: the dataset
  * genuinely never said this mob drops it.
+ *
+ * `boss` rides only on a row the dataset did NOT place under this mob — a family
+ * member's row, or one this character's log learned — and names the boss the dataset
+ * DOES associate with the item. It is what a row that would otherwise read `Adamantium
+ * Earring · from "bee" mobs` says instead: blob prose names nothing the player can act
+ * on, and the boss's name does. Absent on a row the dataset placed outright, so the
+ * qualifier stays the exception it is.
+ *
+ * There is deliberately no drop COUNT on a row any more. The popup lists what is still
+ * needed, and "seen 4×" beside a needed item reads as four already in the bag — the one
+ * number on the panel that could be mistaken for progress, on a panel whose entire
+ * subject is what is missing.
  */
-function itemRow(entry, hereKey, seen = null) {
+function itemRow(entry, hereKey, { boss = null } = {}) {
   const row = {
     name: entry.name,
     rune: entry.rune,
@@ -142,10 +155,23 @@ function itemRow(entry, hereKey, seen = null) {
       .map((other) => ({ island: other.island, mob: other.mob })),
     classes: entry.classes,
   };
-  // Only ever present on a row the dataset did NOT place here, so the panel can say
-  // it is speaking from experience without ever claiming dataset authority for it.
-  if (seen !== null) row.seen = seen;
+  if (boss) row.boss = boss;
   return row;
+}
+
+/**
+ * The one boss the dataset associates with an item, or null when it names none or more
+ * than one.
+ *
+ * Used for the rows a family or the learned index placed, where the dataset never said
+ * this mob drops it and the player still wants a name they recognise. Silent on an
+ * ambiguity rather than picking: `Efreeti Standard` comes off three different bosses,
+ * and printing one of the three would be a guess in a slot the player will read as a
+ * fact. Silent on the zone-wide rune bucket too — "anywhere" is not a boss.
+ */
+function soleBoss(entry) {
+  const named = entry.chips.filter((chip) => !chip.zoneWide);
+  return named.length === 1 ? named[0].mob : null;
 }
 
 /**
@@ -200,76 +226,103 @@ export function bossNeeds(snapshot) {
 }
 
 /**
- * The POPUP's inversion: every place that still owes this character something, the
- * dataset's named bosses unioned with the mobs this character's own log has proved
- * drop what is outstanding.
+ * The POPUP's inversion: every place that still owes this character something. Three
+ * sources unioned, in descending order of how strongly the dataset stands behind them.
  *
- * Why a union rather than a replacement, in both directions. The dataset half is what
- * makes a fresh character useful before it has looted anything — drop the shipped
- * chips and day one shows an empty popup on a boss the data has always known about.
- * The learned half is what reaches everything the dataset's prose cannot name: six of
- * its eighteen source strings describe a FAMILY ("Island 7: drake/sphinx/spirit
- * mobs"), and the ones that do name a mob name only the island boss — so the spiroc
- * trash mob standing on the player's own Spiroc Earth Totem was invisible.
+ * 1. **The dataset's named chips** — `bossNeeds`, unchanged. What makes a fresh
+ *    character useful before it has looted anything.
+ * 2. **The shipped family lists** — the six source strings that describe a family
+ *    rather than a name (`Island 6: "bee" mobs`) resolved to member mobs by
+ *    `families.json`.
+ * 3. **What this character's own log has proved** — the learned drop index.
  *
- * There is no matching heuristic in either half and deliberately no shipped member
- * table. Approach 1 of the plan — a hand-authored blob → member list — was rejected
- * for the reason CLAUDE.md gives about a shipped spell-duration table: Legends is a
- * custom server, a list transcribed from a classic wiki is wrong for everybody in a
- * slightly different way, and it fails SILENTLY, which is the bug being fixed. What
- * is here instead is measurement: the keys are the log's own creature names, so
- * matching an engaged mob is equality by construction.
+ * A row from either of the last two carries `boss`: the name the dataset does put the
+ * item under, so the panel can qualify the row with something the player recognises
+ * rather than with blob prose or a drop count.
  *
- * A learned item the dataset already places under this mob is NOT duplicated and does
- * not gain a `seen` count — the dataset said it first, and a row must never claim to
- * have been learned when it was shipped. A learned mob the dataset never named gets a
- * group with `island: null`: the item's own chips usually imply one, but inferring the
- * island from them would be a guess wearing a label's clothes, and the renderer simply
- * omits the tag.
+ * WHY ALL THREE, and specifically why the family table was added after the learned
+ * index shipped alone. A drop index learned from your own loot cannot answer "what does
+ * this corpse owe me", because owing means not-yet-looted:
  *
- * @param {Object} snapshot  QuestProgress#snapshot(), including its `drops` index
+ *     You only learn that a mob drops X by looting X. The popup exists to tell you
+ *     about the X you have NOT looted. The index is blind by construction to exactly
+ *     the items the popup is for.
+ *
+ * That is structural, not bad luck — measured on the live ledger, 0 of 16 outstanding
+ * items had a learned source and all 267 learned pairs resolved to items already owned.
+ * The index is kept and demoted rather than removed: it costs nothing, every entry is
+ * something the character watched happen, and it still catches the second-copy case and
+ * a need reopened by a hand-in. It just stops being the only answer to a question it
+ * cannot answer. Do not rebuild it as the primary one.
+ *
+ * The families half is a shipped table, which this file previously argued against by
+ * citing CLAUDE.md's spell-duration rule. That argument does not transfer and the
+ * reversal is deliberate — see the long note on `FAMILIES` in `src/quests/index.js` for
+ * why, including the measured alternative (composing the learned index with the
+ * dataset) and the two ways it failed.
+ *
+ * Precedence between the three: whoever gets there first keeps the row. An item the
+ * dataset already places under a mob is never re-added by a family or by the index, so
+ * a row can never claim to have been inferred when it was shipped outright. A family
+ * group carries the family's own island, because the dataset's string states it; a
+ * purely learned mob gets `island: null`, because inferring one from the item's chips
+ * would be a guess wearing a label's clothes, and the renderer simply omits the tag.
+ *
+ * @param {Object} snapshot  QuestProgress#snapshot(), including `drops` and `families`
  * @param {{anyMob?: boolean}} [options]  `anyMob: false` is exactly the shipped
  *   named-boss-only behaviour — the dataset half alone, byte for byte `bossNeeds`.
  */
 export function dropGroups(snapshot, { anyMob = true } = {}) {
   const groups = bossNeeds(snapshot);
-  const learned = snapshot?.drops;
-  if (!anyMob || !learned) return groups;
+  if (!anyMob) return groups;
 
   const entries = outstanding(snapshot);
   const byMob = new Map(groups.filter((g) => !g.zoneWide).map((g) => [mobKey(g.mob), g]));
 
-  for (const [mob, items] of Object.entries(learned)) {
+  /** Find or open the group for one mob name, keeping the dataset's row order. */
+  const groupFor = (mob, island) => {
+    const key = mobKey(mob);
+    let group = byMob.get(key);
+    if (!group) {
+      group = { island, mob, zoneWide: false, items: [] };
+      byMob.set(key, group);
+      groups.push(group);
+    }
+    return group;
+  };
+
+  // ---- the families, before the learned index so a mob in both keeps its island
+  for (const family of snapshot?.families ?? []) {
+    const key = groupKey({ island: family.island ?? null, mob: family.mob, zoneWide: false });
+    // What this family still owes: every outstanding item whose source chips include
+    // this exact chip. Equality on the chip's own key, not on its words — the family
+    // is a member list for one statement the dataset made, not a description to match.
+    const owed = [...entries.values()].filter((entry) => entry.chipKeys.has(key));
+    if (!owed.length) continue;
+    for (const member of family.members ?? []) {
+      if (!mobKey(member.name)) continue;
+      const group = groupFor(member.name, family.island ?? null);
+      for (const entry of owed) {
+        if (group.items.some((i) => i.name === entry.name)) continue;
+        group.items.push(itemRow(entry, key, { boss: family.boss ?? soleBoss(entry) }));
+      }
+    }
+  }
+
+  // ---- what this character has watched drop
+  for (const [mob, items] of Object.entries(snapshot?.drops ?? {})) {
     const key = mobKey(mob);
     if (!key) continue;
-    let group = byMob.get(key);
-    for (const [name, count] of Object.entries(items)) {
+    for (const name of Object.keys(items)) {
       const entry = entries.get(name);
       // Nothing outstanding under that name: turned in, owned, or a name this copy of
       // the dataset no longer knows. The still-needed filter is the whole popup.
       if (!entry) continue;
-      if (group?.items.some((i) => i.name === name)) continue;
-      if (!group) {
-        group = { island: null, mob, zoneWide: false, items: [] };
-        byMob.set(key, group);
-        groups.push(group);
-      }
-      group.items.push(itemRow(entry, `learned|${key}`, count));
+      if (byMob.get(key)?.items.some((i) => i.name === name)) continue;
+      groupFor(mob, null).items.push(itemRow(entry, `learned|${key}`, { boss: soleBoss(entry) }));
     }
   }
   return groups;
-}
-
-/**
- * What one named mob still owes, or null for one that owes nothing — the popup's
- * question asked about a single corpse, for anything that has a name rather than a
- * pull. Same union and same still-needed filter as `dropGroups`, which it reads.
- */
-export function mobNeeds(snapshot, mobName, options) {
-  const key = mobKey(mobName);
-  if (!key) return null;
-  return dropGroups(snapshot, options)
-    .find((g) => !g.zoneWide && mobKey(g.mob) === key && g.items.length > 0) ?? null;
 }
 
 /**
@@ -279,7 +332,10 @@ export function mobNeeds(snapshot, mobName, options) {
  * Equality is still the whole rule — "spiroc mobs" and "drake/sphinx/spirit mobs" are
  * descriptions, not names the log will ever write, so they can never match here, and
  * guessing their membership from substrings is exactly what this project does not do.
- * Those blobs are reached through the LEARNED half of `dropGroups` or not at all.
+ * By the time groups reach this function those blobs have already been RESOLVED into
+ * named member groups by `dropGroups`, from a reviewed table rather than from their
+ * words; a blob that no family covers simply never matches, which is the honest
+ * outcome and the one `scripts/mine-families.js` exists to report on.
  * `mobKey`'s article fold is not a loosening of that: it is the same strip the parser
  * has already applied to every name in `engagedNames`, and without it the two dataset
  * bosses the log only ever writes with an article could never match either.

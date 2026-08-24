@@ -69,6 +69,70 @@ export const EFFECTS = (() => {
 })();
 
 /**
+ * Member lists for the six source strings that name a FAMILY of mobs rather than one.
+ *
+ * `families.json` beside this file, on the same terms as the effects supplement and
+ * for the same reason: `scripts/fetch-posky.js` rewrites `posky.json` wholesale, so a
+ * hand-reviewed fact must live somewhere a refresh cannot reach.
+ *
+ * WHY A SHIPPED TABLE, when CLAUDE.md says a shipped spell-duration table is exactly
+ * the wrong answer. Because the two facts are not the same shape. A buff's duration
+ * varies per player — level, spell rank, purchased AAs — which is why `mine-buffs.js`
+ * measures it instead; *which mobs are the bees on island 6* varies for nobody. The
+ * precedent that fits is `src/triggers/seed-pack.js`: sixteen boss timers measured off
+ * a real server, reviewed by hand, shipped, and replacing a live estimator that was
+ * worse for being learned.
+ *
+ * The measured alternative was built and rejected on its own numbers rather than on
+ * principle. Composing the learned drop index with the dataset — "Bzzzt dropped Bixie
+ * Essence, whose source is `\"bee\" mobs`, so Bzzzt is a bee" — misses the live case
+ * (the Adamantium Earring hangs off a second, differently-spelled bee blob) and
+ * over-generalises through multi-source items (three efreeti bosses become island-4
+ * griffons via `Efreeti Statuette`). And it can never help at all with an item you
+ * have not looted, which is every item the popup exists for.
+ *
+ * The "fails silently" objection is answered by construction rather than by promise:
+ * every member says how it was established, and `scripts/mine-families.js` replays the
+ * player's own log against this file and reports every Sky mob no chip and no family
+ * claims. That report is the audit surface — a wrong or missing entry is a name in a
+ * list you can read, which is what the objection asked for. It is deliberately NOT a
+ * screen in the Quests window: that window answers what a character still owes, and a
+ * member table is a fact about the zone, the same shape of thing `seed-pack.js` keeps
+ * in a file rather than in a pane.
+ *
+ * Absent or malformed reads as empty. A supplement must never be able to take the
+ * ledger down — a popup that stays quiet about eight items is a smaller failure than
+ * a Quests window that will not open.
+ *
+ * @type {{attribution: Object|null, families: Array<{island: string|null, mob: string,
+ *   boss: string|null, note: string|null,
+ *   members: Array<{name: string, how: 'log'|'hand'}>}>}}
+ */
+export const FAMILIES = (() => {
+  const empty = { attribution: null, families: [] };
+  try {
+    const raw = JSON.parse(fs.readFileSync(new URL('./families.json', import.meta.url), 'utf8'));
+    if (!Array.isArray(raw?.families)) return empty;
+    return {
+      attribution: raw.attribution ?? null,
+      families: raw.families
+        .filter((f) => f && typeof f.mob === 'string' && Array.isArray(f.members))
+        .map((f) => ({
+          island: f.island ?? null,
+          mob: f.mob,
+          boss: f.boss ?? null,
+          note: f.note ?? null,
+          members: f.members
+            .filter((m) => m && typeof m.name === 'string' && m.name.trim())
+            .map((m) => ({ name: m.name.trim(), how: m.how === 'log' ? 'log' : 'hand' })),
+        })),
+    };
+  } catch {
+    return empty;
+  }
+})();
+
+/**
  * Collapse an item name to the key everything matches on.
  *
  * Four normalizations, each earned by a real mismatch: the article the log puts in

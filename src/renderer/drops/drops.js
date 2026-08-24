@@ -62,13 +62,16 @@ function render(payload) {
     for (const item of group.items) {
       const row = div(`need${item.rune ? ' rune' : ''}`);
       row.append(span('iname', item.name));
-      // `seen` rides only on a row the quest DATA did not place under this mob — one
-      // this character's own log learned. Saying so is the point: the panel is
-      // speaking from experience there, and a row that looked identical to a shipped
-      // one would be claiming dataset authority it does not have. Dataset rows carry
-      // no caption at all rather than a matching "from the data" one, so the caption
-      // reads as the exception it is.
-      if (item.seen) row.append(span('seen', `seen ${item.seen}\u00d7`));
+      // `boss` rides only on a row the quest data did not place under THIS mob — one a
+      // family member list reached, or one this character's own log learned — and it
+      // names the boss the data does put the item under. Two things it is deliberately
+      // not. It is not the family's own words: `Island 6: "bee" mobs` is prose, and a
+      // row reading `from "bee" mobs` names nothing the player can go and kill. And it
+      // is not a drop count: `seen 4×` used to sit here, and beside a still-needed
+      // item it reads as four already in the bag, on a panel whose whole subject is
+      // what is missing. Dataset rows carry no qualifier at all rather than a matching
+      // "from the data" one, so the qualifier reads as the exception it is.
+      if (item.boss) row.append(span('from', item.boss));
       const who = span('who', '');
       for (const c of item.classes) who.append(span('cls', c.className));
       row.append(who);

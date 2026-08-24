@@ -87,31 +87,47 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
 
 /* ------------------------------------------------------------------ boss lines */
 
+/*
+ * The mob line is a CAPTION, not a headline.
+ *
+ * The question this panel answers is "what do I still need off this corpse", and it
+ * used to answer "which corpse" in bold uppercase full-ink and "what" in body text
+ * underneath — the loudest thing on screen was the one word the player could already
+ * read off their own target window. So the weights are inverted: the mob recedes to a
+ * letter-spaced caption above its items and the item name below becomes the loud line.
+ * The mob stays visible because you still need to know which corpse, and the grouping,
+ * the row heights and the geometry are untouched — this is a type change and nothing
+ * else, which is why it cannot reflow anything.
+ *
+ * 0.82em is the floor, not a preference: at the 1.25 scale this is read at, that is
+ * 13.3px, and no label in this project goes under 12.
+ */
 .bhead {
   display: flex;
   align-items: baseline;
-  gap: 0.5em;
-  padding: 0.42em 0.69em 0.15em;
+  gap: 0.42em;
+  padding: 0.54em 0.69em 0.06em;
 }
 .bhead .btag {
-  font-size: 0.85em;
+  font-size: 0.78em;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--ember-lit);
   white-space: nowrap;
 }
 .bhead .bmob {
-  font-size: 0.92em;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-size: 0.82em;
+  font-weight: 600;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
+  color: var(--ink-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .bhead .bstate {
   margin-left: auto;
-  font-size: 0.81em;
+  font-size: 0.78em;
   color: var(--ink-faint);
   white-space: nowrap;
 }
@@ -121,24 +137,35 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
 .need {
   display: flex;
   align-items: center;
-  gap: 0.62em;
-  padding: 0.19em 0.69em 0.19em 1.15em;
+  gap: 0.5em;
+  padding: 0.12em 0.69em 0.26em 1.15em;
 }
+/* The loud line — the drop, which is the whole question. */
 .need .iname {
-  font-size: 0.96em;
+  font-size: 1.05em;
+  font-weight: 600;
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Shrinkable, never growing. `.who` already claims the free space with
+     margin-left:auto, so growing the name would only shove the boss qualifier out to
+     sit against the class chips — and the qualifier belongs to the NAME. min-width: 0
+     is what makes the name's own ellipsis absorb a squeeze, instead of the class chips
+     being crushed: a row that ellipsised its class flags would answer "which of my
+     quests" with a guess, which is the failure the item-led-single-line layout would
+     have shipped. */
+  flex: 0 1 auto;
+  min-width: 0;
 }
 /* A rune keeps its gold accent in every surface that names one. */
 .need.rune .iname { color: var(--ember-lit); }
-/* Faint, and only on a row the quest data did not place here — see drops.js. It sits
-   against the name rather than out by the class flags because it qualifies the NAME:
-   "this mob, this item, N times in your own log". `flex: none` so it can never be the
-   thing that squeezes; the name's ellipsis absorbs a long one instead. */
-.need .seen {
+/* Faint, and only on a row the quest data did not place under this mob — see drops.js.
+   It sits against the name rather than out by the class flags because it qualifies the
+   NAME. `flex: none` so it can never be the thing that squeezes. */
+.need .from {
   flex: none;
-  font-size: 0.81em;
+  font-size: 0.78em;
   color: var(--ink-faint);
   white-space: nowrap;
 }
@@ -149,7 +176,7 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
   flex: none;
 }
 .need .cls {
-  font-size: 0.85em;
+  font-size: 0.81em;
   color: var(--ink-dim);
   background: color-mix(in srgb, var(--slab) 55%, #241a10);
   border: 1px solid var(--edge);

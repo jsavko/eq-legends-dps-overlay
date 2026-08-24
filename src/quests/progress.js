@@ -34,7 +34,7 @@ import { parseTimestamp } from '../parser/timestamp.js';
 import { CHAT_RULE_IDS } from '../parser/rules.js';
 import { matchSessionRule } from '../session/rules.js';
 import {
-  lookup, questItemKey, isRune, POSKY, EFFECTS, itemRef, questRef,
+  lookup, questItemKey, isRune, POSKY, EFFECTS, FAMILIES, itemRef, questRef,
   VALID_ITEM_REFS, VALID_QUEST_REFS,
   offerSlots, rewardLookup, allItemKeys, allRewardKeys,
 } from './index.js';
@@ -622,6 +622,16 @@ export class QuestProgress {
       inventoryAsOf: this.state.inventory.asOf,
       /** Static spell data for the effect tooltips — a few KB, cheaper than a channel. */
       effects: EFFECTS,
+      /**
+       * The six family member lists, ridden through verbatim.
+       *
+       * They travel on the snapshot for the same reason the learned drop index does:
+       * `src/quests/needs.js` is imported by a renderer and must never touch `fs`,
+       * while the file itself is read here in the pure layer that already owns
+       * `posky.json`. Shipped and unchanging, so this is a static payload of a few KB
+       * riding a message the window asks for by hand — not a per-tick cost.
+       */
+      families: FAMILIES.families,
       /**
        * The learned drop index, creature key → DATASET item name → count.
        *
