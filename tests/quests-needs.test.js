@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  bossNeeds, engagedNeeds, nextDropsState, dropsDisplay, parseSources, DROPS_LINGER_MS,
+  bossNeeds, dropGroups, mobNeeds, engagedNeeds, nextDropsState, dropsDisplay,
+  parseSources, DROPS_LINGER_MS,
 } from '../src/quests/needs.js';
 import { QuestProgress } from '../src/quests/progress.js';
 
@@ -216,4 +217,145 @@ test('dropsDisplay re-reads the live inversion so looted rows leave mid-linger',
   const afterLoot = GROUPS.filter((g) => g.mob !== 'Gorgalosk');
   assert.deepEqual(dropsDisplay(state, afterLoot), [], 'everything looted → nothing to paint');
   assert.deepEqual(dropsDisplay(null, GROUPS), []);
+});
+
+// ---------------------------------------------------------------------------
+// The learned drop index: the popup's other half.
+// ---------------------------------------------------------------------------
+
+/** The dataset half of every case below, plus a `drops` index to union with it. */
+const LEARNED = (drops) => ({
+  drops,
+  classes: [
+    cls('ranger', 'Ranger', [quest('ranger:0', "Earthshaker's Mantle", [
+      // A family blob: prose, not a name the log will ever write.
+      item('Spiroc Earth Totem', 'Island 5: spiroc mobs / Island 5: The Spiroc Lord'),
+    ])]),
+    cls('bard', 'Bard', [quest('bard:0', 'Singing Short Sword', [
+      // The bee blob, plus the boss chip the log spells differently.
+      item('Bee Stinger', 'Island 6: "bee" mobs / Island 6: Bazzt Zzzt "Bees"'),
+      item('Wind Rune Azia', 'Random zone-wide drop', { rune: true }),
+    ])]),
+    cls('monk', 'Monk', [quest('monk:0', 'Knuckles', [
+      item('Silken Strands', 'Island 3: Gorgalosk'),
+    ])]),
+  ],
+});
+
+test('a trash mob the dataset only describes as a family fires from what the log saw', () => {
+  const snapshot = LEARNED({ 'spiroc vanquisher': { 'Spiroc Earth Totem': 3 } });
+  const groups = dropGroups(snapshot);
+  assert.deepEqual(engagedNeeds(groups, ['spiroc vanquisher']).map((g) => g.mob),
+    ['spiroc vanquisher']);
+  const row = engagedNeeds(groups, ['spiroc vanquisher'])[0].items[0];
+  assert.equal(row.name, 'Spiroc Earth Totem');
+  assert.equal(row.seen, 3, 'the row says it is speaking from experience');
+  assert.deepEqual(row.classes.map((c) => c.className), ['Ranger'], 'and to whom it is owed');
+  assert.deepEqual(row.alsoFrom, [
+    { island: '5', mob: 'spiroc mobs' },
+    { island: '5', mob: 'The Spiroc Lord' },
+  ], 'the dataset genuinely never said this mob drops it — every chip is an alternative');
+  assert.equal(engagedNeeds(groups, ['spiroc vanquisher'])[0].island, null,
+    'the island is not inferred from the item — a label is not worth a guess');
+});
+
+test("Bazzt Zzzt fires though the dataset spells it 'Bazzt Zzzt \"Bees\"'", () => {
+  const snapshot = LEARNED({ 'Bazzt Zzzt': { 'Bee Stinger': 18 } });
+  const groups = dropGroups(snapshot);
+  assert.deepEqual(engagedNeeds(groups, ['Bazzt Zzzt']).map((g) => g.mob), ['Bazzt Zzzt']);
+  assert.equal(engagedNeeds(groups, ['Bazzt Zzzt'])[0].items[0].seen, 18);
+  // And the odd-spelled bee that contains no "bee" anywhere in its name.
+  const bzz = dropGroups(LEARNED({ Bzzazzt: { 'Bee Stinger': 6 } }));
+  assert.deepEqual(engagedNeeds(bzz, ['Bzzazzt']).map((g) => g.mob), ['Bzzazzt']);
+});
+
+test('a learned row the dataset already places is not doubled and never claims to be learned', () => {
+  const snapshot = LEARNED({ Gorgalosk: { 'Silken Strands': 4 } });
+  const group = engagedNeeds(dropGroups(snapshot), ['Gorgalosk'])[0];
+  assert.equal(group.island, '3', 'the dataset group is kept, not replaced by a learned one');
+  assert.deepEqual(group.items.map((i) => i.name), ['Silken Strands']);
+  assert.equal('seen' in group.items[0], false, 'the dataset said it first');
+});
+
+test('a dataset boss gains the rows the dataset never attributed to it', () => {
+  const snapshot = LEARNED({ Gorgalosk: { 'Wind Rune Azia': 5 } });
+  const group = engagedNeeds(dropGroups(snapshot), ['Gorgalosk'])[0];
+  assert.deepEqual(group.items.map((i) => i.name), ['Silken Strands', 'Wind Rune Azia']);
+  assert.equal(group.items[1].seen, 5, 'a measured rune drop IS a fact about this mob');
+  assert.equal(group.items[1].rune, true);
+});
+
+test('an item already owned or turned in never reaches the popup, however often it dropped', () => {
+  const owned = LEARNED({ 'spiroc vanquisher': { 'Spiroc Earth Totem': 9 } });
+  owned.classes[0].quests[0].items[0].owned = true;
+  assert.deepEqual(engagedNeeds(dropGroups(owned), ['spiroc vanquisher']), [],
+    'the still-needed filter is the whole popup');
+
+  const done = LEARNED({ 'spiroc vanquisher': { 'Spiroc Earth Totem': 9 } });
+  done.classes[0].quests[0].done = true;
+  assert.deepEqual(engagedNeeds(dropGroups(done), ['spiroc vanquisher']), []);
+});
+
+test('a learned name the dataset no longer knows is dropped, not published nameless', () => {
+  const snapshot = LEARNED({ 'a fatestealer drake': { 'Some Removed Item': 2 } });
+  assert.deepEqual(engagedNeeds(dropGroups(snapshot), ['fatestealer drake']), []);
+});
+
+test('anyMob: false reproduces the shipped named-boss-only behaviour exactly', () => {
+  const snapshot = LEARNED({
+    'spiroc vanquisher': { 'Spiroc Earth Totem': 3 },
+    Gorgalosk: { 'Wind Rune Azia': 5 },
+  });
+  const strict = dropGroups(snapshot, { anyMob: false });
+  assert.deepEqual(strict, bossNeeds(snapshot), 'the dataset half alone');
+  assert.deepEqual(engagedNeeds(strict, ['spiroc vanquisher']), []);
+  assert.deepEqual(engagedNeeds(strict, ['Gorgalosk'])[0].items.map((i) => i.name),
+    ['Silken Strands'], 'and no learned rune row on the boss either');
+});
+
+test('a snapshot with no drop index at all is the dataset half, switch or no switch', () => {
+  const snapshot = LEARNED(undefined);
+  assert.deepEqual(dropGroups(snapshot), bossNeeds(snapshot));
+  assert.deepEqual(dropGroups(snapshot, { anyMob: true }), bossNeeds(snapshot));
+});
+
+test('the two dataset bosses the log only ever writes with an article now match', () => {
+  // Measured, not assumed: the live log writes "the Hand of Veeshan" 5,405 times and
+  // "a greater sphinx" 18,790 times, and never once without the article — which the
+  // combat parser strips before it reaches engagedNames. Under bare lowercase equality
+  // neither boss could ever have fired the popup.
+  const groups = bossNeeds(snap([
+    cls('monk', 'Monk', [quest('monk:0', 'Knuckles', [
+      item('Sphinx Feather', 'Island 7: a greater sphinx'),
+      item('Veeshan Scale', 'Island 8: the Hand of Veeshan'),
+    ])]),
+  ]));
+  assert.deepEqual(engagedNeeds(groups, ['greater sphinx']).map((g) => g.mob), ['a greater sphinx']);
+  assert.deepEqual(engagedNeeds(groups, ['Hand of Veeshan']).map((g) => g.mob), ['the Hand of Veeshan']);
+  assert.deepEqual(engagedNeeds(groups, ['spiroc mobs']), [],
+    'and a blob with no article to lose is exactly as unmatchable as it was');
+});
+
+test('mobNeeds answers for one corpse, and null for one that owes nothing', () => {
+  const snapshot = LEARNED({ 'spiroc vanquisher': { 'Spiroc Earth Totem': 3 } });
+  assert.equal(mobNeeds(snapshot, 'a spiroc vanquisher').items[0].name, 'Spiroc Earth Totem',
+    'the caller may hand over the raw log spelling, article and all');
+  assert.equal(mobNeeds(snapshot, 'spiroc vanquisher', { anyMob: false }), null);
+  assert.equal(mobNeeds(snapshot, 'a spiroc walker'), null);
+  assert.equal(mobNeeds(snapshot, ''), null);
+});
+
+test('the popup lifetime and painter carry a learned mob exactly as a named one', () => {
+  const snapshot = LEARNED({ 'spiroc vanquisher': { 'Spiroc Earth Totem': 3 } });
+  const groups = dropGroups(snapshot);
+  const state = nextDropsState(null, {
+    active: true, startTs: 100,
+    matchedMobs: engagedNeeds(groups, ['spiroc vanquisher']).map((g) => g.mob),
+    now: 1000,
+  });
+  assert.deepEqual(dropsDisplay(state, groups).map((g) => g.mob), ['spiroc vanquisher']);
+  // Looted mid-linger: the row leaves because the inversion is re-read, not cached.
+  const afterLoot = LEARNED({ 'spiroc vanquisher': { 'Spiroc Earth Totem': 4 } });
+  afterLoot.classes[0].quests[0].items[0].owned = true;
+  assert.deepEqual(dropsDisplay(state, dropGroups(afterLoot)), []);
 });

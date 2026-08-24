@@ -56,6 +56,7 @@ node scripts/backfill-history.js <log> --dir <dir>         # replay a log into t
 node scripts/gina-dryrun.js <pack.gtp> --log <log>         # replay a GINA pack against a log: per-trigger hit counts, a sample line, and the dead list
 node scripts/mine-rhythms.js <log> [--write <pack.json>]   # measure boss recast intervals offline and print them as candidate triggers; writes nothing without --write
 node scripts/mine-buffs.js <log> [--write <pack.json>]     # measure how long YOUR OWN effects last, pairing landing prose with wear-off prose; writes nothing without --write
+node scripts/mine-drops.js <log> [--min 1] [--dir <quests dir> --write]  # learn mob -> quest item -> count from a log; the drops popup's backfill, print-only without --write
 node scripts/mine-gina.js <dir> [--min 2]                  # spell names recurring across independent GINA packs; prints candidates, never writes
 ```
 

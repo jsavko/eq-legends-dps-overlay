@@ -210,14 +210,25 @@
 
       <section>
         <h2>Needed drops</h2>
-        <!-- One switch, one screen: this key backs no other surface, so the
+        <!-- Both switches, one screen: neither key backs any other surface, so the
              two-places failure that moved the alert switches out of this form
              cannot recur here. What the list CONTAINS is the Quests window's
-             ledger; this only decides whether the popup may appear. -->
+             ledger; these only decide whether the popup may appear, and how far
+             its question reaches. -->
         <div class="row checkbox">
           <input id="drops-overlay" type="checkbox" />
-          <label for="drops-overlay">Show needed Sky drops when a boss is engaged
-            <span class="unit">a small corner list of what that boss still owes, and to which class — it stays up while you loot</span>
+          <label for="drops-overlay">Show needed drops when a mob is engaged
+            <span class="unit">a small corner list of what that mob still owes, and to which class — it stays up while you loot</span>
+          </label>
+        </div>
+        <!-- The louder half gets its own switch. Off is exactly what shipped before
+             the drop index existed: the bosses the quest data names, and nothing
+             else. On, a spiroc camp fires the popup on most pulls — which is the
+             point, and the reason this is escapable without losing the popup. -->
+        <div class="row checkbox">
+          <input id="drops-any-mob" type="checkbox" />
+          <label for="drops-any-mob">Include any mob your log has proved drops what you need
+            <span class="unit">off shows only the named bosses the quest data lists — trash mobs and the families it can only describe ("spiroc mobs", "bee mobs") stay silent</span>
           </label>
         </div>
       </section>

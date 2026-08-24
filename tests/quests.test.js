@@ -175,6 +175,80 @@ test('a write failure reports through the callback instead of throwing', () => {
   assert.equal(errors.length, 1);
 });
 
+// ---------------------------------------------------------------- the drop index
+
+const looted = (item, from, extra = {}) => loot(item, { from, ...extra });
+
+test('a loot line records the corpse it came off, keyed by the log\'s own name', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  assert.ok(store.feed(looted('a Spiroc Earth Totem', 'spiroc vanquisher', { ts: 1000 })));
+  assert.deepEqual(store.snapshot().drops, {
+    'spiroc vanquisher': { 'Spiroc Earth Totem': 1 },
+  }, 'stored by item key, published under the dataset name the readers join on');
+});
+
+test('the drop index is a QUEST ledger: loot no quest wants leaves no mob behind', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  assert.equal(store.feed(looted('Rusty Short Sword', 'spiroc vanquisher', { ts: 1000 })), null);
+  assert.deepEqual(store.snapshot().drops, {}, 'the same lookup() gate the item counts use');
+});
+
+test('a loot line with no corpse in it records a count and no drop', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  assert.ok(store.feed(loot('Crude Wooden Flute', { ts: 1000 })));
+  assert.equal(store.lootedCount('Crude Wooden Flute'), 1);
+  assert.deepEqual(store.snapshot().drops, {});
+});
+
+test('drops accumulate — a repeat raises the count, it does not overwrite it', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  store.feed(looted('Spiroc Earth Totem', 'spiroc vanquisher', { ts: 1000 }));
+  store.feed(looted('a Spiroc Earth Totem', 'spiroc vanquisher', { ts: 2000, disposition: 'stored' }));
+  store.feed(looted('Spiroc Earth Totem +1', 'spiroc vanquisher', { ts: 3000, qty: 2 }));
+  // Every disposition counts: `sold` says where the item went, not what dropped it.
+  store.feed(looted('Spiroc Earth Totem', 'spiroc walker', { ts: 4000, disposition: 'sold' }));
+  assert.deepEqual(store.snapshot().drops, {
+    'spiroc vanquisher': { 'Spiroc Earth Totem': 4 },
+    'spiroc walker': { 'Spiroc Earth Totem': 1 },
+  });
+});
+
+test('one mob owes several items and each is counted apart', () => {
+  const store = new QuestProgress({ dir: tempDir(), character: 'Rhale', server: 'oggok' });
+  store.feed(looted('Wind Rune Azia', 'Gorgalosk', { ts: 1000 }));
+  store.feed(looted('Silken Strands', 'Gorgalosk', { ts: 2000 }));
+  assert.deepEqual(store.snapshot().drops.Gorgalosk,
+    { 'Wind Rune Azia': 1, 'Silken Strands': 1 });
+});
+
+test('the drop index survives a restart', () => {
+  const dir = tempDir();
+  const first = new QuestProgress({ dir, character: 'Rhale', server: 'oggok' });
+  first.feed(looted('Spiroc Earth Totem', 'spiroc vanquisher', { ts: 1000 }));
+  const second = new QuestProgress({ dir, character: 'Rhale', server: 'oggok' });
+  assert.deepEqual(second.snapshot().drops, { 'spiroc vanquisher': { 'Spiroc Earth Totem': 1 } });
+});
+
+test('a v2 file written before the key existed loads, reads empty, and grows one', () => {
+  const dir = tempDir();
+  const before = new QuestProgress({ dir, character: 'Rhale', server: 'oggok' });
+  before.feed(loot('Crude Wooden Flute', { ts: 1000 }));
+
+  // Exactly what was on disk one version of this file ago: v2 in every other respect,
+  // with no `drops` key at all. Additive means this loads — no migration, no bump.
+  const file = path.join(dir, 'Rhale_oggok.json');
+  const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete stored.drops;
+  fs.writeFileSync(file, JSON.stringify(stored, null, 2) + '\n', 'utf8');
+
+  const after = new QuestProgress({ dir, character: 'Rhale', server: 'oggok' });
+  assert.equal(after.state.v, QUEST_STORE_VERSION, 'no version bump was needed');
+  assert.deepEqual(after.snapshot().drops, {});
+  assert.equal(after.lootedCount('Crude Wooden Flute'), 1, 'the older facts are untouched');
+  after.feed(looted('Spiroc Earth Totem', 'spiroc vanquisher', { ts: 2000 }));
+  assert.deepEqual(after.snapshot().drops, { 'spiroc vanquisher': { 'Spiroc Earth Totem': 1 } });
+});
+
 // ------------------------------------------------------------------- owned / done flags
 
 test('manual toggles go both ways and round-trip through the file', () => {

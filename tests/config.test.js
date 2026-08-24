@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   ConfigStore, DEFAULTS, DEFAULT_LOG_DIR, alertsEnabled, timersEnabled, dropsEnabled,
+  dropsAnyMob, DROPS_KEYS,
   ALERT_CATEGORIES, ALERT_PRESETS, TIMER_KEYS, WARN_GROUPS, WARN_KEYS,
   warnKeyFor, warnGroupOn, presetOf,
   SESSION_CATEGORIES, sessionEnabled, sessionLineEnabled, sessionCategories, partyListFor,
@@ -548,4 +549,24 @@ test('the drops popup has one switch, and mute wins over it like the timers', ()
   const legacy = { ...DEFAULTS };
   delete legacy.dropsOverlay;
   assert.equal(dropsEnabled(legacy), true);
+});
+
+test('how far the popup reaches is its own switch, and mute does not answer it', () => {
+  assert.equal(dropsAnyMob(DEFAULTS), true, 'a fresh install learns from its own log');
+  assert.equal(dropsAnyMob({ ...DEFAULTS, dropsAnyMob: false }), false,
+    'off is exactly the named-boss-only behaviour that shipped before the drop index');
+  // Deliberately NOT gated on dropsEnabled: this says how far the question reaches,
+  // not whether it is asked, and one switch answering two questions is what the
+  // separate key exists to avoid.
+  assert.equal(dropsAnyMob({ ...DEFAULTS, alertsMuted: true }), true);
+  assert.equal(dropsAnyMob({ ...DEFAULTS, dropsOverlay: false }), true);
+  // A config predating the key must not silently swallow the feature.
+  const legacy = { ...DEFAULTS };
+  delete legacy.dropsAnyMob;
+  assert.equal(dropsAnyMob(legacy), true);
+  assert.equal(dropsAnyMob(null), true);
+});
+
+test('both drops keys re-sync the popup when they change', () => {
+  assert.deepEqual(DROPS_KEYS, ['dropsOverlay', 'dropsAnyMob', 'alertsMuted']);
 });

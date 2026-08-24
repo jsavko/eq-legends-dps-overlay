@@ -334,6 +334,7 @@ function fillForm(cfg) {
   // Absent reads as ON, matching dropsEnabled in config.js: a config predating the
   // key must not silently swallow the feature its next update ships.
   $('drops-overlay').checked = cfg.dropsOverlay !== false;
+  $('drops-any-mob').checked = cfg.dropsAnyMob !== false;
   state.petOwners = { ...(cfg.petOwners ?? {}) };
 
   const session = cfg.session ?? {};
@@ -712,6 +713,7 @@ async function save() {
     postKillGraceSec: Number($('grace').value),
     autoSwitchCharacter: $('auto-switch').checked,
     dropsOverlay: $('drops-overlay').checked,
+    dropsAnyMob: $('drops-any-mob').checked,
     // Merged over what is stored, never replacing it: the picker only ever edits the
     // character currently logged in, and writing the whole map would wipe every other
     // character's list on every Save.

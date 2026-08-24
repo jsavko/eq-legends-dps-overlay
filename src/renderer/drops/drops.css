@@ -132,6 +132,16 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
 }
 /* A rune keeps its gold accent in every surface that names one. */
 .need.rune .iname { color: var(--ember-lit); }
+/* Faint, and only on a row the quest data did not place here — see drops.js. It sits
+   against the name rather than out by the class flags because it qualifies the NAME:
+   "this mob, this item, N times in your own log". `flex: none` so it can never be the
+   thing that squeezes; the name's ellipsis absorbs a long one instead. */
+.need .seen {
+  flex: none;
+  font-size: 0.81em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
 .need .who {
   margin-left: auto;
   display: flex;

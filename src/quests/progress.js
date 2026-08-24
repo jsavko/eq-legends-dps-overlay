@@ -3,10 +3,12 @@
  * and the claims derived from it.
  *
  * The honesty rule this store lives by: COUNTS ARE FACTS, OWNED AND DONE ARE CLAIMS —
- * and facts are never edited, only accumulated. Three kinds of fact land here:
+ * and facts are never edited, only accumulated. Four kinds of fact land here:
  * loot counts (an item arrived), offer counts (an item was handed to one of the
- * sixteen quest NPCs — the log's own record of a turn-in), and inventory counts
- * (a `/outputfile inventory` dump said the item was in the bags as of its date).
+ * sixteen quest NPCs — the log's own record of a turn-in), inventory counts
+ * (a `/outputfile inventory` dump said the item was in the bags as of its date), and
+ * the drop index (which corpse the item came off, which is how the drops popup learns
+ * what a mob owes without a shipped table of drops to be wrong about).
  *
  * Claims are TRI-STATE: explicitly true, explicitly false, or unset. An explicit
  * value comes from the player's own toggle, an eqlposky import, and nothing else;
@@ -159,6 +161,28 @@ export class QuestProgress {
       lastTs: null,
       /** item key → per-disposition counts, e.g. { "wind rune azia": { kept: 1, stored: 4 } } */
       items: {},
+      /**
+       * The drop index: creature key → item key → count. A fourth FACT, on the same
+       * terms as the other three — it records that this character watched this corpse
+       * yield this item, and it is only ever accumulated.
+       *
+       * It exists because the dataset's `source` strings are prose, not names: six of
+       * the eighteen ("Island 6: \"bee\" mobs", "Island 7: drake/sphinx/spirit mobs")
+       * describe a FAMILY and can therefore never equal anything the log writes, and
+       * the ones that do match name only the island boss — so the spiroc trash mob
+       * standing on the player's own Spiroc Earth Totem was invisible to the popup.
+       * Guessing family membership from the blob text is what this project does not do
+       * (`looksLikeMobName` exists because reading meaning out of a name's shape once
+       * made a whole raid zone score nothing), so the membership is MEASURED instead:
+       * the loot rule already captures the corpse as `from`, this is where it stops
+       * being thrown away, and the keys are the log's own creature names — which makes
+       * matching an engaged mob equality by construction, with nothing clever in it.
+       *
+       * Gated by the same `lookup()` test the item counts use, so this stays a quest
+       * ledger and not a second loot pane. Additive: a file written before the key
+       * existed simply reads as empty, which is why nothing here bumped the version.
+       */
+      drops: {},
       /** positional item ref ("bard:0:0") → { count, lastTs }: hand-ins the log saw. */
       offers: {},
       /**
@@ -285,6 +309,18 @@ export class QuestProgress {
     const disposition = DISPOSITIONS.includes(event.disposition) ? event.disposition : 'kept';
     const counts = this.state.items[key] ?? (this.state.items[key] = {});
     counts[disposition] = (counts[disposition] ?? 0) + (event.qty ?? 1);
+    // The corpse it came off, if the line named one. Every disposition counts: `sold`
+    // says where the item WENT, not what dropped it, and the mob is owed the credit
+    // either way. `from` is already `creatureKey`-folded by the loot rule — the same
+    // article strip the combat parser applies to `engagedNpcs` — so a name recorded
+    // here and a name the popup matches against are the same string by construction.
+    // Lazily created rather than assumed present: a ledger written before this key
+    // existed loads without it.
+    if (event.from) {
+      const drops = this.state.drops ?? (this.state.drops = {});
+      const mob = drops[event.from] ?? (drops[event.from] = {});
+      mob[key] = (mob[key] ?? 0) + (event.qty ?? 1);
+    }
     this.state.lastTs = Math.max(this.state.lastTs ?? 0, event.ts);
     this.revision++;
     this.persist();
@@ -586,6 +622,27 @@ export class QuestProgress {
       inventoryAsOf: this.state.inventory.asOf,
       /** Static spell data for the effect tooltips — a few KB, cheaper than a channel. */
       effects: EFFECTS,
+      /**
+       * The learned drop index, creature key → DATASET item name → count.
+       *
+       * Stored by item KEY and published by item NAME on purpose: the key is the fold
+       * that survives the four spellings the log wraps around a name, and the name is
+       * what every reader of a snapshot already matches on (`bossNeeds` walks
+       * `item.name`). Resolving here is what lets `src/quests/needs.js` stay free of
+       * the dataset — it is imported by a renderer, and `src/quests/index.js` reads
+       * `posky.json` off disk. A key the dataset no longer knows drops out rather than
+       * being published under a name nothing can join to.
+       */
+      drops: Object.fromEntries(
+        Object.entries(this.state.drops ?? {}).map(([mob, items]) => [
+          mob,
+          Object.fromEntries(
+            Object.entries(items)
+              .map(([key, count]) => [lookup(key)[0]?.itemName, count])
+              .filter(([name]) => name),
+          ),
+        ]),
+      ),
       classes: POSKY.classes.map((cls) => ({
         id: cls.id,
         name: cls.name,

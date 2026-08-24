@@ -242,6 +242,21 @@ export const DEFAULTS = {
    * settings cannot recur here.
    */
   dropsOverlay: true,
+  /**
+   * How far the popup's question reaches: every mob this character's own log has
+   * PROVED drops something still outstanding (on), or only the bosses the dataset
+   * names (off — exactly what shipped before the drop index existed).
+   *
+   * Its own key beside the master switch rather than folded into it, because the two
+   * answer different questions and the wider reach is the louder one: a spiroc camp
+   * fires the popup on most pulls, which is the requested behaviour and also the
+   * thing somebody may want back off without losing the popup entirely. Both live in
+   * the one Needed drops section of the settings form — the only place either is
+   * written, so the two-places failure that removed the ALERTS section cannot recur.
+   * Absent reads as ON, like every other key here: a config predating the key must
+   * not silently swallow the feature its next update ships.
+   */
+  dropsAnyMob: true,
   /** Drops popup position; null until the player drags it somewhere. Its own key,
    *  written only by that window's own move handler — never derived from another
    *  window's bounds, for the usual climbing-window reason. */
@@ -389,8 +404,13 @@ export const ALERT_KEYS = [...ALERT_CATEGORIES, 'alertsMuted'];
 /** Every key that can change whether the boss-timer window should exist. */
 export const TIMER_KEYS = ['triggerTimers', 'alertsMuted'];
 
-/** Every key that can change whether the engaged-drops popup window should exist. */
-export const DROPS_KEYS = ['dropsOverlay', 'alertsMuted'];
+/**
+ * Every key that can change whether the engaged-drops popup should exist or what it
+ * may contain. `dropsAnyMob` decides only the latter, and rides here because the
+ * window sync is idempotent and the alternative is a second, near-identical list
+ * whose only job would be to be forgotten when a third key arrives.
+ */
+export const DROPS_KEYS = ['dropsOverlay', 'dropsAnyMob', 'alertsMuted'];
 
 /** Every key whose change means the second-screen server must be rebuilt. The token
  *  is deliberately absent: nothing edits it after first generation, and a patch that
@@ -558,6 +578,16 @@ export function timersEnabled(cfg) {
 export function dropsEnabled(cfg) {
   if (!cfg || cfg.alertsMuted) return false;
   return cfg.dropsOverlay !== false;
+}
+
+/**
+ * May the popup speak for mobs the dataset never named — the ones this character's
+ * own log has proved drop something still outstanding? Deliberately NOT gated on
+ * `dropsEnabled`: this answers how far the question reaches, not whether it is asked,
+ * and one switch answering two questions is what the separate key exists to avoid.
+ */
+export function dropsAnyMob(cfg) {
+  return cfg?.dropsAnyMob !== false;
 }
 
 /**

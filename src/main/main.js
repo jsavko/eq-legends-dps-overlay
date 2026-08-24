@@ -23,7 +23,7 @@ import { nearestName } from '../parser/entities.js';
 import { Tailer, listLogs } from './tailer.js';
 import {
   ConfigStore, DEFAULT_LOG_DIR, ALERT_KEYS, TIMER_KEYS, DROPS_KEYS, MOBILE_KEYS,
-  alertsEnabled, timersEnabled, dropsEnabled, partyListFor,
+  alertsEnabled, timersEnabled, dropsEnabled, dropsAnyMob, partyListFor,
   ALERT_PRESETS, warnKeyFor, presetOf, sessionEnabled, sessionCategories,
   DURATION_KEYS, DURATION_DEFAULTS, durationSec, alertTtls,
 } from './config.js';
@@ -33,7 +33,7 @@ import { SessionStore, sessionKey, listEntry, CHECKPOINT_INTERVAL_MS } from './s
 import { SessionTracker } from '../session/session.js';
 import { QuestProgress } from '../quests/progress.js';
 import { parseInventory } from '../quests/inventory.js';
-import { bossNeeds, engagedNeeds, nextDropsState, dropsDisplay } from '../quests/needs.js';
+import { dropGroups, engagedNeeds, nextDropsState, dropsDisplay } from '../quests/needs.js';
 import { TriggerStore } from './triggers-store.js';
 import { builtinPack, builtinPatch, builtinPresetPatch } from './builtin-pack.js';
 import { TriggerEngine } from '../triggers/engine.js';
@@ -1199,23 +1199,32 @@ function buildSnapshot({ timeline = false } = {}) {
  * One tick of the engaged-drops popup: advance its lifetime and push its payload —
  * to its own window, on its own channel, only when it changed.
  *
- * All the judgement is imported: `bossNeeds` inverts the ledger (the same inversion
- * the Quests window's "By boss" rail paints, so the two surfaces cannot disagree),
- * `engagedNeeds` matches the fight's enemy names against it by strict equality, and
- * `nextDropsState` owns the lifetime — including the 90s linger past encounter
- * close, which is why this runs BEFORE the snapshot skip: the linger has to expire
- * during exactly the silence that skip exists for.
+ * All the judgement is imported: `dropGroups` inverts the ledger — the dataset's
+ * named bosses unioned with the mobs this character's own log has PROVED drop
+ * something still outstanding — `engagedNeeds` matches the fight's enemy names
+ * against it by equality on the shared creature key, and `nextDropsState` owns the
+ * lifetime, including the 90s linger past encounter close. The linger is why this
+ * runs BEFORE the snapshot skip: it has to expire during exactly the silence that
+ * skip exists for.
+ *
+ * The popup's inversion is `dropGroups` and the Quests window's rail is `bossNeeds`,
+ * and they diverge on purpose — the rail answers "where do I go next", where
+ * thirty-seven trash mobs are noise; the popup answers "is this corpse worth
+ * looting", where they are the point. One outstanding-items walk feeds both, so they
+ * cannot disagree about what is owed.
  *
  * The inversion is recomputed per tick rather than cached, but only while it can
  * matter (a state is live, or an encounter is running with engaged names): out of
- * combat this function is two null checks, and in combat the ledger is ~190 items —
- * cheaper than the snapshot already built this tick. Recomputing is also what makes
- * a drop looted mid-linger leave the list with no invalidation plumbing at all.
+ * combat this function is two null checks, and in combat the ledger is ~190 items and
+ * the drop index a few dozen mobs of plain-object reads — cheaper than the snapshot
+ * already built this tick. Recomputing is also what makes a drop looted mid-linger
+ * leave the list with no invalidation plumbing at all, and it is what makes the
+ * `dropsAnyMob` switch take effect on the next tick rather than the next pull.
  */
 function pushDrops(snapshot) {
   let payload = null;
   if (quests && (dropsState || (snapshot.active && snapshot.engagedNames?.length))) {
-    const groups = bossNeeds(quests.snapshot());
+    const groups = dropGroups(quests.snapshot(), { anyMob: dropsAnyMob(config.all) });
     const matched = engagedNeeds(groups, snapshot.active ? snapshot.engagedNames : [])
       .map((g) => g.mob);
     dropsState = nextDropsState(dropsState, {

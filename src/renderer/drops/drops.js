@@ -62,6 +62,13 @@ function render(payload) {
     for (const item of group.items) {
       const row = div(`need${item.rune ? ' rune' : ''}`);
       row.append(span('iname', item.name));
+      // `seen` rides only on a row the quest DATA did not place under this mob — one
+      // this character's own log learned. Saying so is the point: the panel is
+      // speaking from experience there, and a row that looked identical to a shipped
+      // one would be claiming dataset authority it does not have. Dataset rows carry
+      // no caption at all rather than a matching "from the data" one, so the caption
+      // reads as the exception it is.
+      if (item.seen) row.append(span('seen', `seen ${item.seen}\u00d7`));
       const who = span('who', '');
       for (const c of item.classes) who.append(span('cls', c.className));
       row.append(who);
