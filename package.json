@@ -1,6 +1,6 @@
 {
   "name": "eq-legends-dps-overlay",
-  "version": "0.8.9",
+  "version": "0.8.10",
   "private": true,
   "description": "Real-time group DPS overlay for EverQuest Legends",
   "type": "module",
