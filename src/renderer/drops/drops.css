@@ -63,6 +63,26 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
 
 #panel {
   width: 24.62em;   /* 320px at 1× */
+  /*
+   * NEVER SHRINK. This is the whole reason the popup could not grow past its parked
+   * size, and it is subtle enough to be worth the paragraph.
+   *
+   * `body` is a full-height flex COLUMN, because that is how the panel bottom-anchors
+   * into the corner. That makes this a flex item, and a flex item's automatic minimum
+   * size — the thing that normally stops it being squashed below its content — resolves
+   * to ZERO the moment the item has `overflow` other than visible, which this has (for
+   * the rounded corners). So in the 64×64 box the window is PARKED at, the panel was
+   * being compressed from its real 219px to 64, `getBoundingClientRect()` reported 64,
+   * and `reportFit` asked main for the size the window already was. Main obliged,
+   * nothing changed, and the popup stayed one line tall for the rest of the session.
+   *
+   * Measured, not reasoned: at the parked size the panel's scrollHeight was 219 and its
+   * clientHeight 62. `flex: none` is what makes the measurement report the content
+   * instead of the cage. The content then overflows the top edge for one frame, which
+   * is exactly why `reportFit` measures the min/max EXTENT of the children rather than
+   * `rect.bottom` — a negative `top` still yields the right height.
+   */
+  flex: none;
   background: linear-gradient(180deg, color-mix(in srgb, var(--slab) 94%, #3a2a18) 0%, var(--slab) 40%, var(--slab) 100%);
   border: 1px solid var(--edge);
   border-radius: 3px;
@@ -194,6 +214,8 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
  */
 #placeholder {
   display: none;
+  /* Same cage, same reason — see #panel above. */
+  flex: none;
   width: 24.62em;
   margin-top: 0.3em;
   padding: 0.62em 0.92em;
