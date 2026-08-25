@@ -489,8 +489,19 @@ const fitObserver = new ResizeObserver(() => reportFit());
 fitObserver.observe(document.body);
 for (const el of document.body.children) fitObserver.observe(el);
 // The observer does not fire for a child that is merely un-hidden at the same size, so
-// the mutation of `hidden` is watched too.
+// mutations of the DOM are watched too — and watched with NO `attributeFilter`, which is
+// not laziness but the fix for a bug the filter caused.
+//
+// It used to name `['hidden', 'class', 'style']`, and the one attribute it did not name
+// was `data-locked` — which is the only thing the unlock gesture changes. Unlocking
+// reveals the placeholder through a CSS selector alone, so it mutates no node and
+// changes no watched attribute; the sole remaining route was the `ResizeObserver`, and
+// that is delivered by the rendering lifecycle, which a parked (off-screen, occluded)
+// window does not run. The result was a panel that could never be brought up to be
+// positioned. An enumeration of attributes is a list that the next state added to `body`
+// will silently fall off, so there is no list any more. The cost is a few extra
+// `reportFit` calls, which the size-unchanged skip below already absorbs.
 new MutationObserver(() => reportFit())
-  .observe(document.body, { attributes: true, childList: true, subtree: true, attributeFilter: ['hidden', 'class', 'style'] });
+  .observe(document.body, { attributes: true, childList: true, subtree: true });
 if (document.fonts?.ready) document.fonts.ready.then(reportFit);
 reportFit();

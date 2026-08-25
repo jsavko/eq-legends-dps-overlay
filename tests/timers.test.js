@@ -16,7 +16,7 @@ import path from 'node:path';
 
 import {
   normalize, defaultModel, addCategory, updateCategory, removeCategory,
-  addTimer, updateTimer, removeTimer, validateTimer, compile, color, boxLook,
+  addTimer, updateTimer, removeTimer, validateTimer, compile, color, boxLook, timerPushDecision,
   BOSS_CATEGORY, PALETTE, MAX_DURATION_MS, LOOK,
 } from '../src/timers/model.js';
 import { TimersRuntime, SPENT_LINGER_MS } from '../src/timers/runtime.js';
@@ -441,4 +441,72 @@ test('a document with no boxes at all is not a state to leave somebody in', () =
   const store = new TimersStore(dir);
   fs.writeFileSync(path.join(dir, 'timers.json'), JSON.stringify({ categories: [], timers: [] }));
   assert.ok(store.load().categories.length > 0);
+});
+
+// ---------------------------------------------------------------------------
+// The push gate
+// ---------------------------------------------------------------------------
+//
+// A box's rows are merged from TWO engines at the moment of sending, so the gate that
+// decides whether to send has to ask both. It used to ask only the player's own runtime,
+// which made every boss timer invisible until something unrelated happened to push —
+// the "switch the box off and on again to get anything" bug.
+
+test('a boss timer running with an idle personal runtime still pushes', () => {
+  // The exact live shape: no personal timer armed, so the runtime is neither live nor
+  // changed, while a pack's countdown is running and its rows move every tick.
+  const d = timerPushDecision({
+    timersLive: false, timersRevision: 7, lastTimersRevision: 7,
+    triggersLive: true, triggersRevision: 3, lastTriggersRevision: 3,
+  });
+  assert.equal(d.push, true, 'a live boss countdown is a reason to push');
+});
+
+test('a boss timer that merely armed since the last push is a reason to push', () => {
+  const d = timerPushDecision({
+    timersLive: false, timersRevision: 7, lastTimersRevision: 7,
+    triggersLive: false, triggersRevision: 4, lastTriggersRevision: 3,
+  });
+  assert.equal(d.push, true);
+  assert.equal(d.triggersRevision, 4, 'and the caller is told what to store back');
+});
+
+test('the player\'s own timers are unchanged by the second half of the gate', () => {
+  assert.equal(timerPushDecision({
+    timersLive: true, timersRevision: 7, lastTimersRevision: 7,
+    triggersLive: false, triggersRevision: 3, lastTriggersRevision: 3,
+  }).push, true, 'a live personal timer still pushes');
+  assert.equal(timerPushDecision({
+    timersLive: false, timersRevision: 8, lastTimersRevision: 7,
+    triggersLive: false, triggersRevision: 3, lastTriggersRevision: 3,
+  }).push, true, 'so does one that changed');
+});
+
+test('nothing running and nothing changed is silence', () => {
+  // The reason the gate exists at all: an idle box must not take four pushes a second
+  // between fights.
+  const d = timerPushDecision({
+    timersLive: false, timersRevision: 7, lastTimersRevision: 7,
+    triggersLive: false, triggersRevision: 3, lastTriggersRevision: 3,
+  });
+  assert.equal(d.push, false);
+});
+
+test('no trigger engine at all is not a reason to push forever', () => {
+  // main passes -1 for both when `triggers` is null; the two must agree or a build with
+  // no packs loaded would push every tick.
+  assert.equal(timerPushDecision({
+    timersLive: false, timersRevision: 7, lastTimersRevision: 7,
+    triggersLive: false, triggersRevision: -1, lastTriggersRevision: -1,
+  }).push, false);
+});
+
+test('each engine reports its own revision back, so neither swallows the other', () => {
+  // The reason main keeps `lastBossTimerRevision` separate from `lastTriggerRevision`:
+  // one push must not mark the other's change as already sent.
+  const d = timerPushDecision({
+    timersLive: false, timersRevision: 9, lastTimersRevision: 7,
+    triggersLive: false, triggersRevision: 4, lastTriggersRevision: 3,
+  });
+  assert.deepEqual({ t: d.timersRevision, g: d.triggersRevision }, { t: 9, g: 4 });
 });

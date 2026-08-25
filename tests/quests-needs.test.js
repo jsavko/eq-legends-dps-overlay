@@ -214,7 +214,7 @@ test('the popup state engages, accumulates, holds through a death, lingers, and 
 
 test('dropsDisplay re-reads the live inversion so looted rows leave mid-linger', () => {
   const state = { phase: 'linger', mobs: ['gorgalosk'], startTs: 100, until: 9000 };
-  assert.deepEqual(dropsDisplay(state, GROUPS).map((g) => g.mob), ['Gorgalosk'],
+  assert.deepEqual(dropsDisplay(state, GROUPS).map((g) => g.mobs), [['Gorgalosk']],
     'state mob names are matched case-insensitively against the current groups');
   const afterLoot = GROUPS.filter((g) => g.mob !== 'Gorgalosk');
   assert.deepEqual(dropsDisplay(state, afterLoot), [], 'everything looted → nothing to paint');
@@ -349,7 +349,7 @@ test('the popup lifetime and painter carry a learned mob exactly as a named one'
     matchedMobs: engagedNeeds(groups, ['spiroc vanquisher']).map((g) => g.mob),
     now: 1000,
   });
-  assert.deepEqual(dropsDisplay(state, groups).map((g) => g.mob), ['spiroc vanquisher']);
+  assert.deepEqual(dropsDisplay(state, groups).map((g) => g.mobs), [['spiroc vanquisher']]);
   // Looted mid-linger: the row leaves because the inversion is re-read, not cached.
   const afterLoot = LEARNED({ 'spiroc vanquisher': { 'Spiroc Earth Totem': 4 } });
   afterLoot.classes[0].quests[0].items[0].owned = true;
@@ -555,4 +555,123 @@ test('every shipped family row survives a real snapshot without doubling anythin
   const bees = engagedNeeds(dropGroups(snapshot), ['Bzzzt']);
   assert.deepEqual(bees.map((g) => g.mob), ['Bzzzt']);
   assert.ok(bees[0].items.some((i) => i.name === 'Adamantium Earring' && i.boss === 'Bazzt Zzzt'));
+});
+
+// ---------------------------------------------------------------------------
+// The fold: one item, one row, however many corpses owe it
+// ---------------------------------------------------------------------------
+//
+// The popup used to return one group per mob, so a pull where several mobs owe the
+// same thing said so once per mob — four island-6 bees, four groups, five rows, four
+// of them reading `Adamantium Earring`. These pin the fold that replaced it and, just
+// as much, the single-boss pull it must leave exactly as it was.
+
+/** A group in the shape `dropGroups` produces, with no dataset boss on its rows. */
+const grp = (island, mob, items) => ({
+  island, mob, zoneWide: false,
+  items: items.map(([name, className, boss]) => ({
+    name, rune: false, alsoFrom: [],
+    classes: [{ classId: className.toLowerCase(), className, ref: 'x:0', reward: 'R' }],
+    ...(boss ? { boss } : {}),
+  })),
+});
+
+const engagedState = (mobs) => ({ phase: 'engaged', mobs, startTs: 1, until: null });
+
+test('four mobs owing the same item produce one row, not four', () => {
+  // The live island-6 pull, exactly: three bees reached by the family list, then the
+  // boss who owes a second item of his own.
+  const groups = [
+    grp('6', 'Bzzzt', [['Adamantium Earring', 'Enchanter', 'Bazzt Zzzt']]),
+    grp('6', 'Bzzazzt', [['Adamantium Earring', 'Enchanter', 'Bazzt Zzzt']]),
+    grp('6', 'Bazzzazzt', [['Adamantium Earring', 'Enchanter', 'Bazzt Zzzt']]),
+    grp('6', 'Bazzt Zzzt', [['Fine Wool Cloak', 'Rogue'], ['Adamantium Earring', 'Enchanter', 'Bazzt Zzzt']]),
+  ];
+  const out = dropsDisplay(engagedState(['Bzzzt', 'Bzzazzt', 'Bazzzazzt', 'Bazzt Zzzt']), groups);
+
+  assert.equal(out.length, 1, 'one island, one header');
+  assert.equal(out[0].label, 'Bzzzt · Bzzazzt +2', 'two spelled, the rest counted');
+  assert.deepEqual(out[0].items.map((i) => i.name), ['Adamantium Earring', 'Fine Wool Cloak'],
+    'two rows for two items, in first-engaged order');
+  assert.equal(out[0].items[0].from, null,
+    'owed by every engaged mob, so the header already answers "which corpse"');
+  assert.equal(out[0].items[1].from, 'Bazzt Zzzt',
+    'owed by one of the four, so that one is named');
+});
+
+test('the single-boss pull is untouched by the fold', () => {
+  // The case that must not regress: one mob owes everything, so nothing is ever
+  // qualified and the panel says exactly what it always said.
+  const groups = [grp('5', 'The Spiroc Lord', [
+    ['Spiroc Earth Totem', 'Shaman'], ['Silver Chestplate', 'Warrior'],
+  ])];
+  const out = dropsDisplay(engagedState(['The Spiroc Lord']), groups);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].label, 'The Spiroc Lord', 'one name, spelled, never counted');
+  assert.deepEqual(out[0].items.map((i) => i.from), [null, null], 'no row is qualified');
+});
+
+test('a lone bee still learns whose earring it is', () => {
+  // Engaging ONE bee: the item is owed by every engaged mob (all one of them), so the
+  // subset qualifier says nothing — and the dataset's boss takes the slot instead,
+  // which is the behaviour the family lists shipped and the fold must not eat.
+  const groups = [grp('6', 'Bzzzt', [['Adamantium Earring', 'Enchanter', 'Bazzt Zzzt']])];
+  const out = dropsDisplay(engagedState(['Bzzzt']), groups);
+  assert.equal(out[0].items[0].from, 'Bazzt Zzzt');
+});
+
+test('a boss standing in the header is not repeated on the row beneath it', () => {
+  // `ISL 6  BAZZT ZZZT` over `Adamantium Earring · Bazzt Zzzt` is the panel saying one
+  // thing twice in two type sizes.
+  const groups = [grp('6', 'Bazzt Zzzt', [['Adamantium Earring', 'Enchanter', 'Bazzt Zzzt']])];
+  assert.equal(dropsDisplay(engagedState(['Bazzt Zzzt']), groups)[0].items[0].from, null);
+});
+
+test('two islands engaged at once keep their own headers', () => {
+  // The ISL tag is a claim about the mobs under it. One header for a mixed pull would
+  // label one island with the other's number.
+  const groups = [
+    grp('6', 'Bzzzt', [['Adamantium Earring', 'Enchanter']]),
+    grp('7', 'a greater sphinx', [['Sphinxian Circlet', 'Rogue']]),
+  ];
+  const out = dropsDisplay(engagedState(['Bzzzt', 'a greater sphinx']), groups);
+  assert.deepEqual(out.map((g) => g.island), ['6', '7']);
+  assert.deepEqual(out.map((g) => g.label), ['Bzzzt', 'a greater sphinx']);
+});
+
+test('a learned mob with no island groups with its own kind, tagless', () => {
+  const groups = [
+    grp(null, 'spiroc vanquisher', [['Spiroc Earth Totem', 'Shaman']]),
+    grp(null, 'a spiroc guardian', [['Spiroc Earth Totem', 'Shaman']]),
+  ];
+  const out = dropsDisplay(engagedState(['spiroc vanquisher', 'a spiroc guardian']), groups);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].island, null, 'no island is not a guess at one');
+  assert.equal(out[0].items.length, 1, 'and the shared item still folds');
+  assert.equal(out[0].items[0].from, null);
+});
+
+test('a subset of more than one names the first and counts the rest', () => {
+  const groups = [
+    grp('6', 'Bzzzt', [['Adamantium Earring', 'Enchanter']]),
+    grp('6', 'Bzzazzt', [['Adamantium Earring', 'Enchanter']]),
+    grp('6', 'Bazzzazzt', [['Adamantium Earring', 'Enchanter'], ['Bixie Essence', 'Shaman']]),
+    grp('6', 'Bizazzzt', [['Bixie Essence', 'Shaman']]),
+  ];
+  const out = dropsDisplay(engagedState(['Bzzzt', 'Bzzazzt', 'Bazzzazzt', 'Bizazzzt']), groups);
+  const essence = out[0].items.find((i) => i.name === 'Bixie Essence');
+  // A row spells ONE name and counts the rest; the header above it spells two. The
+  // difference is the width the class flags leave, measured on the real panel.
+  assert.equal(essence.from, 'Bazzzazzt +1');
+});
+
+test('a mob whose items were all looted drops out of the header too', () => {
+  // The fold must not leave a name in the header for a corpse with nothing left on it.
+  const groups = [
+    grp('6', 'Bzzzt', [['Adamantium Earring', 'Enchanter']]),
+    { island: '6', mob: 'Bzzazzt', zoneWide: false, items: [] },
+  ];
+  const out = dropsDisplay(engagedState(['Bzzzt', 'Bzzazzt']), groups);
+  assert.deepEqual(out[0].mobs, ['Bzzzt']);
+  assert.equal(out[0].items[0].from, null, 'and the survivor owes it alone, unqualified');
 });

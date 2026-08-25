@@ -53,25 +53,23 @@ function render(payload) {
   for (const group of payload.groups) {
     const head = div('bhead');
     if (group.island) head.append(span('btag', `ISL ${group.island}`));
-    head.append(span('bmob', group.mob));
-    // The state rides on every boss line so the panel says WHY it is still up:
-    // "engaged" while the fight runs, the looting note through the linger.
+    // The mobs are the HEADER now, not one header each. `label` is built in
+    // src/quests/needs.js rather than here so the "first two spelled, the rest counted"
+    // wording is unit-tested with the fold that produces it.
+    head.append(span('bmob', group.label));
+    // The state rides on the header so the panel says WHY it is still up: "engaged"
+    // while the fight runs, the looting note through the linger.
     head.append(span('bstate', payload.phase === 'linger' ? 'slain — while you loot' : 'engaged'));
     frag.append(head);
 
     for (const item of group.items) {
       const row = div(`need${item.rune ? ' rune' : ''}`);
       row.append(span('iname', item.name));
-      // `boss` rides only on a row the quest data did not place under THIS mob — one a
-      // family member list reached, or one this character's own log learned — and it
-      // names the boss the data does put the item under. Two things it is deliberately
-      // not. It is not the family's own words: `Island 6: "bee" mobs` is prose, and a
-      // row reading `from "bee" mobs` names nothing the player can go and kill. And it
-      // is not a drop count: `seen 4×` used to sit here, and beside a still-needed
-      // item it reads as four already in the bag, on a panel whose whole subject is
-      // what is missing. Dataset rows carry no qualifier at all rather than a matching
-      // "from the data" one, so the qualifier reads as the exception it is.
-      if (item.boss) row.append(span('from', item.boss));
+      // One slot, and the module above decided what belongs in it — either the corpses
+      // that actually have this when not all of them do, or the dataset's boss for an
+      // item nothing engaged is named for. A bare row is the common case and says "any
+      // of the mobs in the header", which is the whole of what the fold bought.
+      if (item.from) row.append(span('from', item.from));
       const who = span('who', '');
       for (const c of item.classes) who.append(span('cls', c.className));
       row.append(who);
@@ -147,8 +145,19 @@ const fitObserver = new ResizeObserver(() => reportFit());
 fitObserver.observe(document.body);
 for (const el of document.body.children) fitObserver.observe(el);
 // The observer does not fire for a child that is merely un-hidden at the same size, so
-// the mutation of `hidden` is watched too.
+// mutations of the DOM are watched too — and watched with NO `attributeFilter`, which is
+// not laziness but the fix for a bug the filter caused.
+//
+// It used to name `['hidden', 'class', 'style']`, and the one attribute it did not name
+// was `data-locked` — which is the only thing the unlock gesture changes. Unlocking
+// reveals the placeholder through a CSS selector alone, so it mutates no node and
+// changes no watched attribute; the sole remaining route was the `ResizeObserver`, and
+// that is delivered by the rendering lifecycle, which a parked (off-screen, occluded)
+// window does not run. The result was a panel that could never be brought up to be
+// positioned. An enumeration of attributes is a list that the next state added to `body`
+// will silently fall off, so there is no list any more. The cost is a few extra
+// `reportFit` calls, which the size-unchanged skip below already absorbs.
 new MutationObserver(() => reportFit())
-  .observe(document.body, { attributes: true, childList: true, subtree: true, attributeFilter: ['hidden', 'class', 'style'] });
+  .observe(document.body, { attributes: true, childList: true, subtree: true });
 if (document.fonts?.ready) document.fonts.ready.then(reportFit);
 reportFit();

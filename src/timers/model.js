@@ -180,6 +180,38 @@ export function boxLook(category, scale = 1) {
   };
 }
 
+/**
+ * Should the boxes be sent their rows this tick?
+ *
+ * The push loop cannot simply push every tick — an idle box would take four pushes a
+ * second forever between fights — so it asks this instead. The whole of the bug this
+ * answers is that a box's rows come from TWO engines and the gate only knew about one.
+ *
+ * `TimersRuntime` owns the player's own countdowns and `TriggerEngine` owns the ones a
+ * pack states, and `pushTimerRows` merges them at the moment of sending. A gate reading
+ * only the runtime is therefore blind to every boss timer there is: with no personal
+ * timer armed the runtime is neither live nor changed, the push never happens, and the
+ * boss box sits empty through a pull that is firing countdowns the whole time. It looked
+ * like the box needing to be switched off and on again, because that path calls
+ * `pushTimerRows` directly and is the only thing that did.
+ *
+ * Each engine contributes the same two questions — is anything running right now (its
+ * rows move every tick on the clock alone, with no event to announce them), and has
+ * anything changed since we last sent. Two revisions in, two revisions out, so the
+ * caller can store them back without either engine's change being swallowed by the
+ * other's.
+ *
+ * @returns {{push: boolean, timersRevision: number, triggersRevision: number}}
+ */
+export function timerPushDecision({
+  timersLive = false, timersRevision = -1, lastTimersRevision = -1,
+  triggersLive = false, triggersRevision = -1, lastTriggersRevision = -1,
+} = {}) {
+  const push = Boolean(timersLive) || timersRevision !== lastTimersRevision
+    || Boolean(triggersLive) || triggersRevision !== lastTriggersRevision;
+  return { push, timersRevision, triggersRevision };
+}
+
 function clampDuration(value) {
   const ms = Math.round(Number(value));
   if (!Number.isFinite(ms) || ms <= 0) return 60_000;

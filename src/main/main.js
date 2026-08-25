@@ -48,7 +48,7 @@ import { TimersStore } from './timers-store.js';
 import { TimersRuntime } from '../timers/runtime.js';
 import {
   addCategory, updateCategory, removeCategory, addTimer, updateTimer, removeTimer,
-  BOSS_CATEGORY, PALETTE, LOOK, boxLook, clampLook,
+  BOSS_CATEGORY, PALETTE, LOOK, boxLook, clampLook, timerPushDecision,
 } from '../timers/model.js';
 import {
   setLogEnabled, isLogEnabled, eqclientIniPath, runningLogReaders, GAME_PROCESS,
@@ -191,6 +191,14 @@ const quietUpdateTimers = [];
 let lastRevision = -1;
 let lastTimersRevision = -1;
 let lastTriggerRevision = -1;
+/**
+ * The trigger engine's revision as the BOXES last saw it.
+ *
+ * Its own variable rather than a second reader of `lastTriggerRevision`, which the
+ * snapshot push below owns and updates on its own schedule: sharing one would let
+ * whichever of the two pushed first swallow the change the other had not yet sent.
+ */
+let lastBossTimerRevision = -1;
 let overlayVisible = true;
 let saveBoundsTimer = null;
 let saveHistoryBoundsTimer = null;
@@ -223,6 +231,38 @@ let restingWidth = null;
 let lastFitY = null;
 let lastFitX = null;
 let lastFitWidth = null;
+
+/**
+ * Stop Windows deciding our click-through panels are not worth drawing.
+ *
+ * Every panel that fits itself is PARKED off-screen at -32000,-32000 while it has
+ * nothing to draw — parked rather than hidden, because a hidden window's renderer stops
+ * painting and could never ask to come back. Chromium's Windows occlusion tracker then
+ * reaches the same conclusion by itself: a window entirely outside the desktop is
+ * occluded, so the page goes `visibilityState: 'hidden'` and its RENDERING LIFECYCLE
+ * stops. Measured side by side on the same build, on the parked alerts window:
+ *
+ *                                      default    this switch
+ *   document.visibilityState           hidden     visible
+ *   requestAnimationFrame fires        no         yes
+ *   ResizeObserver fires               no         yes
+ *   MutationObserver / setTimeout      yes        yes
+ *
+ * Tasks and microtasks keep running, which is why a payload still got through — it
+ * mutates the DOM, and the mutation observer that reports the new size is a microtask.
+ * Everything delivered by the rendering lifecycle stopped dead, and that is three
+ * separate bugs in one line: the panel could not PAINT after main moved it back on
+ * screen (the drops popup arriving 15-20s into a pull), a quest loot chip's six seconds
+ * expired before it was ever drawn (the loot toast that "did nothing"), and unlocking
+ * the HUD reported no size at all, because the placeholder appearing is a pure CSS
+ * change that only a ResizeObserver can see (panels that could not be positioned).
+ *
+ * The switch is not the whole fix — the renderers no longer depend on a ResizeObserver
+ * for the unlock, so the gesture works even if a future Chromium ignores this. It is
+ * what keeps a parked panel painting, which nothing on the renderer side can do for
+ * itself.
+ */
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 // A second instance would fight the first for the same log and hotkeys.
 if (!app.requestSingleInstanceLock()) {
@@ -1128,10 +1168,22 @@ function startPushLoop() {
     // during exactly the silence the snapshot skip below exists for.
     pushDrops(snapshot);
     // The boxes ride the same tick but keep their own change gate: a countdown moves
-    // every tick, and it can be running with no encounter open at all.
-    if (timersRuntime && (timersRuntime.live || timersRuntime.revision !== lastTimersRevision)) {
-      lastTimersRevision = timersRuntime.revision;
-      pushTimerRows();
+    // every tick, and it can be running with no encounter open at all. BOTH engines are
+    // asked, because `pushTimerRows` merges both — see `timerPushDecision`.
+    if (timersRuntime) {
+      const decision = timerPushDecision({
+        timersLive: timersRuntime.live,
+        timersRevision: timersRuntime.revision,
+        lastTimersRevision,
+        triggersLive: triggers?.live ?? false,
+        triggersRevision: triggers?.revision ?? -1,
+        lastTriggersRevision: lastBossTimerRevision,
+      });
+      if (decision.push) {
+        lastTimersRevision = decision.timersRevision;
+        lastBossTimerRevision = decision.triggersRevision;
+        pushTimerRows();
+      }
     }
     const unchanged = parser.revision === lastRevision &&
       (triggers?.revision ?? -1) === lastTriggerRevision &&
@@ -1941,6 +1993,13 @@ function createAlerts() {
     focusable: true,
     webPreferences: {
       preload: path.join(RENDERER, 'alerts', 'preload.cjs'),
+      // A parked panel is off-screen, and an off-screen window is a background window.
+      // `disable-features=CalculateNativeWinOcclusion` above keeps it PAINTING; this
+      // keeps its timers and animation frames running at full rate when something else
+      // (a maximised game, another always-on-top window) covers it for real, which that
+      // switch does not cover. Both are needed: one is about being outside the desktop,
+      // the other about being behind something on it.
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -2024,6 +2083,13 @@ function createTimerBox(category) {
     icon: path.join(ASSETS, 'icon-256.png'),
     webPreferences: {
       preload: path.join(RENDERER, 'timerbox', 'preload.cjs'),
+      // A parked panel is off-screen, and an off-screen window is a background window.
+      // `disable-features=CalculateNativeWinOcclusion` above keeps it PAINTING; this
+      // keeps its timers and animation frames running at full rate when something else
+      // (a maximised game, another always-on-top window) covers it for real, which that
+      // switch does not cover. Both are needed: one is about being outside the desktop,
+      // the other about being behind something on it.
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -2387,6 +2453,13 @@ function createDropsWindow() {
     focusable: true,
     webPreferences: {
       preload: path.join(RENDERER, 'drops', 'preload.cjs'),
+      // A parked panel is off-screen, and an off-screen window is a background window.
+      // `disable-features=CalculateNativeWinOcclusion` above keeps it PAINTING; this
+      // keeps its timers and animation frames running at full rate when something else
+      // (a maximised game, another always-on-top window) covers it for real, which that
+      // switch does not cover. Both are needed: one is about being outside the desktop,
+      // the other about being behind something on it.
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
     },

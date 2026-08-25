@@ -180,9 +180,15 @@ body:not([data-locked="true"]) { -webkit-app-region: drag; }
 }
 /* A rune keeps its gold accent in every surface that names one. */
 .need.rune .iname { color: var(--ember-lit); }
-/* Faint, and only on a row the quest data did not place under this mob — see drops.js.
+/* Faint, and only on a row that needs it — see `dropsDisplay`. The mobs live in the
+   header now, so a bare row means "any corpse up there" and this slot appears only when
+   that is not the whole answer: the corpses that actually have this when not all of them
+   do, or the dataset's boss for an item nothing engaged is named for.
    It sits against the name rather than out by the class flags because it qualifies the
-   NAME. `flex: none` so it can never be the thing that squeezes. */
+   NAME. `flex: none` so it can never be the thing that squeezes — which is exactly why
+   the caption spells ONE mob name and counts the rest: at two, `Pulsating Ruby` (a
+   Berserker and a Necromancer, 176px of chips on a 400px panel) had its own name
+   ellipsised to make room for the caption explaining it. Measured, not guessed. */
 .need .from {
   flex: none;
   font-size: 0.78em;

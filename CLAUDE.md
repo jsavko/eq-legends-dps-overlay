@@ -254,12 +254,30 @@ clear the list and it is the same fight with more rows.
   on-screen room: the window grows (both dimensions while the hover breakdown is open,
   up to the work area), and the ability list flows into columns when one column would
   outgrow the screen. Never "fix" an overflow with `overflow-y: auto` or a max-height.
-  This applies to every click-through window — the overlay, the alerts and the timers —
-  and never to the history and settings windows, which take real mouse input and scroll
-  their panes internally by design. The click-through windows that do not auto-fit
-  (alerts, timers) buy the same guarantee with a generously oversized invisible box
-  instead of geometry code: sized for the worst realistic content at the largest text
-  size, so nothing is ever clipped.
+  This applies to every click-through window — the overlay, the alerts, the timer boxes
+  and the drops popup — and never to the history and settings windows, which take real
+  mouse input and scroll their panes internally by design. All four of the click-through
+  windows now FIT themselves: the renderer measures its content and `applyPanelFit` in
+  main sizes the window around a fixed anchor. The oversized-invisible-box era is over
+  and its description here was stale.
+- **A PARKED panel is off-screen, and an off-screen renderer stops rendering.** Every
+  fitting panel is parked at `-32000,-32000` while it has nothing to draw — parked, not
+  hidden, because a hidden renderer stops painting and could never ask to come back.
+  Windows then reaches the same conclusion anyway: `disable-features=
+  CalculateNativeWinOcclusion` in `main.js` is what stops it, and without that line a
+  parked window measures as follows (measured, both columns, same build):
+  `visibilityState: hidden`, **no `requestAnimationFrame`, no `ResizeObserver`** — while
+  `setTimeout`, IPC handlers and `MutationObserver` keep running. So a parked panel can
+  still think; it just cannot paint or notice a size change.
+  Two rules follow, and breaking either one costs a whole surface:
+  **a panel must never depend on a `ResizeObserver` alone to report a size** (the
+  `MutationObserver` on `document.body` is the route that works, which is why it carries
+  no `attributeFilter` — an enumeration silently dropped `data-locked` and the unlock
+  gesture with it), and **anything with a deadline must survive not being painted for a
+  while**. A quest loot chip lives six seconds; it was being drawn, measured and
+  correctly moved on screen, then pruned before Windows let the window paint, which is
+  exactly what "the loot toast does nothing" was. See
+  `docs/changelog/2026-08-25-parked-panels-and-the-bee-fold.md`.
 - **A timer row never moves — in any box.** That window exists because the timers used to sit
   at the bottom of the alert stack, where a measured session displaced them 524 times
   and hid them behind their own cast warning 10,525 times. So: slots come from the

@@ -397,17 +397,112 @@ export function nextDropsState(prev, { active, startTs, matchedMobs, now }) {
 }
 
 /**
- * What the popup should paint for a state: the state's mobs re-joined to the CURRENT
- * inversion, in the state's own first-engaged order. A mob whose items have all been
- * looted since simply drops out; when every mob has, the popup has nothing and the
- * window goes empty — honesty by construction, nothing cached.
+ * A list of mob names as a caption: the first few spelled, the rest counted.
+ *
+ * `Bzzzt +3` rather than all four, because the four island-6 bees are spelled `Bzzzt`,
+ * `Bzzazzt`, `Bazzzazzt` and `Bizazzzt` — a list nobody reads at a glance over a game,
+ * in a panel that would ellipsis it anyway.
+ *
+ * `spelled` differs between the two places this is used, and the reason is width
+ * measured rather than taste. The HEADER owns a whole line and spells two. A ROW shares
+ * its line with the item name and the class flags, and those flags are the one thing
+ * that may never be squeezed — `Pulsating Ruby` is owed to a Berserker and a Necromancer,
+ * 176px of chips on a 400px panel, and at two spelled names the item's own name was
+ * being ellipsised to make room for the caption explaining it. So a row spells one.
+ */
+function mobLabel(mobs, spelled) {
+  if (mobs.length <= spelled) return mobs.join(' \u00b7 ');
+  return `${mobs.slice(0, spelled).join(' \u00b7 ')} +${mobs.length - spelled}`;
+}
+
+/**
+ * What the popup should paint for a state: the engaged mobs re-joined to the CURRENT
+ * inversion, folded so that no item is named twice.
+ *
+ * A mob whose items have all been looted since simply drops out; when every mob has,
+ * the popup has nothing and the window goes empty — honesty by construction, nothing
+ * cached.
+ *
+ * **The fold is the point.** This used to return one group per mob, and on a pull where
+ * several mobs owe the SAME thing it said so once per mob: four island-6 bees produced
+ * four groups and five rows, four of which read `Adamantium Earring`, and the panel was
+ * 228px tall to say two things. That was predicted in writing when the mob grouping
+ * shipped and left in on the grounds that each corpse genuinely does owe it. It reads as
+ * noise in play, which is the report that overturned it.
+ *
+ * So the mobs move into the HEADER, where they say what the pull is, and the items are
+ * listed once underneath. What is lost by folding — which of these corpses actually has
+ * it — is exactly what the qualifier puts back, and only on the rows where it differs
+ * from the header:
+ *
+ *   ISL 6  BZZZT +3                                  engaged
+ *     Adamantium Earring                            [Enchanter]     ← any of them
+ *     Fine Wool Cloak         Bazzt Zzzt only            [Rogue]    ← that one alone
+ *
+ * A bare row means "any corpse here", which is the common case and now costs no words.
+ * On the single-boss pull the whole thing is byte-for-byte what it always drew, because
+ * one mob owes everything and no row is ever qualified.
+ *
+ * Grouped by ISLAND rather than into one header for everything, because the `ISL n` tag
+ * is a claim: a pull that somehow engaged two islands at once would otherwise have one
+ * of them labelled with the other's number. Mobs the learned index found and the dataset
+ * never placed carry `island: null` and group together, tagless.
+ *
+ * @returns {Array<{island: string|null, mobs: string[], label: string,
+ *   items: Array<{name, rune, classes, from: string|null}>}>}
  */
 export function dropsDisplay(state, groups) {
   if (!state) return [];
   const byMob = new Map(
     (groups ?? []).filter((g) => !g.zoneWide).map((g) => [mobKey(g.mob), g]),
   );
-  return state.mobs
+  const engaged = state.mobs
     .map((mob) => byMob.get(mobKey(mob)))
     .filter((g) => g && g.items.length > 0);
+
+  // Island buckets in first-engaged order, so the panel's top line is still the mob the
+  // fight opened on.
+  const islands = new Map();
+  for (const group of engaged) {
+    const key = group.island ?? '';
+    if (!islands.has(key)) islands.set(key, { island: group.island ?? null, groups: [] });
+    islands.get(key).groups.push(group);
+  }
+
+  const out = [];
+  for (const { island, groups: mine } of islands.values()) {
+    const mobs = mine.map((g) => g.mob);
+    const mobKeys = new Set(mobs.map(mobKey));
+    /** item name → { row, owedBy: [mob names, in engage order] } */
+    const items = new Map();
+    for (const group of mine) {
+      for (const item of group.items) {
+        const seen = items.get(item.name);
+        if (seen) { seen.owedBy.push(group.mob); continue; }
+        items.set(item.name, { item, owedBy: [group.mob] });
+      }
+    }
+    out.push({
+      island,
+      mobs,
+      label: mobLabel(mobs, 2),
+      items: [...items.values()].map(({ item, owedBy }) => ({
+        name: item.name,
+        rune: item.rune,
+        classes: item.classes,
+        // Two different facts compete for this one slot, and they are ordered by which
+        // the player can act on. FIRST: this item is not on every corpse here, so name
+        // the ones it is on — that is the difference between looting one body and all
+        // of them. Otherwise the dataset's own boss for the item, which is what the
+        // slot has carried since the family lists shipped and is worth keeping for the
+        // pull that engages one bee and would otherwise be told an enchanter earring
+        // drops off `Bzzzt` with nothing to explain why. Suppressed when that boss is
+        // already standing in the header, where it would only repeat itself.
+        from: owedBy.length < mobs.length
+          ? mobLabel(owedBy, 1)
+          : (item.boss && !mobKeys.has(mobKey(item.boss)) ? item.boss : null),
+      })),
+    });
+  }
+  return out;
 }
